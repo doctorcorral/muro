@@ -84,6 +84,8 @@ mix muro.check
 
 `Muro.Check.check_sig/1` returns `:ok` on the book. Run defs emit to ordinary Elixir; `half` of eight is four.
 
+CI (GitHub Actions) runs Elixir tests and `make agda` on every push and pull request.
+
 ## Names
 
 | | |

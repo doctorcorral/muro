@@ -26,17 +26,19 @@ defmodule Muro.Example do
   def plus_ty, do: pi("n", :nat, pi("m", :nat, :nat))
 
   def plus_tm do
-    lam("n", :nat,
-      lam("m", :nat,
-        {:mnat, v("n"), "_", :nat, v("m"), "n1", su(app2(plus(), v("n1"), v("m")))}
-      )
+    lam(
+      "n",
+      :nat,
+      lam("m", :nat, {:mnat, v("n"), "_", :nat, v("m"), "n1", su(app2(plus(), v("n1"), v("m")))})
     )
   end
 
   def is_even_ty, do: pi("n", :nat, :typ)
 
   def is_even_tm do
-    lam("n", :nat,
+    lam(
+      "n",
+      :nat,
       {:mnat, v("n"), "_", :typ, :unit, "n1",
        {:mnat, v("n1"), "_", :typ, :empty, "p", app(is_even(), v("p"))}}
     )
@@ -45,26 +47,31 @@ defmodule Muro.Example do
   def half_ty, do: pi("n", :nat, :nat)
 
   def half_tm do
-    lam("n", :nat,
+    lam(
+      "n",
+      :nat,
       {:mnat, v("n"), "_", :nat, :ze, "n1",
        {:mnat, v("n1"), "_", :nat, :ze, "p", su(app(half(), v("p")))}}
     )
   end
 
   def plus_suc_ty do
-    pi("n", :nat,
-      pi("m", :nat,
-        idt(app2(plus(), v("n"), su(v("m"))), su(app2(plus(), v("n"), v("m"))))
-      )
+    pi(
+      "n",
+      :nat,
+      pi("m", :nat, idt(app2(plus(), v("n"), su(v("m"))), su(app2(plus(), v("n"), v("m")))))
     )
   end
 
   def plus_suc_tm do
-    lam("n", :nat,
-      lam("m", :nat,
+    lam(
+      "n",
+      :nat,
+      lam(
+        "m",
+        :nat,
         {:mnat, v("n"), "n1",
-         idt(app2(plus(), v("n1"), su(v("m"))), su(app2(plus(), v("n1"), v("m")))),
-         :rfl, "n1",
+         idt(app2(plus(), v("n1"), su(v("m"))), su(app2(plus(), v("n1"), v("m")))), :rfl, "n1",
          {:rwt, app2(plus_suc(), v("n1"), v("m")), "z",
           idt(su(v("z")), su(su(app2(plus(), v("n1"), v("m"))))), :rfl}}
       )
@@ -76,11 +83,7 @@ defmodule Muro.Example do
   end
 
   def half_ok_tm do
-    lam("n", :nat,
-      lam("e", app(is_even(), v("n")),
-        app(even_match(), v("e"))
-      )
-    )
+    lam("n", :nat, lam("e", app(is_even(), v("n")), app(even_match(), v("e"))))
   end
 
   defp even_match do
@@ -90,17 +93,17 @@ defmodule Muro.Example do
 
   defp odd_match do
     {:mnat, v("n1"), "y", pi("e1", app(is_even(), su(v("y"))), id_half(su(v("y")))),
-     lam("e1", app(is_even(), su(:ze)),
-       {:memp, v("e1"), "_", id_half(su(:ze))}
-     ), "p", even_step()}
+     lam("e1", app(is_even(), su(:ze)), {:memp, v("e1"), "_", id_half(su(:ze))}), "p",
+     even_step()}
   end
 
   defp even_step do
-    lam("e2", app(is_even(), su(su(v("p")))),
+    lam(
+      "e2",
+      app(is_even(), su(su(v("p")))),
       {:rwt, app2(plus_suc(), app(half(), v("p")), app(half(), v("p"))), "z",
        idt(su(v("z")), su(su(v("p")))),
-       {:rwt, app2(half_ok(), v("p"), v("e2")), "z",
-        idt(su(su(v("z"))), su(su(v("p")))), :rfl}}
+       {:rwt, app2(half_ok(), v("p"), v("e2")), "z", idt(su(su(v("z"))), su(su(v("p")))), :rfl}}
     )
   end
 

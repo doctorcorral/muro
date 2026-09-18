@@ -51,8 +51,12 @@ defmodule Muro.Parser do
     s = skip(s)
 
     cond do
-      tag = forbidden_tag(s) -> {:error, "rejected tag #{tag}"}
-      word_kw?(s, "proof") -> {:ok, %{mode: :proof}, after_kw(s, "proof")}
+      tag = forbidden_tag(s) ->
+        {:error, "rejected tag #{tag}"}
+
+      word_kw?(s, "proof") ->
+        {:ok, %{mode: :proof}, after_kw(s, "proof")}
+
       word_kw?(s, "run") ->
         rest = after_kw(s, "run")
         rest_s = skip(rest)
@@ -112,9 +116,15 @@ defmodule Muro.Parser do
     s = skip(s)
 
     cond do
-      word_kw?(s, "motive") -> false
-      word_kw?(s, "in") -> false
-      word_kw?(s, "def") -> false
+      word_kw?(s, "motive") ->
+        false
+
+      word_kw?(s, "in") ->
+        false
+
+      word_kw?(s, "def") ->
+        false
+
       true ->
         case s do
           <<c, _::binary>>
@@ -132,20 +142,48 @@ defmodule Muro.Parser do
     s = skip(s)
 
     cond do
-      has_prefix?(s, "Type") -> {:ok, :typ, after_kw(s, "Type")}
-      has_prefix?(s, "Nat") -> {:ok, :nat, after_kw(s, "Nat")}
-      has_prefix?(s, "Unit") -> {:ok, :unit, after_kw(s, "Unit")}
-      has_prefix?(s, "Empty") -> {:ok, :empty, after_kw(s, "Empty")}
-      has_prefix?(s, "refl") -> {:ok, :rfl, after_kw(s, "refl")}
-      has_prefix?(s, "tt") -> {:ok, :one, after_kw(s, "tt")}
-      has_prefix?(s, "0") -> {:ok, :ze, after_kw(s, "0")}
-      has_prefix?(s, "suc") -> parse_suc(s)
-      has_prefix?(s, "Π") or has_prefix?(s, "Pi") -> parse_pi(s)
-      has_prefix?(s, "λ") or has_prefix?(s, "lam") -> parse_lam(s)
-      has_prefix?(s, "matchEmpty") -> parse_memp(s)
-      has_prefix?(s, "match") -> parse_mnat(s)
-      has_prefix?(s, "rewrite") -> parse_rwt(s)
-      first_char(s) == ?{ -> parse_idt(s)
+      has_prefix?(s, "Type") ->
+        {:ok, :typ, after_kw(s, "Type")}
+
+      has_prefix?(s, "Nat") ->
+        {:ok, :nat, after_kw(s, "Nat")}
+
+      has_prefix?(s, "Unit") ->
+        {:ok, :unit, after_kw(s, "Unit")}
+
+      has_prefix?(s, "Empty") ->
+        {:ok, :empty, after_kw(s, "Empty")}
+
+      has_prefix?(s, "refl") ->
+        {:ok, :rfl, after_kw(s, "refl")}
+
+      has_prefix?(s, "tt") ->
+        {:ok, :one, after_kw(s, "tt")}
+
+      has_prefix?(s, "0") ->
+        {:ok, :ze, after_kw(s, "0")}
+
+      has_prefix?(s, "suc") ->
+        parse_suc(s)
+
+      has_prefix?(s, "Π") or has_prefix?(s, "Pi") ->
+        parse_pi(s)
+
+      has_prefix?(s, "λ") or has_prefix?(s, "lam") ->
+        parse_lam(s)
+
+      has_prefix?(s, "matchEmpty") ->
+        parse_memp(s)
+
+      has_prefix?(s, "match") ->
+        parse_mnat(s)
+
+      has_prefix?(s, "rewrite") ->
+        parse_rwt(s)
+
+      first_char(s) == ?{ ->
+        parse_idt(s)
+
       first_char(s) == ?( ->
         with {:ok, rest} <- tok(s, "("),
              {:ok, t, rest} <- parse_term(skip(rest), 0),
@@ -348,7 +386,8 @@ defmodule Muro.Parser do
     end
   end
 
-  defp take_ident(<<c, r::binary>>, acc) when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_ do
+  defp take_ident(<<c, r::binary>>, acc)
+       when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_ do
     take_ident(r, acc <> <<c>>)
   end
 

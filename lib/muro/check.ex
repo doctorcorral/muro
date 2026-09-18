@@ -378,7 +378,7 @@ defmodule Muro.Check do
                  else: :ok
                ),
              {:ok, {b, [u0 | us]}} <-
-               infer(k, book, ext_rec(rs, false, rs.next_ok), ext(gamma, q, a), m, t1) ,
+               infer(k, book, ext_rec(rs, false, rs.next_ok), ext(gamma, q, a), m, t1),
              :ok <- check_bound(m, q, u0) do
           {:ok, {{:pi, q, a, b}, us}}
         end
@@ -421,7 +421,15 @@ defmodule Muro.Check do
              {:ok, zu} <- check(k, book, rs, gamma, m, z, Subst.inst(p, :ze)),
              ok? = scrut_ok(rs, e),
              {:ok, [u0 | sus]} <-
-               check(k, book, ext_rec(rs, ok?, ok?), ext(gamma, :affine, :nat), m, s, Subst.mot_suc(p)),
+               check(
+                 k,
+                 book,
+                 ext_rec(rs, ok?, ok?),
+                 ext(gamma, :affine, :nat),
+                 m,
+                 s,
+                 Subst.mot_suc(p)
+               ),
              :ok <- check_bound(m, :affine, u0),
              {:ok, uses} <- combine(m, eu, combine_alt(m, zu, sus)) do
           {:ok, {Subst.inst(p, e), uses}}
