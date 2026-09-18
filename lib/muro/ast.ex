@@ -4,7 +4,7 @@ defmodule Muro.Ast do
   """
 
   @type qty :: :affine | :reuse | :erased
-  @type mode :: :live | :dead
+  @type mode :: :run | :proof
   @type name :: String.t()
 
   # Named FOAS. Binders carry the name string.
@@ -144,10 +144,17 @@ defmodule Muro.Ast do
     with {:ok, t1} <- to_db(t, env), do: {:ok, f.(t1)}
   end
 
-  def def_to_db(%{name: n, mode: m, type: ty, body: bo}) do
+  def def_to_db(%{name: n, mode: m, type: ty, body: bo} = d) do
     with {:ok, ty1} <- to_db(ty),
          {:ok, bo1} <- to_db(bo) do
-      {:ok, %{name: n, mode: m, type: ty1, body: bo1}}
+      base = %{name: n, mode: m, type: ty1, body: bo1}
+
+      {:ok,
+       if Map.has_key?(d, :export) do
+         Map.put(base, :export, d.export)
+       else
+         base
+       end}
     end
   end
 

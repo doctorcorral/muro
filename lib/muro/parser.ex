@@ -38,17 +38,48 @@ defmodule Muro.Parser do
     with {:ok, rest} <- kw(s, "def"),
          {:ok, name, rest} <- ident(skip(rest)),
          {:ok, rest} <- tok(skip(rest), ":"),
-         {:ok, mode, rest} <- parse_mode(skip(rest)),
+         {:ok, tag, rest} <- parse_mode(skip(rest)),
          {:ok, ty, rest} <- parse_term(skip(rest), 0),
          {:ok, rest} <- tok(skip(rest), ":="),
          {:ok, body, rest} <- parse_term(skip(rest), 0) do
-      {:ok, %{name: name, mode: mode, type: ty, body: body}, rest}
+      {:ok, Map.merge(%{name: name, type: ty, body: body}, tag), rest}
     end
   end
 
-  defp parse_mode(<<"live", rest::binary>>), do: {:ok, :live, rest}
-  defp parse_mode(<<"dead", rest::binary>>), do: {:ok, :dead, rest}
-  defp parse_mode(_), do: {:error, "expected live or dead"}
+  # tag ::= "run" "internal"? | "proof"
+  defp parse_mode(s) do
+    s = skip(s)
+
+    cond do
+      word_kw?(s, "live") -> {:error, "rejected tag live"}
+      word_kw?(s, "dead") -> {:error, "rejected tag dead"}
+      word_kw?(s, "comp") -> {:error, "rejected tag comp"}
+      word_kw?(s, "ghost") -> {:error, "rejected tag ghost"}
+      word_kw?(s, "export") -> {:error, "rejected tag export"}
+      word_kw?(s, "proof") -> {:ok, %{mode: :proof}, after_kw(s, "proof")}
+      word_kw?(s, "run") ->
+        rest = after_kw(s, "run")
+        rest_s = skip(rest)
+
+        if word_kw?(rest_s, "internal") do
+          {:ok, %{mode: :run, export: false}, after_kw(rest_s, "internal")}
+        else
+          {:ok, %{mode: :run, export: true}, rest}
+        end
+
+      true ->
+        {:error, "expected run, run internal, or proof"}
+    end
+  end
+
+  defp word_kw?(s, w) do
+    has_prefix?(s, w) and not ident_continue?(s, w)
+  end
+
+  defp ident_continue?(s, w) do
+    rest = after_kw(s, w)
+    rest != "" and ident_char?(String.first(rest))
+  end
 
   # Pratt-ish: apps are juxtaposition, arrows bind looser via Π/λ.
   defp parse_term(s, min_bp) do
@@ -72,10 +103,22 @@ defmodule Muro.Parser do
   end
 
   defp starts_atom?(s) do
-    case s do
-      <<c, _::binary>> when c in ?a..?z or c in ?A..?Z or c == ?( or c == ?{ -> true
-      <<"Type", _::binary>> -> true
-      _ -> false
+    s = skip(s)
+
+    cond do
+      word_kw?(s, "motive") -> false
+      word_kw?(s, "in") -> false
+      word_kw?(s, "def") -> false
+      true ->
+        case s do
+          <<c, _::binary>>
+          when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_ or c == ?( or
+                 c == ?{ ->
+            true
+
+          _ ->
+            false
+        end
     end
   end
 
@@ -281,7 +324,9 @@ defmodule Muro.Parser do
   defp tok(s, t) do
     s = skip(s)
 
-    if has_prefix?(s, t), do: {:ok, after_kw(s, t)}, else: {:error, "expected #{t}"}
+    if has_prefix?(s, t),
+      do: {:ok, after_kw(s, t)},
+      else: {:error, "expected #{t}"}
   end
 
   defp ident(s) do

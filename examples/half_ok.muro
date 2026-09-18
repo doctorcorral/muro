@@ -1,13 +1,13 @@
--- half_ok.muro — nothing dead runs.
+-- half_ok.muro — a proof never becomes a run.
 -- Agda-shaped surface: Π, λ, match with explicit motive.
 
-def plus : live Π (n : Nat) → Π (m : Nat) → Nat :=
+def plus : run Π (n : Nat) → Π (m : Nat) → Nat :=
   λ (n : Nat) → λ (m : Nat) →
     match n motive (λ _ → Nat)
       | 0 => m
       | suc np => suc(plus np m)
 
-def IsEven : dead Π (n : Nat) → Type :=
+def IsEven : proof Π (n : Nat) → Type :=
   λ (n : Nat) →
     match n motive (λ _ → Type)
       | 0 => Unit
@@ -16,7 +16,7 @@ def IsEven : dead Π (n : Nat) → Type :=
           | 0 => Empty
           | suc p => IsEven p
 
-def half : live Π (n : Nat) → Nat :=
+def half : run Π (n : Nat) → Nat :=
   λ (n : Nat) →
     match n motive (λ _ → Nat)
       | 0 => 0
@@ -25,7 +25,7 @@ def half : live Π (n : Nat) → Nat :=
           | 0 => 0
           | suc p => suc(half p)
 
-def plus_suc : dead Π (n : Nat) → Π (m : Nat) → {plus n suc(m) ≡ suc(plus n m) : Nat} :=
+def plus_suc : proof Π (n : Nat) → Π (m : Nat) → {plus n suc(m) ≡ suc(plus n m) : Nat} :=
   λ (n : Nat) → λ (m : Nat) →
     match n motive (λ np → {plus np suc(m) ≡ suc(plus np m) : Nat})
       | 0 => refl
@@ -33,12 +33,12 @@ def plus_suc : dead Π (n : Nat) → Π (m : Nat) → {plus n suc(m) ≡ suc(plu
         rewrite plus_suc np m motive (λ z → {suc(z) ≡ suc(suc(plus np m)) : Nat}) in
         refl
 
-def half_ok : dead Π (n : Nat) → Π (e : IsEven n) → {plus (half n) (half n) ≡ n : Nat} :=
+def half_ok : proof Π (n : Nat) → Π (e : IsEven n) → {plus (half n) (half n) ≡ n : Nat} :=
   λ (n : Nat) → λ (e : IsEven n) →
-    (match n motive (λ x → Π (e′ : IsEven x) → {plus (half x) (half x) ≡ x : Nat})
+    (match n motive (λ x → Π (ep : IsEven x) → {plus (half x) (half x) ≡ x : Nat})
       | 0 => λ (_ : IsEven 0) → refl
       | suc n1 =>
-        match n1 motive (λ y → Π (e′ : IsEven suc(y)) → {plus (half suc(y)) (half suc(y)) ≡ suc(y) : Nat})
+        match n1 motive (λ y → Π (ep : IsEven suc(y)) → {plus (half suc(y)) (half suc(y)) ≡ suc(y) : Nat})
           | 0 => λ (e1 : IsEven suc(0)) →
             matchEmpty e1 motive (λ _ → {plus (half suc(0)) (half suc(0)) ≡ suc(0) : Nat})
           | suc p => λ (e2 : IsEven suc(suc(p))) →

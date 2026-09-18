@@ -1,0 +1,7 @@
+-- A run-internal helper is emitted as defp and called from a run def.
+
+def step : run internal Π (n : Nat) → Nat :=
+  λ (n : Nat) → suc(n)
+
+def inc : run Π (n : Nat) → Nat :=
+  λ (n : Nat) → step n
