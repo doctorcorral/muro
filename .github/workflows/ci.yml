@@ -25,7 +25,7 @@ jobs:
 
       - uses: jdx/mise-action@v4
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             deps
@@ -48,14 +48,29 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: agda/agda-setup-action@v1
-        with:
-          agda-version: "2.8.0"
+      # agda-setup-action@v1 exits immediately on these runners.
+      - name: Install Agda 2.8.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/octet-stream" \
+            -o agda.tar.xz \
+            https://github.com/agda/agda/releases/download/v2.8.0/Agda-v2.8.0-linux.tar.xz
+          tar xf agda.tar.xz
+          mkdir -p "$HOME/.local/bin"
+          mv agda "$HOME/.local/bin/agda"
+          chmod +x "$HOME/.local/bin/agda"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/agda" --setup
+          "$HOME/.local/bin/agda" --version
 
       - name: Fetch Agda standard library 2.3
         run: git clone --depth 1 --branch v2.3 https://github.com/agda/agda-stdlib.git vendor/agda-stdlib
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: agda/_build
           key: agda-${{ runner.os }}-2.8.0-stdlib-2.3-${{ hashFiles('agda/**/*.agda', 'agda/**/*.agda-lib') }}
