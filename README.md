@@ -81,9 +81,10 @@ git clone --depth 1 --branch v2.3 https://github.com/agda/agda-stdlib.git vendor
 make agda
 ```
 
-Elixir 1.15+:
+Elixir and OTP via [mise](https://mise.jdx.dev/) (`mise.toml` pins `latest` stable):
 
 ```
+mise install
 mix test
 mix muro.check
 ```
