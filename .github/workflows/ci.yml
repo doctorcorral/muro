@@ -48,22 +48,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # agda-setup-action@v1 exits immediately on these runners.
-      # Download the public asset without GITHUB_TOKEN: a repo-scoped token
-      # 403s against agda/agda, and gh then saves an HTML error as the tarball.
+      # Extract outside the repo: the tarball's `agda` binary collides with
+      # the `agda/` source directory (tar exits 2). agda-setup-action@v1
+      # unpacks in cwd and hits the same clash.
       - name: Install Agda 2.8.0
         run: |
           set -euo pipefail
           trap 'echo "::error::agda install failed at line $LINENO exit $?"' ERR
+          tmp=$(mktemp -d)
           asset="Agda-v2.8.0-linux.tar.xz"
-          curl -fL --retry 5 --retry-all-errors -o "$asset" \
+          curl -fL --retry 5 -o "$tmp/$asset" \
             "https://github.com/agda/agda/releases/download/v2.8.0/${asset}"
-          ls -lh "$asset"
-          python3 -c 'import pathlib,sys; d=pathlib.Path(sys.argv[1]).read_bytes()[:6]; sys.exit(0 if d==b"\xfd7zXZ\x00" else 1)' "$asset"
-          tar xf "$asset"
-          chmod +x agda
+          tar -xJf "$tmp/$asset" -C "$tmp"
           mkdir -p "$HOME/.local/bin"
-          mv agda "$HOME/.local/bin/agda"
+          install -m 0755 "$tmp/agda" "$HOME/.local/bin/agda"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/agda" --version
           "$HOME/.local/bin/agda" --setup
