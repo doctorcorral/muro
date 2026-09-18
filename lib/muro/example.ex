@@ -1,7 +1,7 @@
 defmodule Muro.Example do
   @moduledoc """
   The v1 book: plus, IsEven, half, plus_suc, half_ok.
-  Named FOAS, Agda-shaped. Same content as Bend's half_ok.
+  Named FOAS, Agda-shaped.
   """
 
   @affine :affine

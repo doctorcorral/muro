@@ -1,6 +1,6 @@
 defmodule Muro.Parser do
   @moduledoc """
-  Tiny .muro parser. Agda-looking: Π, λ, match, explicit types. Not Python-like.
+  Tiny .muro parser. Agda-looking: Π, λ, match, explicit types.
   """
 
   def parse(src) when is_binary(src) do

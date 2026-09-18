@@ -6,7 +6,6 @@
 --   half_ok : (n : Nat) → IsEven n → half n + half n ≡ n
 --
 -- Proofs are ordinary terms: match + refl + rewrite with motive.
--- Same content as Bend's half_ok, Agda-shaped syntax.
 ------------------------------------------------------------------------
 
 module Muro.Example where
