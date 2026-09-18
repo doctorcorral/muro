@@ -4,7 +4,7 @@ defmodule Muro.Ast do
   """
 
   @type qty :: :affine | :reuse | :erased
-  @type mode :: :run | :proof
+  @type mode :: :run | :spec | :evidence
   @type name :: String.t()
 
   # Named FOAS. Binders carry the name string.

@@ -1,4 +1,4 @@
--- half_ok.muro — a proof never becomes a run.
+-- half_ok.muro — a spec never becomes evidence; evidence never becomes a run.
 -- Agda-shaped surface: Π, λ, match with explicit motive.
 
 def plus : run Π (n : Nat) → Π (m : Nat) → Nat :=
@@ -7,7 +7,7 @@ def plus : run Π (n : Nat) → Π (m : Nat) → Nat :=
       | 0 => m
       | suc np => suc(plus np m)
 
-def IsEven : proof Π (n : Nat) → Type :=
+def IsEven : spec Π (n : Nat) → Type :=
   λ (n : Nat) →
     match n motive (λ _ → Type)
       | 0 => Unit
@@ -25,7 +25,8 @@ def half : run Π (n : Nat) → Nat :=
           | 0 => 0
           | suc p => suc(half p)
 
-def plus_suc : proof Π (n : Nat) → Π (m : Nat) → {plus n suc(m) ≡ suc(plus n m) : Nat} :=
+def plus_suc : evidence Π (n : Nat) → Π (m : Nat) →
+                          {plus n suc(m) ≡ suc(plus n m) : Nat} :=
   λ (n : Nat) → λ (m : Nat) →
     match n motive (λ np → {plus np suc(m) ≡ suc(plus np m) : Nat})
       | 0 => refl
@@ -33,7 +34,8 @@ def plus_suc : proof Π (n : Nat) → Π (m : Nat) → {plus n suc(m) ≡ suc(pl
         rewrite plus_suc np m motive (λ z → {suc(z) ≡ suc(suc(plus np m)) : Nat}) in
         refl
 
-def half_ok : proof Π (n : Nat) → Π (e : IsEven n) → {plus (half n) (half n) ≡ n : Nat} :=
+def half_ok : evidence Π (n : Nat) → Π (e : IsEven n) →
+                          {plus (half n) (half n) ≡ n : Nat} :=
   λ (n : Nat) → λ (e : IsEven n) →
     (match n motive (λ x → Π (ep : IsEven x) → {plus (half x) (half x) ≡ x : Nat})
       | 0 => λ (_ : IsEven 0) → refl

@@ -46,7 +46,7 @@ defmodule Muro.Parser do
     end
   end
 
-  # tag ::= "run" "internal"? | "proof"
+  # tag ::= "run" "internal"? | "spec" | "evidence"
   defp parse_mode(s) do
     s = skip(s)
 
@@ -54,8 +54,11 @@ defmodule Muro.Parser do
       tag = forbidden_tag(s) ->
         {:error, "rejected tag #{tag}"}
 
-      word_kw?(s, "proof") ->
-        {:ok, %{mode: :proof}, after_kw(s, "proof")}
+      word_kw?(s, "spec") ->
+        {:ok, %{mode: :spec}, after_kw(s, "spec")}
+
+      word_kw?(s, "evidence") ->
+        {:ok, %{mode: :evidence}, after_kw(s, "evidence")}
 
       word_kw?(s, "run") ->
         rest = after_kw(s, "run")
@@ -68,16 +71,32 @@ defmodule Muro.Parser do
         end
 
       true ->
-        {:error, "expected run, run internal, or proof"}
+        {:error, "expected run, run internal, spec, or evidence"}
     end
   end
 
   defp forbidden_tag(s) do
     Enum.find_value(
-      [{"l", "ive"}, {"d", "ead"}, {"comp", ""}, {"ghost", ""}, {"export", ""}],
+      [
+        {"l", "ive"},
+        {"d", "ead"},
+        {"pr", "oof"},
+        {"comp", ""},
+        {"ghost", ""},
+        {"export", ""}
+      ],
       fn {a, b} ->
         tag = a <> b
-        if word_kw?(s, tag), do: tag, else: nil
+
+        if word_kw?(s, tag) do
+          rest = skip(after_kw(s, tag))
+
+          if tag == "pr" <> "oof" and word_kw?(rest, "evidence") do
+            tag <> " evidence"
+          else
+            tag
+          end
+        end
       end
     )
   end
