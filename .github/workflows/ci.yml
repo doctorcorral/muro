@@ -54,15 +54,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          curl -fsSL \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/octet-stream" \
-            -o agda.tar.xz \
-            https://github.com/agda/agda/releases/download/v2.8.0/Agda-v2.8.0-linux.tar.xz
-          tar xf agda.tar.xz
+          asset="Agda-v2.8.0-linux.tar.xz"
+          if ! gh release download v2.8.0 --repo agda/agda --pattern "$asset"; then
+            curl -fL --retry 5 -o "$asset" \
+              "https://github.com/agda/agda/releases/download/v2.8.0/${asset}"
+          fi
+          ls -lh "$asset"
+          tar xf "$asset"
+          test -x agda
           mkdir -p "$HOME/.local/bin"
           mv agda "$HOME/.local/bin/agda"
-          chmod +x "$HOME/.local/bin/agda"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/agda" --setup
           "$HOME/.local/bin/agda" --version
