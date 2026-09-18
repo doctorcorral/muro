@@ -1,0 +1,13 @@
+*.agdai
+*.agda.vim
+_build/
+MAlonzo/
+dist/
+deps/
+erl_crash.dump
+*.beam
+_build
+.elixir_ls/
+.elixir-tools/
+fetch-log
+vendor/agda-stdlib/

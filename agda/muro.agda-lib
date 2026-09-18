@@ -1,0 +1,5 @@
+name: muro
+depend: standard-library-2.3
+include: .
+flags:
+  --without-K
