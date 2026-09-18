@@ -2,57 +2,267 @@
 
 **A spec never becomes evidence. Evidence never becomes a run.**
 
-An explicit affine dependent type theory: Elixir checks it, Agda specifies it, only run terms run.
+An explicit affine dependent type theory. Elixir parses, checks, and emits it. Agda specifies the judgments. Only run terms become running code.
 
-Named after the wall between spec, evidence, and run. Types, erased arguments, equations, and paradoxes never become running code. (Formerly *nothing dead runs* / *a proof never becomes a run*; those are history, not syntax.)
+Named after the wall between spec, evidence, and run. Types, erased arguments, equations, and paradoxes never execute. (Formerly *nothing dead runs* / *a proof never becomes a run*; those are history, not syntax.)
 
-## Layout
+If Agda and Elixir disagree, Agda wins.
 
-| Layer | Form |
+---
+
+## One-shot (humans and agents)
+
+Two jobs. Do not mix them.
+
+| You want to… | Do this |
 | --- | --- |
-| Elixir parser / pretty / emit | named FOAS (quoted tuples or `.muro`) |
-| Executable check / subst | PHOAS in Agda; de Bruijn in both Agda and Elixir |
-| Metatheory (soundness, no-promotion) | de Bruijn `Tm n` in Agda |
+| Add a Muro program | Write a `.muro` file against the grammar below. Check with `mix muro.check path.muro`. Do not change Agda or the Elixir kernel. |
+| Change the type theory | Edit Agda `Muro.Check` first until it decides the new example. Then add the matching Elixir clause, tagged with the ⊢ constructor. |
 
-`toPHOAS` and `unembed` (PHOAS → de Bruijn) sit in `agda/Muro/Subst.agda`. Raw HOAS (`Tm → Tm`) is not the inductive syntax.
+Copy-paste skeleton:
 
 ```
-agda/Muro/          specification (source of truth for ⊢)
-lib/muro/           Elixir checker, parser, emit
-examples/half_ok.muro
-examples/internal_ok.muro
+-- comments start with --
+def plus : run Π (n : Nat) → Π (m : Nat) → Nat :=
+  λ (n : Nat) → λ (m : Nat) →
+    match n motive (λ _ → Nat)
+      | 0 => m
+      | suc np => suc(plus np m)
 ```
 
-## Theory (MuroTT v1)
+Then:
 
-Bidirectional judgments:
+```
+mix muro.check examples/your_file.muro
+```
 
-- Γ ⊢ᵐ e ⇒ A  infer
-- Γ ⊢ᵐ e ⇐ A  check
+A definition is in the book the moment `Parser.parse/1` returns it. The checker sees the whole book (forward references are allowed). Emit keeps only `run`.
 
-m ∈ {run, spec, evid}.
+---
 
-| Tag | What | Affinity + descent | Emit |
+## Surface grammar
+
+This is the grammar `lib/muro/parser.ex` actually implements. ASCII aliases are in parentheses.
+
+```
+book       ::= def*
+def        ::= "def" ident ":" tag term ":=" term
+tag        ::= "run" "internal"? | "spec" | "evidence"
+
+term       ::= atom atom*                  -- juxtaposition is application
+atom       ::= "Type" | "Nat" | "Unit" | "Empty" | "refl" | "tt" | "0"
+             | suc | pi | lam | match | matchEmpty | rewrite | idt
+             | "(" term ")"
+             | ident
+
+suc        ::= "suc" "(" term ")"          -- constructor; parens required
+qty        ::= "+" | "-" | ε               -- ε = affine (default)
+binder     ::= "(" qty ident ":" term ")"
+pi         ::= ("Π" | "Pi") binder ("→" | "->") term
+lam        ::= ("λ" | "lam") binder ("→" | "->") term
+
+match      ::= "match" term "motive" mot
+               "|" "0" "=>" term
+               "|" "suc" ident "=>" term
+matchEmpty ::= "matchEmpty" term "motive" mot
+rewrite    ::= "rewrite" term "motive" mot "in" term
+mot        ::= "(" ("λ" | "lam")? ident ("→" | "->") term ")"
+idt        ::= "{" term ("≡" | "==") term ":" term "}"
+
+ident      ::= [A-Za-z_][A-Za-z0-9_]*
+comment    ::= "--" through end of line
+space      ::= [ \t\n\r] | comment
+```
+
+Application is juxtaposition (`f a b`). `motive`, `in`, and `def` never start an argument. Digits start atoms, so `| 0 =>` parses.
+
+Rejected as tags (not as ordinary identifiers): `live`, `dead`, `proof`, `proof evidence`, `ghost`, `comp`, `export`. There is no other tag.
+
+Not in the surface (present in the kernel AST only): `matchUnit`, annotations `{e : A}`, raw de Bruijn.
+
+### Binder quantities
+
+```
+Π (n : Nat) → …        affine (default): at most one run/evidence use
+Π (+ n : Nat) → …      reuse: only if the type WHNFs to Data (Nat, Unit, Empty)
+Π (- e : IsEven n) → … erased: compile-time; cannot be used computationally
+```
+
+The `+` / `-` sits immediately before the name, inside the parentheses.
+
+### Identity, match, rewrite
+
+```
+{plus (half n) (half n) ≡ n : Nat}     identity type  (sides and sort)
+
+match n motive (λ x → P)
+  | 0 => tz
+  | suc p => ts                        Nat eliminator; motive is explicit
+
+matchEmpty e motive (λ _ → P)          Empty eliminator
+
+rewrite eq motive (λ z → P) in t       eq : {lhs ≡ rhs : A};
+                                       t is checked as P[rhs]
+```
+
+`refl` checks against `{x ≡ y : A}` only when `x` and `y` convert.
+
+---
+
+## Modes and the wall
+
+m ∈ {run, spec, evid}. Surface word `evidence` is Agda constructor `evid` and Elixir atom `:evidence`.
+
+| Tag | Meaning | Affinity + descent | Emit |
 | --- | --- | --- | --- |
 | `run` | program | yes | `def` |
-| `run internal` | same | yes | `defp` |
-| `spec` | type / family / signature | no | omit |
+| `run internal` | same judgment | yes | `defp` |
+| `spec` | type / family / signature | no (uses forgotten) | omit |
 | `evidence` | theorem | yes (same tax as run) | omit |
 
-Emit visibility is an Elixir-only flag on `run`.
+Emit visibility (`def` vs `defp`) is Elixir-only on `run`. Agda `Def` stores `dmode` only.
 
-Syntax: one `Type` (not Type : Type), Π / λ / app, quantities (affine by default, `+` reuse only if the type is Data, `-` erased), inductive families enough for Nat, Empty, Unit, and `IsEven n`, identity with `refl` when both sides compute equal, rewrite with explicit motive, match with explicit motive.
+Promotion is forbidden:
+
+```
+spec ↛ evidence
+evidence ↛ run
+spec ↛ run
+```
+
+Using a definition of mode `from` while checking in mode `to`:
+
+| from \ to | run | evidence | spec |
+| --- | --- | --- | --- |
+| run | yes | yes | yes |
+| evidence | no | yes | yes |
+| spec | no | no | yes |
+
+Erased Π-arguments and identity sides are checked in spec. Arguments of an **evidence definition** at a call site are also checked in spec (uses discarded), so instantiating a theorem does not consume affine resources. Local affine binders in an evidence λ still fail if used twice.
+
+---
+
+## Kernel (MuroTT v1)
+
+Bidirectional, explicit, no metavariables, no implicits, no unification, no tactics.
+
+```
+σ , Γ ⊢[ m ] e ⇒ A     infer
+σ , Γ ⊢[ m ] e ⇐ A     check
+```
+
+- One sort `Type`. Not Type : Type. `Type` itself is erased.
+- Π / λ / app, quantities affine / reuse / erased.
+- Inductive families enough for `Nat`, `Empty`, `Unit`, and `IsEven n`.
+- Identity `{e₁ ≡ e₂ : A}` with `refl` when both sides compute equal.
+- `rewrite` and `match` take an explicit motive. No inference of the motive.
 
 Hard rules:
 
-- A run or evidence variable is used at most once (unless `+` on Data).
-- Run and evidence recursion must descend on a non-erased argument.
-- No promotion: spec ↛ evidence, evidence ↛ run, spec ↛ run.
-- Emitted code is run only.
+1. A run or evidence variable is used at most once, unless `+` on Data.
+2. Run and evidence recursion must descend on a non-erased argument (a structurally smaller variable from a `match`). Spec does not check descent.
+3. No promotion (table above). Erased variables have no computational use.
+4. Emitted code is run only. Fallback for a non-run fragment is `raise "erased term"`.
 
-Agda `Muro.Check` is the spec. If Agda and Elixir disagree, Agda wins.
+Data (for `+`) after WHNF: `Nat`, `Unit`, `Empty`.
+
+Conversion: syntactic equality first; then stuck-def congruence when the first argument is not constructor-headed; then WHNF. Fuel is for conversion only (Elixir `@fuel 2000`). Infer/check recurse on the term.
+
+---
+
+## Representations
+
+Three, on purpose. Do not add a fourth, and do not use raw HOAS (`Tm → Tm`) as inductive syntax.
+
+| Layer | Form | Where |
+| --- | --- | --- |
+| Parser / pretty / emit | named FOAS | `lib/muro/{parser,ast,emit}.ex` |
+| Check / subst | de Bruijn | `lib/muro/{check,subst}.ex`, `agda/Muro/{Check,Subst}.agda` |
+| Examples in Agda | PHOAS `PTm V` | `agda/Muro/Syntax.agda`, `agda/Muro/Example.agda` |
+| Metatheory | de Bruijn `Tm n` | `agda/Muro/Syntax.agda` |
+
+`toPHOAS` / `unembed` live in `agda/Muro/Subst.agda`. Elixir `Muro.Ast.to_db/2` sends named FOAS to de Bruijn (unbound names become `{:def, name}`).
+
+### Named FOAS (what the parser emits)
+
+```
+{:var, name}
+:typ | :nat | :ze | {:su, t} | :unit | :one | :empty
+{:pi, qty, a, name, b}
+{:lam, qty, a, name, t}
+{:app, f, a}
+{:mnat, e, x, p, z, y, s}     -- x binds in motive p; y binds in suc branch s
+{:memp, e, x, p}
+{:munit, e, x, p, u}          -- kernel only; no parser production
+{:idt, ty, a, b}              -- {a ≡ b : ty}
+:rfl
+{:rwt, eq, x, p, t}
+{:def, name}
+{:ann, e, a}                  -- kernel only; no parser production
+```
+
+`qty` is `:affine | :reuse | :erased`. A book entry:
+
+```
+%{name: "half", mode: :run, export: true, type: named, body: named}
+%{name: "IsEven", mode: :spec, type: named, body: named}
+%{name: "half_ok", mode: :evidence, type: named, body: named}
+```
+
+`export` is present only on `:run` (`true` → `def`, `false` → `defp`).
+
+De Bruijn drops the name strings: `{:pi, q, a, b}`, `{:lam, q, a, t}`, `{:mnat, e, p, z, s}` with index 0 = nearest binder.
+
+---
+
+## Adding a `.muro` program
+
+1. Put the file in `examples/`. Use only `run` / `run internal` / `spec` / `evidence`.
+2. Every binder is a typed `(x : A)` (or `(+ x : A)` / `(- x : A)`). No implicit arguments.
+3. Every `match` / `rewrite` writes `motive (λ x → …)` in parentheses.
+4. `suc` on a term is `suc(t)`. `suc p` in a pattern is a binder, not an application.
+5. Recursion on `run`/`evidence` must go through `match` and call `f p` where `p` is the `suc` variable (or smaller).
+6. Check:
+
+```
+mix muro.check examples/your_file.muro
+```
+
+7. Emit (run only), from `iex -S mix`:
+
+```
+{:ok, src} = Muro.emit_file("examples/your_file.muro", Foo)
+IO.puts(src)
+```
+
+8. If you want it in the test suite, parse/check/emit in `test/muro_check_test.exs`. The canonical book is also `Muro.Example.book/0` (must stay in sync with `examples/half_ok.muro` and `agda/Muro/Example.agda`).
+
+Emit of Nat: `0` stays `0`; `suc(n)` becomes `{:suc, n}`. Unit constructor `tt` becomes `:tt`. Erased Π-arguments are dropped from the generated arity.
+
+---
+
+## Extending the kernel
+
+Order is mandatory:
+
+1. **Agda syntax** (`agda/Muro/Syntax.agda`) if you add a constructor — both `Tm n` and `PTm V`.
+2. **Subst** (`agda/Muro/Subst.agda`): `wk`, `sub`, `toPHOAS`, `unembed`. Pattern-lambdas passed to `sub` do not compute; use a named function (`instσ`, `motSucσ`).
+3. **Check** (`agda/Muro/Check.agda`): a ⊢ constructor and a `decide` clause. Mixfix is `σ , Γ ⊢[ m ] e ⇒ A`.
+4. `make agda` until the example decides (`half_ok-checks` is `refl` for the canonical book).
+5. **Elixir mirror**, same shapes, each checker clause commented with the Agda constructor (`⇒-var-run`, `⇐-refl`, …):
+   - `lib/muro/ast.ex`
+   - `lib/muro/subst.ex`
+   - `lib/muro/check.ex`
+   - `lib/muro/parser.ex` / `lib/muro/emit.ex` if it is surface or run code
+6. `mix test` and `mix muro.check`.
+
+Elixir constraints: ASCII identifiers only (no unicode primes, no mixed-script atoms). Do not define local `hd/1`. Guards cannot call ordinary `defp` helpers.
+
+---
 
 ## The example
+
+`examples/half_ok.muro` is the done bar for the v1 kernel:
 
 ```
 IsEven : Nat → Type
@@ -60,26 +270,53 @@ half   : Nat → Nat
 half_ok : (n : Nat) → IsEven n → half n + half n ≡ n
 ```
 
-Evidence is an ordinary term: match + refl + rewrite with motive.
+```
+def plus     : run      Π (n : Nat) → Π (m : Nat) → Nat := …
+def IsEven   : spec     Π (n : Nat) → Type := …
+def half     : run      Π (n : Nat) → Nat := …
+def plus_suc : evidence Π (n : Nat) → Π (m : Nat) →
+                          {plus n suc(m) ≡ suc(plus n m) : Nat} := …
+def half_ok  : evidence Π (n : Nat) → Π (e : IsEven n) →
+                          {plus (half n) (half n) ≡ n : Nat} := …
+```
+
+Evidence is an ordinary term: `match` + `refl` + `rewrite` with motives. `half` of eight is four. `examples/internal_ok.muro` is a `run internal` helper (`step` → `defp`) called from a `run` def (`inc` → `def`).
+
+---
+
+## Layout
 
 ```
-def plus     : run      Π (n : Nat) → Π (m : Nat) → Nat := ...
-def IsEven   : spec     Π (n : Nat) → Type := ...
-def half     : run      Π (n : Nat) → Nat := ...
-def plus_suc : evidence Π (n : Nat) → Π (m : Nat) →
-                          {plus n suc(m) ≡ suc(plus n m) : Nat} := ...
-def half_ok  : evidence Π (n : Nat) → Π (e : IsEven n) →
-                          {plus (half n) (half n) ≡ n : Nat} := ...
+agda/Muro.agda          public re-export
+agda/Muro/Base.agda     Qty, Mode, Use, Result
+agda/Muro/Syntax.agda   Tm n, PTm V
+agda/Muro/Subst.agda    wk, sub, toPHOAS, unembed
+agda/Muro/Check.agda    ⊢ and the decision procedure
+agda/Muro/Example.agda  plus / IsEven / half / plus_suc / half_ok
+lib/muro/parser.ex      .muro → named FOAS
+lib/muro/ast.ex         named FOAS, to_db
+lib/muro/subst.ex       de Bruijn subst
+lib/muro/check.ex       Elixir mirror of ⊢
+lib/muro/emit.ex        run → Elixir source
+lib/muro/example.ex     same book as Agda
+lib/mix/tasks/muro.check.ex
+examples/half_ok.muro
+examples/internal_ok.muro
+test/muro_check_test.exs
 ```
+
+---
 
 ## Build
 
-Agda 2.8+ and the standard library 2.3 (no `--type-in-type`):
+Agda 2.8+ and standard library 2.3 (no `--type-in-type`):
 
 ```
 git clone --depth 1 --branch v2.3 https://github.com/agda/agda-stdlib.git vendor/agda-stdlib
 make agda
 ```
+
+`make agda` is `agda --no-libraries -i agda -i vendor/agda-stdlib/src` (the stdlib checkout ships extra `.agda-lib` files that must not be loaded).
 
 Elixir 1.20.4 and OTP 29.1 via [mise](https://mise.jdx.dev/):
 
@@ -87,11 +324,12 @@ Elixir 1.20.4 and OTP 29.1 via [mise](https://mise.jdx.dev/):
 mise install
 mix test
 mix muro.check
+mix muro.check examples/half_ok.muro
 ```
 
-`Muro.Check.check_sig/1` returns `:ok` on the book. Run defs emit to ordinary Elixir; `half` of eight is four.
+`Muro.Check.check_sig/1` returns `:ok` on the book. CI runs the Elixir job and `make agda` on every push and pull request.
 
-CI (GitHub Actions) runs Elixir tests and `make agda` on every push and pull request.
+---
 
 ## Names
 
@@ -100,5 +338,9 @@ CI (GitHub Actions) runs Elixir tests and `make agda` on every push and pull req
 | Language | Muro |
 | Theory | MuroTT |
 | Files | `.muro` |
-| Elixir | `Muro`, `Muro.Check`, `Muro.Emit` |
+| Elixir | `Muro`, `Muro.Check`, `Muro.Emit`, `Muro.Parser` |
 | Agda | `Muro.*` |
+
+## Not in v1
+
+Type : Type, cubical, tactics, implicits, unification, metavariables, extra quantities, ν / codata, typing raw Elixir, emitting spec or evidence.
