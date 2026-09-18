@@ -14,7 +14,7 @@ open import Function.Base using (case_of_)
 -- Quantities q
 --   affine  — default: at most one run use
 --   reuse   — +, reuse only if the type is Data
---   erased  — -, compile-time / proof / type argument
+--   erased  — -, compile-time / type argument
 ------------------------------------------------------------------------
 
 data Qty : Set where
@@ -34,22 +34,25 @@ showQty reuse  = "+"
 showQty erased = "-"
 
 ------------------------------------------------------------------------
--- Modes m ∈ {run, proof}
--- A proof never becomes a run (no promotion).
+-- Modes m ∈ {run, spec, evid}
+-- A spec never becomes evidence; evidence never becomes a run.
 ------------------------------------------------------------------------
 
 data Mode : Set where
-  run   : Mode
-  proof : Mode
+  run  : Mode
+  spec : Mode
+  evid : Mode
 
 eqMode : Mode → Mode → Bool
-eqMode run   run   = true
-eqMode proof proof = true
-eqMode _     _     = false
+eqMode run  run  = true
+eqMode spec spec = true
+eqMode evid evid = true
+eqMode _    _    = false
 
 showMode : Mode → String
-showMode run   = "run"
-showMode proof = "proof"
+showMode run  = "run"
+showMode spec = "spec"
+showMode evid = "evidence"
 
 ------------------------------------------------------------------------
 -- Run usage of one binder.

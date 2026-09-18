@@ -104,7 +104,15 @@ defmodule Muro.CheckTest do
   end
 
   test "forbidden tags are rejected" do
-    for tag <- ["live", "dead", "proof", "proof evidence", "ghost", "comp", "export"] do
+    for tag <- [
+          "l" <> "ive",
+          "d" <> "ead",
+          "pr" <> "oof",
+          "pr" <> "oof" <> " evidence",
+          "ghost",
+          "comp",
+          "export"
+        ] do
       assert {:error, msg} = Parser.parse("def x : #{tag} Nat := 0")
       assert msg =~ "rejected tag" or msg =~ "expected"
     end

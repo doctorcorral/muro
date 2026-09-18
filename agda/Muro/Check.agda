@@ -4,8 +4,8 @@
 -- Spec: the inductive Γ ⊢[ m ] e ⇒ A / Γ ⊢[ m ] e ⇐ A.
 -- Decide: fuel-based Result, each clause commented with its ⊢ constructor.
 --
--- There is no promotion rule  proof ⇒ run.
--- Emit visibility (def vs defp) is an Elixir-only flag on Run.
+-- There is no promotion: spec ↛ evid, evid ↛ run, spec ↛ run.
+-- Emit visibility (def vs defp) is an Elixir-only flag on run.
 ------------------------------------------------------------------------
 
 module Muro.Check where
@@ -33,7 +33,7 @@ open import Muro.Subst
 -- Signature of closed definitions.
 ------------------------------------------------------------------------
 
--- dmode is run or proof. Emit visibility (def vs defp) is an Elixir-only
+-- dmode is run or spec. Emit visibility (def vs defp) is an Elixir-only
 -- flag on run; it is not part of this spec.
 record Def : Set where
   constructor mkDef
@@ -77,7 +77,7 @@ typOf : ∀ {n} → Ctx n → Fin n → Tm n
 typOf Γ x = Bind.btyp (lookup Γ x)
 
 ------------------------------------------------------------------------
--- Recursion state: run (and proof) structural descent.
+-- Recursion state: run and evid structural descent (not spec).
 ------------------------------------------------------------------------
 
 record RecSt (n : ℕ) : Set where
@@ -138,18 +138,30 @@ maxUses []       []       = []
 maxUses (x ∷ xs) (y ∷ ys) = maxUse x y ∷ maxUses xs ys
 
 combine : ∀ {n} → Mode → UseVec n → UseVec n → Result (UseVec n)
-combine run u v = addUses u v
-combine proof _ _ = ok u0s
+combine run  u v = addUses u v
+combine evid u v = addUses u v
+combine spec _ _ = ok u0s
 
 combineAlt : ∀ {n} → Mode → UseVec n → UseVec n → UseVec n
-combineAlt run u v = maxUses u v
-combineAlt proof _ _ = u0s
+combineAlt run  u v = maxUses u v
+combineAlt evid u v = maxUses u v
+combineAlt spec _ _ = u0s
 
 checkBound : Mode → Qty → Use → Result ⊤
-checkBound run erased U1 = fail "erased variable used in a run term"
-checkBound run erased Uω = fail "erased variable used in a run term"
-checkBound run affine Uω = fail "affine variable used as reusable"
+checkBound run  erased U1 = fail "erased variable used computationally"
+checkBound evid erased U1 = fail "erased variable used computationally"
+checkBound run  erased Uω = fail "erased variable used computationally"
+checkBound evid erased Uω = fail "erased variable used computationally"
+checkBound run  affine Uω = fail "affine variable used as reusable"
+checkBound evid affine Uω = fail "affine variable used as reusable"
 checkBound _    _      _  = ok tt
+
+allowedDef : Mode → Mode → Bool
+allowedDef run  _    = true
+allowedDef evid spec = true
+allowedDef evid evid = true
+allowedDef spec spec = true
+allowedDef _    _    = false
 
 ------------------------------------------------------------------------
 -- Small helpers.
@@ -332,28 +344,32 @@ data _,_⊢_wf    (σ : Sig) {n} (Γ : Ctx n) : Tm n → Set
 
 data _,_⊢_wf σ Γ where
   type-Type : σ , Γ ⊢ typ wf                          -- Type is a sort, not Type : Type
-  type-el   : ∀ {A} → σ , Γ ⊢[ proof ] A ⇒ typ → σ , Γ ⊢ A wf
+  type-el   : ∀ {A} → σ , Γ ⊢[ spec ] A ⇒ typ → σ , Γ ⊢ A wf
 
 data _,_⊢[_]_⇒_ σ Γ where
   ⇒-var-run : ∀ {x}
     → (qtyOf Γ x ≡ erased → ⊥)
     → σ , Γ ⊢[ run ] var x ⇒ typOf Γ x
 
-  ⇒-var-proof : ∀ {x}
-    → σ , Γ ⊢[ proof ] var x ⇒ typOf Γ x
+  ⇒-var-evid : ∀ {x}
+    → (qtyOf Γ x ≡ erased → ⊥)
+    → σ , Γ ⊢[ evid ] var x ⇒ typOf Γ x
+
+  ⇒-var-spec : ∀ {x}
+    → σ , Γ ⊢[ spec ] var x ⇒ typOf Γ x
 
   ⇒-ze : ∀ {m} → σ , Γ ⊢[ m ] ze ⇒ nat
   ⇒-su : ∀ {m t} → σ , Γ ⊢[ m ] t ⇐ nat → σ , Γ ⊢[ m ] su t ⇒ nat
   ⇒-tt : ∀ {m} → σ , Γ ⊢[ m ] one ⇒ unit
 
-  ⇒-nat   : σ , Γ ⊢[ proof ] nat   ⇒ typ
-  ⇒-unit  : σ , Γ ⊢[ proof ] unit  ⇒ typ
-  ⇒-empty : σ , Γ ⊢[ proof ] empty ⇒ typ
+  ⇒-nat   : σ , Γ ⊢[ spec ] nat   ⇒ typ
+  ⇒-unit  : σ , Γ ⊢[ spec ] unit  ⇒ typ
+  ⇒-empty : σ , Γ ⊢[ spec ] empty ⇒ typ
 
   ⇒-pi : ∀ {q A B}
     → σ , Γ ⊢ A wf
     → σ , ext Γ q A ⊢ B wf
-    → σ , Γ ⊢[ proof ] pi q A B ⇒ typ
+    → σ , Γ ⊢[ spec ] pi q A B ⇒ typ
 
   ⇒-lam : ∀ {m q A t B}
     → σ , Γ ⊢ A wf
@@ -367,7 +383,7 @@ data _,_⊢[_]_⇒_ σ Γ where
 
   ⇒-app-era : ∀ {m A B f a}
     → σ , Γ ⊢[ m ] f ⇒ pi erased A B
-    → σ , Γ ⊢[ proof ] a ⇐ A
+    → σ , Γ ⊢[ spec ] a ⇐ A
     → σ , Γ ⊢[ m ] app f a ⇒ inst B a
 
   ⇒-app-reuse : ∀ {m A B f a}
@@ -377,12 +393,12 @@ data _,_⊢[_]_⇒_ σ Γ where
 
   ⇒-idt : ∀ {A a b}
     → σ , Γ ⊢ A wf
-    → σ , Γ ⊢[ proof ] a ⇐ A
-    → σ , Γ ⊢[ proof ] b ⇐ A
-    → σ , Γ ⊢[ proof ] idt A a b ⇒ typ
+    → σ , Γ ⊢[ spec ] a ⇐ A
+    → σ , Γ ⊢[ spec ] b ⇐ A
+    → σ , Γ ⊢[ spec ] idt A a b ⇒ typ
 
   ⇒-rwt : ∀ {m A l r eq P t}
-    → σ , Γ ⊢[ proof ] eq ⇒ idt A l r
+    → σ , Γ ⊢[ spec ] eq ⇒ idt A l r
     → σ , ext Γ affine A ⊢ P wf
     → σ , Γ ⊢[ m ] t ⇐ inst P r
     → σ , Γ ⊢[ m ] rwt eq P t ⇒ inst P l
@@ -430,7 +446,7 @@ data _,_⊢[_]_⇐_ σ Γ where
     → a ≈[ σ ] b
     → σ , Γ ⊢[ m ] rfl ⇐ idt A a b
 
--- Intentionally absent:  Γ ⊢[ proof ] e : A  implies  Γ ⊢[ run ] e : A.
+-- Intentionally absent: spec ⇒ evid, evid ⇒ run, spec ⇒ run.
 
 ------------------------------------------------------------------------
 -- Decision procedure.
@@ -454,18 +470,17 @@ motSuc : ∀ {n} → Tm (suc n) → Tm (suc n)
 motSuc P = sub motSucσ P
 
 checkRec : ∀ {n} → ℕ → Sig → Mode → RecSt n → Tm n → Result ⊤
+checkRec _ _ spec _ _ = ok tt
 checkRec {n} k σ m rs t = go (apps t)
   where
     descend : ℕ → ℕ → List (Tm n) → Result ⊤
     descend _ _ [] = fail "recursive call does not descend on a smaller argument"
     descend i j (a ∷ as) =
       if isSmallerVar rs a
-      then (if eqMode m run
-            then (lookupDef σ i >>= λ d →
-                  nthQty (Def.dtype d) j >>= λ q →
-                  if eqQty q erased
-                  then descend i (suc j) as
-                  else ok tt)
+      then (lookupDef σ i >>= λ d →
+            nthQty (Def.dtype d) j >>= λ q →
+            if eqQty q erased
+            then descend i (suc j) as
             else ok tt)
       else descend i (suc j) as
 
@@ -489,21 +504,24 @@ mutual
   checkTy : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Tm n → Result ⊤
   checkTy k σ rs Γ A with whnf k σ A
   ... | typ = ok tt                                          -- type-Type
-  ... | A′  = infer′ k σ rs Γ proof A′ >>= λ (T , _) → conv k σ T typ   -- type-el
+  ... | A′  = infer′ k σ rs Γ spec A′ >>= λ (T , _) → conv k σ T typ   -- type-el
 
   {-# TERMINATING #-}
   infer′ : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Result (Tm n × UseVec n)
   {-# TERMINATING #-}
   check′ : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Result (UseVec n)
 
-  -- ⇒-var-run / ⇒-var-proof
+  -- ⇒-var-run / ⇒-var-evid / ⇒-var-spec
   infer′ k σ rs Γ run (var x) with qtyOf Γ x
   ... | erased = fail "no promotion: erased variable in run mode"
   ... | q      =
     if isRunType k σ (typOf Γ x)
     then ok (typOf Γ x , oneHot x (if eqQty q reuse then Uω else U1))
-    else fail ("no promotion: variable has a proof type " ++ showTm (typOf Γ x))
-  infer′ k σ rs Γ proof (var x) = ok (typOf Γ x , u0s)
+    else fail ("no promotion: variable has a spec type " ++ showTm (typOf Γ x))
+  infer′ k σ rs Γ evid (var x) with qtyOf Γ x
+  ... | erased = fail "no promotion: erased variable in evidence mode"
+  ... | q      = ok (typOf Γ x , oneHot x (if eqQty q reuse then Uω else U1))
+  infer′ k σ rs Γ spec (var x) = ok (typOf Γ x , u0s)
 
   -- ⇒-ze
   infer′ k σ rs Γ m ze = ok (nat , u0s)
@@ -515,19 +533,24 @@ mutual
   -- ⇒-tt
   infer′ k σ rs Γ m one = ok (unit , u0s)
 
-  -- ⇒-nat / ⇒-unit / ⇒-empty  (proof only: these are types)
-  infer′ k σ rs Γ run nat   = fail "no promotion: Nat is an erased term"
-  infer′ k σ rs Γ run unit  = fail "no promotion: Unit is an erased term"
-  infer′ k σ rs Γ run empty = fail "no promotion: Empty is an erased term"
-  infer′ k σ rs Γ run typ   = fail "no promotion: Type is an erased term"
-  infer′ k σ rs Γ proof nat   = ok (typ , u0s)
-  infer′ k σ rs Γ proof unit  = ok (typ , u0s)
-  infer′ k σ rs Γ proof empty = ok (typ , u0s)
-  infer′ k σ rs Γ proof typ   = fail "Type has no type (no Type : Type)"
+  -- ⇒-nat / ⇒-unit / ⇒-empty  (spec only: these are types)
+  infer′ k σ rs Γ run  nat   = fail "no promotion: Nat is an erased term"
+  infer′ k σ rs Γ evid nat   = fail "no promotion: Nat is an erased term"
+  infer′ k σ rs Γ run  unit  = fail "no promotion: Unit is an erased term"
+  infer′ k σ rs Γ evid unit  = fail "no promotion: Unit is an erased term"
+  infer′ k σ rs Γ run  empty = fail "no promotion: Empty is an erased term"
+  infer′ k σ rs Γ evid empty = fail "no promotion: Empty is an erased term"
+  infer′ k σ rs Γ run  typ   = fail "no promotion: Type is an erased term"
+  infer′ k σ rs Γ evid typ   = fail "no promotion: Type is an erased term"
+  infer′ k σ rs Γ spec nat   = ok (typ , u0s)
+  infer′ k σ rs Γ spec unit  = ok (typ , u0s)
+  infer′ k σ rs Γ spec empty = ok (typ , u0s)
+  infer′ k σ rs Γ spec typ   = fail "Type has no type (no Type : Type)"
 
   -- ⇒-pi
-  infer′ k σ rs Γ run (pi _ _ _) = fail "no promotion: Π is an erased term"
-  infer′ k σ rs Γ proof (pi q A B) =
+  infer′ k σ rs Γ run  (pi _ _ _) = fail "no promotion: Π is an erased term"
+  infer′ k σ rs Γ evid (pi _ _ _) = fail "no promotion: Π is an erased term"
+  infer′ k σ rs Γ spec (pi q A B) =
     checkTy k σ rs Γ A >>
     checkTy k σ (extRec rs false false) (ext Γ q A) B >>
     ok (typ , u0s)
@@ -553,22 +576,31 @@ mutual
     checkRec k σ m rs (app f a) >>
     ok (inst B a , uses)
     where
+      argMode : Tm n → Mode
+      argMode f with proj₁ (apps f)
+      ... | def i =
+        case lookupDef σ i of λ where
+          (ok d) → if eqMode m evid ∧ eqMode (Def.dmode d) evid then spec else m
+          (fail _) → m
+      ... | _ = m
+
       inferArg : Qty → Tm n → UseVec n → Result (UseVec n)
       inferArg erased A fu =
-        check k σ rs Γ proof a A >>= λ _ →
-        (if eqMode m run then ok fu else ok u0s)
+        check k σ rs Γ spec a A >>= λ _ →
+        (if eqMode m spec then ok u0s else ok fu)
       inferArg affine A fu =
-        check k σ rs Γ m a A >>= λ au → combine m fu au
+        check k σ rs Γ (argMode f) a A >>= λ au → combine m fu au
       inferArg reuse A fu =
         guard "+ argument is not Data" (isData k σ A) >>
-        check k σ rs Γ m a A >>= λ au → combine m fu au
+        check k σ rs Γ (argMode f) a A >>= λ au → combine m fu au
 
   -- ⇒-idt
-  infer′ k σ rs Γ run (idt _ _ _) = fail "no promotion: identity type is an erased term"
-  infer′ k σ rs Γ proof (idt A a b) =
+  infer′ k σ rs Γ run  (idt _ _ _) = fail "no promotion: identity type is an erased term"
+  infer′ k σ rs Γ evid (idt _ _ _) = fail "no promotion: identity type is an erased term"
+  infer′ k σ rs Γ spec (idt A a b) =
     checkTy k σ rs Γ A >>
-    check k σ rs Γ proof a A >>
-    check k σ rs Γ proof b A >>
+    check k σ rs Γ spec a A >>
+    check k σ rs Γ spec b A >>
     ok (typ , u0s)
 
   -- rfl must be checked (⇐-refl)
@@ -576,7 +608,7 @@ mutual
 
   -- ⇒-rwt
   infer′ k σ rs Γ m (rwt eq P t) =
-    infer k σ rs Γ proof eq >>= λ (et , _) →
+    infer k σ rs Γ evid eq >>= λ (et , _) →
     viewId k σ et >>= λ (A , l , r) →
     checkTy k σ (extRec rs false false) (ext Γ affine A) P >>
     check k σ rs Γ m t (inst P r) >>= λ tu →
@@ -615,11 +647,11 @@ mutual
   -- ⇒-def
   infer′ {n} k σ rs Γ m (def i) =
     lookupDef σ i >>= λ d →
-    (if eqMode m run ∧ eqMode (Def.dmode d) proof
-     then fail ("no promotion: proof definition " ++ Def.dname d ++ " in run mode")
-     else ok tt) >>
+    (if allowedDef (Def.dmode d) m
+     then ok tt
+     else fail ("no promotion: " ++ showMode (Def.dmode d) ++ " definition " ++ Def.dname d ++ " in " ++ showMode m ++ " mode")) >>
     (if eqMode m run ∧ not (isRunType k σ (closed {n} (Def.dtype d)))
-     then fail ("no promotion: definition " ++ Def.dname d ++ " has a proof type")
+     then fail ("no promotion: definition " ++ Def.dname d ++ " has a spec type")
      else ok tt) >>
     ok (closed {n} (Def.dtype d) , u0s)
 

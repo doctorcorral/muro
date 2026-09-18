@@ -1,6 +1,6 @@
 defmodule Muro do
   @moduledoc """
-  Muro — a proof never becomes a run.
+  Muro — a spec never becomes evidence. Evidence never becomes a run.
 
   An explicit affine dependent type theory: Elixir checks it, Agda specifies
   it, only run terms run.
