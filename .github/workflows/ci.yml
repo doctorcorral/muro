@@ -49,24 +49,24 @@ jobs:
       - uses: actions/checkout@v5
 
       # agda-setup-action@v1 exits immediately on these runners.
+      # Download the public asset without GITHUB_TOKEN: a repo-scoped token
+      # 403s against agda/agda, and gh then saves an HTML error as the tarball.
       - name: Install Agda 2.8.0
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          trap 'echo "::error::agda install failed at line $LINENO exit $?"' ERR
           asset="Agda-v2.8.0-linux.tar.xz"
-          if ! gh release download v2.8.0 --repo agda/agda --pattern "$asset"; then
-            curl -fL --retry 5 -o "$asset" \
-              "https://github.com/agda/agda/releases/download/v2.8.0/${asset}"
-          fi
+          curl -fL --retry 5 --retry-all-errors -o "$asset" \
+            "https://github.com/agda/agda/releases/download/v2.8.0/${asset}"
           ls -lh "$asset"
+          python3 -c 'import pathlib,sys; d=pathlib.Path(sys.argv[1]).read_bytes()[:6]; sys.exit(0 if d==b"\xfd7zXZ\x00" else 1)' "$asset"
           tar xf "$asset"
-          test -x agda
+          chmod +x agda
           mkdir -p "$HOME/.local/bin"
           mv agda "$HOME/.local/bin/agda"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          "$HOME/.local/bin/agda" --setup
           "$HOME/.local/bin/agda" --version
+          "$HOME/.local/bin/agda" --setup
 
       - name: Fetch Agda standard library 2.3
         run: git clone --depth 1 --branch v2.3 https://github.com/agda/agda-stdlib.git vendor/agda-stdlib
