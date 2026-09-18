@@ -77,19 +77,49 @@ defmodule Muro.Check do
 
   defp max_uses(us, vs), do: Enum.zip_with(us, vs, &max_use/2)
 
-  defp combine(:run, u, v), do: add_uses(u, v)
-  defp combine(:proof, u, _), do: {:ok, List.duplicate(:u0, length(u))}
+  defp combine(m, u, v) when m in [:run, :evidence], do: add_uses(u, v)
+  defp combine(:spec, u, _), do: {:ok, List.duplicate(:u0, length(u))}
 
-  defp combine_alt(:run, u, v), do: max_uses(u, v)
-  defp combine_alt(:proof, u, _), do: List.duplicate(:u0, length(u))
+  defp combine_alt(m, u, v) when m in [:run, :evidence], do: max_uses(u, v)
+  defp combine_alt(:spec, u, _), do: List.duplicate(:u0, length(u))
 
-  defp check_bound(:run, :erased, u) when u in [:u1, :uw],
-    do: {:error, "erased variable used in a run term"}
+  defp check_bound(m, :erased, u) when m in [:run, :evidence] and u in [:u1, :uw],
+    do: {:error, "erased variable used computationally"}
 
-  defp check_bound(:run, :affine, :uw),
+  defp check_bound(m, :affine, :uw) when m in [:run, :evidence],
     do: {:error, "affine variable used as reusable"}
 
   defp check_bound(_, _, _), do: :ok
+
+  # Using a definition of `from` while checking in `to`.
+  # spec ↛ evidence, evidence ↛ run, spec ↛ run.
+  defp allowed_def?(from, to) do
+    cond do
+      from == to -> true
+      from == :run -> true
+      from == :evidence and to == :spec -> true
+      true -> false
+    end
+  end
+
+  defp infer_var_tax(k, book, gamma, n, x, mode) do
+    case qty_of(gamma, x) do
+      :erased ->
+        {:error, "no promotion: erased variable in #{mode} mode"}
+
+      q ->
+        ty = typ_of(gamma, x)
+
+        cond do
+          mode == :run and not run_ty?(k, book, ty) ->
+            {:error, "no promotion: variable has a spec type"}
+
+          true ->
+            u = if q == :reuse, do: :uw, else: :u1
+            {:ok, {ty, one_hot(n, x, u)}}
+        end
+    end
+  end
 
   defp nctx(gamma), do: length(gamma)
 
@@ -108,8 +138,10 @@ defmodule Muro.Check do
   defp nth_qty({:pi, _, _, b}, i), do: nth_qty(b, i - 1)
   defp nth_qty(_, _), do: {:error, "recursive-call spine longer than Π telescope"}
 
-  # checkRec
-  defp check_rec(book, mode, rs, t) do
+  # Descent is required for run and evidence, not for spec.
+  defp check_rec(_book, :spec, _rs, _t), do: :ok
+
+  defp check_rec(book, mode, rs, t) when mode in [:run, :evidence] do
     case apps(t) do
       {{:def, name}, args} when rs.self == name ->
         descend(book, mode, rs, name, args, 0)
@@ -124,13 +156,9 @@ defmodule Muro.Check do
 
   defp descend(book, mode, rs, name, [a | as], j) do
     if smaller_var?(rs, a) do
-      if mode == :run do
-        with {:ok, d} <- lookup_def(book, name),
-             {:ok, q} <- nth_qty(d.type, j) do
-          if q == :erased, do: descend(book, mode, rs, name, as, j + 1), else: :ok
-        end
-      else
-        :ok
+      with {:ok, d} <- lookup_def(book, name),
+           {:ok, q} <- nth_qty(d.type, j) do
+        if q == :erased, do: descend(book, mode, rs, name, as, j + 1), else: :ok
       end
     else
       descend(book, mode, rs, name, as, j + 1)
@@ -302,24 +330,14 @@ defmodule Muro.Check do
     n = nctx(gamma)
 
     case {mode, t} do
-      # ⇒-var-run / ⇒-var-proof
+      # ⇒-var-run / ⇒-var-evid / ⇒-var-spec
       {:run, {:var, x}} ->
-        case qty_of(gamma, x) do
-          :erased ->
-            {:error, "no promotion: erased variable in run mode"}
+        infer_var_tax(k, book, gamma, n, x, :run)
 
-          q ->
-            ty = typ_of(gamma, x)
+      {:evidence, {:var, x}} ->
+        infer_var_tax(k, book, gamma, n, x, :evidence)
 
-            if run_ty?(k, book, ty) do
-              u = if q == :reuse, do: :uw, else: :u1
-              {:ok, {ty, one_hot(n, x, u)}}
-            else
-              {:error, "no promotion: variable has a proof type"}
-            end
-        end
-
-      {:proof, {:var, x}} ->
+      {:spec, {:var, x}} ->
         {:ok, {typ_of(gamma, x), u0s(n)}}
 
       # ⇒-ze
@@ -335,36 +353,36 @@ defmodule Muro.Check do
       {_, :one} ->
         {:ok, {:unit, u0s(n)}}
 
-      {:run, :nat} ->
+      {m, :nat} when m in [:run, :evidence] ->
         {:error, "no promotion: Nat is an erased term"}
 
-      {:run, :unit} ->
+      {m, :unit} when m in [:run, :evidence] ->
         {:error, "no promotion: Unit is an erased term"}
 
-      {:run, :empty} ->
+      {m, :empty} when m in [:run, :evidence] ->
         {:error, "no promotion: Empty is an erased term"}
 
-      {:run, :typ} ->
+      {m, :typ} when m in [:run, :evidence] ->
         {:error, "no promotion: Type is an erased term"}
 
-      # ⇒-nat / ⇒-unit / ⇒-empty
-      {:proof, :nat} ->
+      # ⇒-nat / ⇒-unit / ⇒-empty  (spec only)
+      {:spec, :nat} ->
         {:ok, {:typ, u0s(n)}}
 
-      {:proof, :unit} ->
+      {:spec, :unit} ->
         {:ok, {:typ, u0s(n)}}
 
-      {:proof, :empty} ->
+      {:spec, :empty} ->
         {:ok, {:typ, u0s(n)}}
 
-      {:proof, :typ} ->
+      {:spec, :typ} ->
         {:error, "Type has no type (no Type : Type)"}
 
       # ⇒-pi
-      {:run, {:pi, _, _, _}} ->
+      {m, {:pi, _, _, _}} when m in [:run, :evidence] ->
         {:error, "no promotion: Π is an erased term"}
 
-      {:proof, {:pi, q, a, b}} ->
+      {:spec, {:pi, q, a, b}} ->
         with :ok <- check_ty(k, book, rs, gamma, a),
              :ok <- check_ty(k, book, ext_rec(rs, false, false), ext(gamma, q, a), b),
              do: {:ok, {:typ, u0s(n)}}
@@ -387,19 +405,19 @@ defmodule Muro.Check do
       {m, {:app, f, a}} ->
         with {:ok, {ft, fu}} <- infer(k, book, rs, gamma, m, f),
              {:ok, {q, a_ty, b}} <- view_pi(k, book, ft),
-             {:ok, uses} <- infer_arg(k, book, rs, gamma, m, q, a_ty, fu, a),
+             {:ok, uses} <- infer_arg(k, book, rs, gamma, m, q, a_ty, fu, a, f),
              :ok <- check_rec(book, m, rs, {:app, f, a}) do
           {:ok, {Subst.inst(b, a), uses}}
         end
 
-      {:run, {:idt, _, _, _}} ->
+      {m, {:idt, _, _, _}} when m in [:run, :evidence] ->
         {:error, "no promotion: identity type is an erased term"}
 
       # ⇒-idt
-      {:proof, {:idt, a, x, y}} ->
+      {:spec, {:idt, a, x, y}} ->
         with :ok <- check_ty(k, book, rs, gamma, a),
-             {:ok, _} <- check(k, book, rs, gamma, :proof, x, a),
-             {:ok, _} <- check(k, book, rs, gamma, :proof, y, a),
+             {:ok, _} <- check(k, book, rs, gamma, :spec, x, a),
+             {:ok, _} <- check(k, book, rs, gamma, :spec, y, a),
              do: {:ok, {:typ, u0s(n)}}
 
       {_, :rfl} ->
@@ -407,7 +425,7 @@ defmodule Muro.Check do
 
       # ⇒-rwt
       {m, {:rwt, eq, p, t1}} ->
-        with {:ok, {et, _}} <- infer(k, book, rs, gamma, :proof, eq),
+        with {:ok, {et, _}} <- infer(k, book, rs, gamma, :evidence, eq),
              {:ok, {a, lft, r}} <- view_id(k, book, et),
              :ok <- check_ty(k, book, ext_rec(rs, false, false), ext(gamma, :affine, a), p),
              {:ok, tu} <- check(k, book, rs, gamma, m, t1, Subst.inst(p, r)) do
@@ -455,11 +473,11 @@ defmodule Muro.Check do
       {m, {:def, name}} ->
         with {:ok, d} <- lookup_def(book, name) do
           cond do
-            m == :run and d.mode == :proof ->
-              {:error, "no promotion: proof definition #{name} in run mode"}
+            not allowed_def?(d.mode, m) ->
+              {:error, "no promotion: #{d.mode} definition #{name} in #{m} mode"}
 
             m == :run and not run_ty?(k, book, d.type) ->
-              {:error, "no promotion: definition #{name} has a proof type"}
+              {:error, "no promotion: definition #{name} has a spec type"}
 
             true ->
               {:ok, {d.type, u0s(n)}}
@@ -477,19 +495,40 @@ defmodule Muro.Check do
     end
   end
 
-  defp infer_arg(k, book, rs, gamma, m, :erased, a, fu, arg) do
-    with {:ok, _} <- check(k, book, rs, gamma, :proof, arg, a) do
-      if m == :run, do: {:ok, fu}, else: {:ok, u0s(nctx(gamma))}
+  # Arguments of an evidence definition are checked in spec: they instantiate
+  # a theorem and are not computational uses.
+  defp arg_mode(book, m, f) do
+    if m == :evidence do
+      case elem(apps(f), 0) do
+        {:def, name} ->
+          case lookup_def(book, name) do
+            {:ok, %{mode: :evidence}} -> :spec
+            _ -> m
+          end
+
+        _ ->
+          m
+      end
+    else
+      m
     end
   end
 
-  defp infer_arg(k, book, rs, gamma, m, :affine, a, fu, arg) do
-    with {:ok, au} <- check(k, book, rs, gamma, m, arg, a), do: combine(m, fu, au)
+  defp infer_arg(k, book, rs, gamma, m, :erased, a, fu, arg, _f) do
+    with {:ok, _} <- check(k, book, rs, gamma, :spec, arg, a) do
+      if m in [:run, :evidence], do: {:ok, fu}, else: {:ok, u0s(nctx(gamma))}
+    end
   end
 
-  defp infer_arg(k, book, rs, gamma, m, :reuse, a, fu, arg) do
+  defp infer_arg(k, book, rs, gamma, m, :affine, a, fu, arg, f) do
+    with {:ok, au} <- check(k, book, rs, gamma, arg_mode(book, m, f), arg, a),
+         do: combine(m, fu, au)
+  end
+
+  defp infer_arg(k, book, rs, gamma, m, :reuse, a, fu, arg, f) do
     if is_data?(k, book, a) do
-      with {:ok, au} <- check(k, book, rs, gamma, m, arg, a), do: combine(m, fu, au)
+      with {:ok, au} <- check(k, book, rs, gamma, arg_mode(book, m, f), arg, a),
+           do: combine(m, fu, au)
     else
       {:error, "+ argument is not Data"}
     end
@@ -503,7 +542,7 @@ defmodule Muro.Check do
 
       # type-el
       a1 ->
-        with {:ok, {t, _}} <- infer(k, book, rs, gamma, :proof, a1),
+        with {:ok, {t, _}} <- infer(k, book, rs, gamma, :spec, a1),
              do: conv(k, book, t, :typ)
     end
   end
