@@ -106,11 +106,11 @@ defmodule Muro.Example do
 
   def book do
     [
-      %{name: "plus", mode: :live, type: plus_ty(), body: plus_tm()},
-      %{name: "IsEven", mode: :dead, type: is_even_ty(), body: is_even_tm()},
-      %{name: "half", mode: :live, type: half_ty(), body: half_tm()},
-      %{name: "plus_suc", mode: :dead, type: plus_suc_ty(), body: plus_suc_tm()},
-      %{name: "half_ok", mode: :dead, type: half_ok_ty(), body: half_ok_tm()}
+      %{name: "plus", mode: :run, export: true, type: plus_ty(), body: plus_tm()},
+      %{name: "IsEven", mode: :proof, type: is_even_ty(), body: is_even_tm()},
+      %{name: "half", mode: :run, export: true, type: half_ty(), body: half_tm()},
+      %{name: "plus_suc", mode: :proof, type: plus_suc_ty(), body: plus_suc_tm()},
+      %{name: "half_ok", mode: :proof, type: half_ok_ty(), body: half_ok_tm()}
     ]
   end
 end

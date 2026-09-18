@@ -1,7 +1,7 @@
 defmodule Muro.Check do
   @moduledoc """
   Bidirectional checker. Each clause is tagged with its Agda ⊢ constructor
-  from `Muro.Check` (`⇒-var-live`, `⇐-refl`, …). There is no promotion.
+  from `Muro.Check` (`⇒-var-run`, `⇐-refl`, …). There is no promotion.
   """
 
   alias Muro.{Ast, Subst}
@@ -77,16 +77,16 @@ defmodule Muro.Check do
 
   defp max_uses(us, vs), do: Enum.zip_with(us, vs, &max_use/2)
 
-  defp combine(:live, u, v), do: add_uses(u, v)
-  defp combine(:dead, u, _), do: {:ok, List.duplicate(:u0, length(u))}
+  defp combine(:run, u, v), do: add_uses(u, v)
+  defp combine(:proof, u, _), do: {:ok, List.duplicate(:u0, length(u))}
 
-  defp combine_alt(:live, u, v), do: max_uses(u, v)
-  defp combine_alt(:dead, u, _), do: List.duplicate(:u0, length(u))
+  defp combine_alt(:run, u, v), do: max_uses(u, v)
+  defp combine_alt(:proof, u, _), do: List.duplicate(:u0, length(u))
 
-  defp check_bound(:live, :erased, u) when u in [:u1, :uw],
-    do: {:error, "erased variable used live"}
+  defp check_bound(:run, :erased, u) when u in [:u1, :uw],
+    do: {:error, "erased variable used in a run term"}
 
-  defp check_bound(:live, :affine, :uw),
+  defp check_bound(:run, :affine, :uw),
     do: {:error, "affine variable used as reusable"}
 
   defp check_bound(_, _, _), do: :ok
@@ -124,7 +124,7 @@ defmodule Muro.Check do
 
   defp descend(book, mode, rs, name, [a | as], j) do
     if smaller_var?(rs, a) do
-      if mode == :live do
+      if mode == :run do
         with {:ok, d} <- lookup_def(book, name),
              {:ok, q} <- nth_qty(d.type, j) do
           if q == :erased, do: descend(book, mode, rs, name, as, j + 1), else: :ok
@@ -184,12 +184,12 @@ defmodule Muro.Check do
     end
   end
 
-  defp live_ty?(k, book, t) do
+  defp run_ty?(k, book, t) do
     case whnf(k, book, t) do
       :nat -> true
       :unit -> true
       :empty -> true
-      {:pi, _, _, b} -> live_ty?(k, book, b)
+      {:pi, _, _, b} -> run_ty?(k, book, b)
       _ -> false
     end
   end
@@ -302,24 +302,24 @@ defmodule Muro.Check do
     n = nctx(gamma)
 
     case {mode, t} do
-      # ⇒-var-live / ⇒-var-dead
-      {:live, {:var, x}} ->
+      # ⇒-var-run / ⇒-var-proof
+      {:run, {:var, x}} ->
         case qty_of(gamma, x) do
           :erased ->
-            {:error, "no promotion: erased variable in live mode"}
+            {:error, "no promotion: erased variable in run mode"}
 
           q ->
             ty = typ_of(gamma, x)
 
-            if live_ty?(k, book, ty) do
+            if run_ty?(k, book, ty) do
               u = if q == :reuse, do: :uw, else: :u1
               {:ok, {ty, one_hot(n, x, u)}}
             else
-              {:error, "no promotion: variable has dead type"}
+              {:error, "no promotion: variable has a proof type"}
             end
         end
 
-      {:dead, {:var, x}} ->
+      {:proof, {:var, x}} ->
         {:ok, {typ_of(gamma, x), u0s(n)}}
 
       # ⇒-ze
@@ -335,36 +335,36 @@ defmodule Muro.Check do
       {_, :one} ->
         {:ok, {:unit, u0s(n)}}
 
-      {:live, :nat} ->
-        {:error, "no promotion: Nat is dead"}
+      {:run, :nat} ->
+        {:error, "no promotion: Nat is an erased term"}
 
-      {:live, :unit} ->
-        {:error, "no promotion: Unit is dead"}
+      {:run, :unit} ->
+        {:error, "no promotion: Unit is an erased term"}
 
-      {:live, :empty} ->
-        {:error, "no promotion: Empty is dead"}
+      {:run, :empty} ->
+        {:error, "no promotion: Empty is an erased term"}
 
-      {:live, :typ} ->
-        {:error, "no promotion: Type is dead"}
+      {:run, :typ} ->
+        {:error, "no promotion: Type is an erased term"}
 
       # ⇒-nat / ⇒-unit / ⇒-empty
-      {:dead, :nat} ->
+      {:proof, :nat} ->
         {:ok, {:typ, u0s(n)}}
 
-      {:dead, :unit} ->
+      {:proof, :unit} ->
         {:ok, {:typ, u0s(n)}}
 
-      {:dead, :empty} ->
+      {:proof, :empty} ->
         {:ok, {:typ, u0s(n)}}
 
-      {:dead, :typ} ->
+      {:proof, :typ} ->
         {:error, "Type has no type (no Type : Type)"}
 
       # ⇒-pi
-      {:live, {:pi, _, _, _}} ->
-        {:error, "no promotion: Π is dead"}
+      {:run, {:pi, _, _, _}} ->
+        {:error, "no promotion: Π is an erased term"}
 
-      {:dead, {:pi, q, a, b}} ->
+      {:proof, {:pi, q, a, b}} ->
         with :ok <- check_ty(k, book, rs, gamma, a),
              :ok <- check_ty(k, book, ext_rec(rs, false, false), ext(gamma, q, a), b),
              do: {:ok, {:typ, u0s(n)}}
@@ -392,14 +392,14 @@ defmodule Muro.Check do
           {:ok, {Subst.inst(b, a), uses}}
         end
 
-      {:live, {:idt, _, _, _}} ->
-        {:error, "no promotion: identity type is dead"}
+      {:run, {:idt, _, _, _}} ->
+        {:error, "no promotion: identity type is an erased term"}
 
       # ⇒-idt
-      {:dead, {:idt, a, x, y}} ->
+      {:proof, {:idt, a, x, y}} ->
         with :ok <- check_ty(k, book, rs, gamma, a),
-             {:ok, _} <- check(k, book, rs, gamma, :dead, x, a),
-             {:ok, _} <- check(k, book, rs, gamma, :dead, y, a),
+             {:ok, _} <- check(k, book, rs, gamma, :proof, x, a),
+             {:ok, _} <- check(k, book, rs, gamma, :proof, y, a),
              do: {:ok, {:typ, u0s(n)}}
 
       {_, :rfl} ->
@@ -407,7 +407,7 @@ defmodule Muro.Check do
 
       # ⇒-rwt
       {m, {:rwt, eq, p, t1}} ->
-        with {:ok, {et, _}} <- infer(k, book, rs, gamma, :dead, eq),
+        with {:ok, {et, _}} <- infer(k, book, rs, gamma, :proof, eq),
              {:ok, {a, lft, r}} <- view_id(k, book, et),
              :ok <- check_ty(k, book, ext_rec(rs, false, false), ext(gamma, :affine, a), p),
              {:ok, tu} <- check(k, book, rs, gamma, m, t1, Subst.inst(p, r)) do
@@ -447,11 +447,11 @@ defmodule Muro.Check do
       {m, {:def, name}} ->
         with {:ok, d} <- lookup_def(book, name) do
           cond do
-            m == :live and d.mode == :dead ->
-              {:error, "no promotion: dead definition #{name} in live mode"}
+            m == :run and d.mode == :proof ->
+              {:error, "no promotion: proof definition #{name} in run mode"}
 
-            m == :live and not live_ty?(k, book, d.type) ->
-              {:error, "no promotion: definition #{name} has a dead type"}
+            m == :run and not run_ty?(k, book, d.type) ->
+              {:error, "no promotion: definition #{name} has a proof type"}
 
             true ->
               {:ok, {d.type, u0s(n)}}
@@ -470,8 +470,8 @@ defmodule Muro.Check do
   end
 
   defp infer_arg(k, book, rs, gamma, m, :erased, a, fu, arg) do
-    with {:ok, _} <- check(k, book, rs, gamma, :dead, arg, a) do
-      if m == :live, do: {:ok, fu}, else: {:ok, u0s(nctx(gamma))}
+    with {:ok, _} <- check(k, book, rs, gamma, :proof, arg, a) do
+      if m == :run, do: {:ok, fu}, else: {:ok, u0s(nctx(gamma))}
     end
   end
 
@@ -495,7 +495,7 @@ defmodule Muro.Check do
 
       # type-el
       a1 ->
-        with {:ok, {t, _}} <- infer(k, book, rs, gamma, :dead, a1),
+        with {:ok, {t, _}} <- infer(k, book, rs, gamma, :proof, a1),
              do: conv(k, book, t, :typ)
     end
   end
