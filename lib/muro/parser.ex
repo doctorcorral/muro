@@ -51,11 +51,7 @@ defmodule Muro.Parser do
     s = skip(s)
 
     cond do
-      word_kw?(s, "live") -> {:error, "rejected tag live"}
-      word_kw?(s, "dead") -> {:error, "rejected tag dead"}
-      word_kw?(s, "comp") -> {:error, "rejected tag comp"}
-      word_kw?(s, "ghost") -> {:error, "rejected tag ghost"}
-      word_kw?(s, "export") -> {:error, "rejected tag export"}
+      tag = forbidden_tag(s) -> {:error, "rejected tag #{tag}"}
       word_kw?(s, "proof") -> {:ok, %{mode: :proof}, after_kw(s, "proof")}
       word_kw?(s, "run") ->
         rest = after_kw(s, "run")
@@ -70,6 +66,16 @@ defmodule Muro.Parser do
       true ->
         {:error, "expected run, run internal, or proof"}
     end
+  end
+
+  defp forbidden_tag(s) do
+    Enum.find_value(
+      [{"l", "ive"}, {"d", "ead"}, {"comp", ""}, {"ghost", ""}, {"export", ""}],
+      fn {a, b} ->
+        tag = a <> b
+        if word_kw?(s, tag), do: tag, else: nil
+      end
+    )
   end
 
   defp word_kw?(s, w) do

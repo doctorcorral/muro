@@ -1,6 +1,6 @@
 ------------------------------------------------------------------------
 -- Muro — an explicit affine dependent type theory:
--- Elixir checks it, Agda specifies it, only live terms run.
+-- Elixir checks it, Agda specifies it, only run terms run.
 ------------------------------------------------------------------------
 
 module Muro where

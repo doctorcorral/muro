@@ -7,7 +7,7 @@ defmodule Mix.Tasks.Muro.Check do
     Mix.Task.run("app.start")
 
     case Muro.Check.check_sig(Muro.Example.book()) do
-      :ok -> Mix.shell().info("All terms check. nothing dead runs.")
+      :ok -> Mix.shell().info("All terms check. A proof never becomes a run.")
       {:error, e} -> Mix.raise(e)
     end
   end
@@ -16,7 +16,7 @@ defmodule Mix.Tasks.Muro.Check do
     Mix.Task.run("app.start")
 
     case Muro.check_file(path) do
-      :ok -> Mix.shell().info("All terms check. nothing dead runs.")
+      :ok -> Mix.shell().info("All terms check. A proof never becomes a run.")
       {:error, e} -> Mix.raise(e)
     end
   end

@@ -12,7 +12,7 @@ open import Function.Base using (case_of_)
 
 ------------------------------------------------------------------------
 -- Quantities q
---   affine  — live affine (default): at most one live use
+--   affine  — default: at most one run use
 --   reuse   — +, reuse only if the type is Data
 --   erased  — -, compile-time / proof / type argument
 ------------------------------------------------------------------------
@@ -34,25 +34,25 @@ showQty reuse  = "+"
 showQty erased = "-"
 
 ------------------------------------------------------------------------
--- Modes m ∈ {live, dead}
--- Dead terms never become live (no promotion).
+-- Modes m ∈ {run, proof}
+-- A proof never becomes a run (no promotion).
 ------------------------------------------------------------------------
 
 data Mode : Set where
-  live : Mode
-  dead : Mode
+  run   : Mode
+  proof : Mode
 
 eqMode : Mode → Mode → Bool
-eqMode live live = true
-eqMode dead dead = true
-eqMode _    _    = false
+eqMode run   run   = true
+eqMode proof proof = true
+eqMode _     _     = false
 
 showMode : Mode → String
-showMode live = "live"
-showMode dead = "dead"
+showMode run   = "run"
+showMode proof = "proof"
 
 ------------------------------------------------------------------------
--- Live usage of one binder.
+-- Run usage of one binder.
 ------------------------------------------------------------------------
 
 data Use : Set where

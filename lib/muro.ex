@@ -1,9 +1,9 @@
 defmodule Muro do
   @moduledoc """
-  Muro — nothing dead runs.
+  Muro — a proof never becomes a run.
 
   An explicit affine dependent type theory: Elixir checks it, Agda specifies
-  it, only live terms run.
+  it, only run terms run.
   """
 
   alias Muro.{Check, Emit, Parser}

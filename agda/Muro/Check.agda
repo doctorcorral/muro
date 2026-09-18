@@ -4,7 +4,8 @@
 -- Spec: the inductive Γ ⊢[ m ] e ⇒ A / Γ ⊢[ m ] e ⇐ A.
 -- Decide: fuel-based Result, each clause commented with its ⊢ constructor.
 --
--- There is no promotion rule  dead ⇒ live.
+-- There is no promotion rule  proof ⇒ run.
+-- Emit visibility (def vs defp) is an Elixir-only flag on Run.
 ------------------------------------------------------------------------
 
 module Muro.Check where
@@ -32,6 +33,8 @@ open import Muro.Subst
 -- Signature of closed definitions.
 ------------------------------------------------------------------------
 
+-- dmode is run or proof. Emit visibility (def vs defp) is an Elixir-only
+-- flag on run; it is not part of this spec.
 record Def : Set where
   constructor mkDef
   field
@@ -74,7 +77,7 @@ typOf : ∀ {n} → Ctx n → Fin n → Tm n
 typOf Γ x = Bind.btyp (lookup Γ x)
 
 ------------------------------------------------------------------------
--- Recursion state: live (and dead) structural descent.
+-- Recursion state: run (and proof) structural descent.
 ------------------------------------------------------------------------
 
 record RecSt (n : ℕ) : Set where
@@ -135,17 +138,17 @@ maxUses []       []       = []
 maxUses (x ∷ xs) (y ∷ ys) = maxUse x y ∷ maxUses xs ys
 
 combine : ∀ {n} → Mode → UseVec n → UseVec n → Result (UseVec n)
-combine live u v = addUses u v
-combine dead _ _ = ok u0s
+combine run u v = addUses u v
+combine proof _ _ = ok u0s
 
 combineAlt : ∀ {n} → Mode → UseVec n → UseVec n → UseVec n
-combineAlt live u v = maxUses u v
-combineAlt dead _ _ = u0s
+combineAlt run u v = maxUses u v
+combineAlt proof _ _ = u0s
 
 checkBound : Mode → Qty → Use → Result ⊤
-checkBound live erased U1 = fail "erased variable used live"
-checkBound live erased Uω = fail "erased variable used live"
-checkBound live affine Uω = fail "affine variable used as reusable"
+checkBound run erased U1 = fail "erased variable used in a run term"
+checkBound run erased Uω = fail "erased variable used in a run term"
+checkBound run affine Uω = fail "affine variable used as reusable"
 checkBound _    _      _  = ok tt
 
 ------------------------------------------------------------------------
@@ -200,15 +203,15 @@ isData k σ t with whnf k σ t
 ... | empty = true
 ... | _     = false
 
-isLiveType : ∀ {n} → ℕ → Sig → Tm n → Bool
-isLiveType k σ t = liveTy (whnf k σ t)
+isRunType : ∀ {n} → ℕ → Sig → Tm n → Bool
+isRunType k σ t = runTy (whnf k σ t)
   where
-    liveTy : ∀ {n} → Tm n → Bool
-    liveTy nat        = true
-    liveTy unit       = true
-    liveTy empty      = true
-    liveTy (pi _ _ B) = liveTy B
-    liveTy _          = false
+    runTy : ∀ {n} → Tm n → Bool
+    runTy nat        = true
+    runTy unit       = true
+    runTy empty      = true
+    runTy (pi _ _ B) = runTy B
+    runTy _          = false
 
 ------------------------------------------------------------------------
 -- Conversion on weak-head normal forms.
@@ -329,28 +332,28 @@ data _,_⊢_wf    (σ : Sig) {n} (Γ : Ctx n) : Tm n → Set
 
 data _,_⊢_wf σ Γ where
   type-Type : σ , Γ ⊢ typ wf                          -- Type is a sort, not Type : Type
-  type-el   : ∀ {A} → σ , Γ ⊢[ dead ] A ⇒ typ → σ , Γ ⊢ A wf
+  type-el   : ∀ {A} → σ , Γ ⊢[ proof ] A ⇒ typ → σ , Γ ⊢ A wf
 
 data _,_⊢[_]_⇒_ σ Γ where
-  ⇒-var-live : ∀ {x}
+  ⇒-var-run : ∀ {x}
     → (qtyOf Γ x ≡ erased → ⊥)
-    → σ , Γ ⊢[ live ] var x ⇒ typOf Γ x
+    → σ , Γ ⊢[ run ] var x ⇒ typOf Γ x
 
-  ⇒-var-dead : ∀ {x}
-    → σ , Γ ⊢[ dead ] var x ⇒ typOf Γ x
+  ⇒-var-proof : ∀ {x}
+    → σ , Γ ⊢[ proof ] var x ⇒ typOf Γ x
 
   ⇒-ze : ∀ {m} → σ , Γ ⊢[ m ] ze ⇒ nat
   ⇒-su : ∀ {m t} → σ , Γ ⊢[ m ] t ⇐ nat → σ , Γ ⊢[ m ] su t ⇒ nat
   ⇒-tt : ∀ {m} → σ , Γ ⊢[ m ] one ⇒ unit
 
-  ⇒-nat   : σ , Γ ⊢[ dead ] nat   ⇒ typ
-  ⇒-unit  : σ , Γ ⊢[ dead ] unit  ⇒ typ
-  ⇒-empty : σ , Γ ⊢[ dead ] empty ⇒ typ
+  ⇒-nat   : σ , Γ ⊢[ proof ] nat   ⇒ typ
+  ⇒-unit  : σ , Γ ⊢[ proof ] unit  ⇒ typ
+  ⇒-empty : σ , Γ ⊢[ proof ] empty ⇒ typ
 
   ⇒-pi : ∀ {q A B}
     → σ , Γ ⊢ A wf
     → σ , ext Γ q A ⊢ B wf
-    → σ , Γ ⊢[ dead ] pi q A B ⇒ typ
+    → σ , Γ ⊢[ proof ] pi q A B ⇒ typ
 
   ⇒-lam : ∀ {m q A t B}
     → σ , Γ ⊢ A wf
@@ -364,7 +367,7 @@ data _,_⊢[_]_⇒_ σ Γ where
 
   ⇒-app-era : ∀ {m A B f a}
     → σ , Γ ⊢[ m ] f ⇒ pi erased A B
-    → σ , Γ ⊢[ dead ] a ⇐ A
+    → σ , Γ ⊢[ proof ] a ⇐ A
     → σ , Γ ⊢[ m ] app f a ⇒ inst B a
 
   ⇒-app-reuse : ∀ {m A B f a}
@@ -374,12 +377,12 @@ data _,_⊢[_]_⇒_ σ Γ where
 
   ⇒-idt : ∀ {A a b}
     → σ , Γ ⊢ A wf
-    → σ , Γ ⊢[ dead ] a ⇐ A
-    → σ , Γ ⊢[ dead ] b ⇐ A
-    → σ , Γ ⊢[ dead ] idt A a b ⇒ typ
+    → σ , Γ ⊢[ proof ] a ⇐ A
+    → σ , Γ ⊢[ proof ] b ⇐ A
+    → σ , Γ ⊢[ proof ] idt A a b ⇒ typ
 
   ⇒-rwt : ∀ {m A l r eq P t}
-    → σ , Γ ⊢[ dead ] eq ⇒ idt A l r
+    → σ , Γ ⊢[ proof ] eq ⇒ idt A l r
     → σ , ext Γ affine A ⊢ P wf
     → σ , Γ ⊢[ m ] t ⇐ inst P r
     → σ , Γ ⊢[ m ] rwt eq P t ⇒ inst P l
@@ -427,7 +430,7 @@ data _,_⊢[_]_⇐_ σ Γ where
     → a ≈[ σ ] b
     → σ , Γ ⊢[ m ] rfl ⇐ idt A a b
 
--- Intentionally absent:  Γ ⊢[ dead ] e : A  implies  Γ ⊢[ live ] e : A.
+-- Intentionally absent:  Γ ⊢[ proof ] e : A  implies  Γ ⊢[ run ] e : A.
 
 ------------------------------------------------------------------------
 -- Decision procedure.
@@ -457,7 +460,7 @@ checkRec {n} k σ m rs t = go (apps t)
     descend _ _ [] = fail "recursive call does not descend on a smaller argument"
     descend i j (a ∷ as) =
       if isSmallerVar rs a
-      then (if eqMode m live
+      then (if eqMode m run
             then (lookupDef σ i >>= λ d →
                   nthQty (Def.dtype d) j >>= λ q →
                   if eqQty q erased
@@ -486,21 +489,21 @@ mutual
   checkTy : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Tm n → Result ⊤
   checkTy k σ rs Γ A with whnf k σ A
   ... | typ = ok tt                                          -- type-Type
-  ... | A′  = infer′ k σ rs Γ dead A′ >>= λ (T , _) → conv k σ T typ   -- type-el
+  ... | A′  = infer′ k σ rs Γ proof A′ >>= λ (T , _) → conv k σ T typ   -- type-el
 
   {-# TERMINATING #-}
   infer′ : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Result (Tm n × UseVec n)
   {-# TERMINATING #-}
   check′ : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Result (UseVec n)
 
-  -- ⇒-var-live / ⇒-var-dead
-  infer′ k σ rs Γ live (var x) with qtyOf Γ x
-  ... | erased = fail "no promotion: erased variable in live mode"
+  -- ⇒-var-run / ⇒-var-proof
+  infer′ k σ rs Γ run (var x) with qtyOf Γ x
+  ... | erased = fail "no promotion: erased variable in run mode"
   ... | q      =
-    if isLiveType k σ (typOf Γ x)
+    if isRunType k σ (typOf Γ x)
     then ok (typOf Γ x , oneHot x (if eqQty q reuse then Uω else U1))
-    else fail ("no promotion: variable has dead type " ++ showTm (typOf Γ x))
-  infer′ k σ rs Γ dead (var x) = ok (typOf Γ x , u0s)
+    else fail ("no promotion: variable has a proof type " ++ showTm (typOf Γ x))
+  infer′ k σ rs Γ proof (var x) = ok (typOf Γ x , u0s)
 
   -- ⇒-ze
   infer′ k σ rs Γ m ze = ok (nat , u0s)
@@ -512,19 +515,19 @@ mutual
   -- ⇒-tt
   infer′ k σ rs Γ m one = ok (unit , u0s)
 
-  -- ⇒-nat / ⇒-unit / ⇒-empty  (dead only: these are types)
-  infer′ k σ rs Γ live nat   = fail "no promotion: Nat is dead"
-  infer′ k σ rs Γ live unit  = fail "no promotion: Unit is dead"
-  infer′ k σ rs Γ live empty = fail "no promotion: Empty is dead"
-  infer′ k σ rs Γ live typ   = fail "no promotion: Type is dead"
-  infer′ k σ rs Γ dead nat   = ok (typ , u0s)
-  infer′ k σ rs Γ dead unit  = ok (typ , u0s)
-  infer′ k σ rs Γ dead empty = ok (typ , u0s)
-  infer′ k σ rs Γ dead typ   = fail "Type has no type (no Type : Type)"
+  -- ⇒-nat / ⇒-unit / ⇒-empty  (proof only: these are types)
+  infer′ k σ rs Γ run nat   = fail "no promotion: Nat is an erased term"
+  infer′ k σ rs Γ run unit  = fail "no promotion: Unit is an erased term"
+  infer′ k σ rs Γ run empty = fail "no promotion: Empty is an erased term"
+  infer′ k σ rs Γ run typ   = fail "no promotion: Type is an erased term"
+  infer′ k σ rs Γ proof nat   = ok (typ , u0s)
+  infer′ k σ rs Γ proof unit  = ok (typ , u0s)
+  infer′ k σ rs Γ proof empty = ok (typ , u0s)
+  infer′ k σ rs Γ proof typ   = fail "Type has no type (no Type : Type)"
 
   -- ⇒-pi
-  infer′ k σ rs Γ live (pi _ _ _) = fail "no promotion: Π is dead"
-  infer′ k σ rs Γ dead (pi q A B) =
+  infer′ k σ rs Γ run (pi _ _ _) = fail "no promotion: Π is an erased term"
+  infer′ k σ rs Γ proof (pi q A B) =
     checkTy k σ rs Γ A >>
     checkTy k σ (extRec rs false false) (ext Γ q A) B >>
     ok (typ , u0s)
@@ -552,8 +555,8 @@ mutual
     where
       inferArg : Qty → Tm n → UseVec n → Result (UseVec n)
       inferArg erased A fu =
-        check k σ rs Γ dead a A >>= λ _ →
-        (if eqMode m live then ok fu else ok u0s)
+        check k σ rs Γ proof a A >>= λ _ →
+        (if eqMode m run then ok fu else ok u0s)
       inferArg affine A fu =
         check k σ rs Γ m a A >>= λ au → combine m fu au
       inferArg reuse A fu =
@@ -561,11 +564,11 @@ mutual
         check k σ rs Γ m a A >>= λ au → combine m fu au
 
   -- ⇒-idt
-  infer′ k σ rs Γ live (idt _ _ _) = fail "no promotion: identity type is dead"
-  infer′ k σ rs Γ dead (idt A a b) =
+  infer′ k σ rs Γ run (idt _ _ _) = fail "no promotion: identity type is an erased term"
+  infer′ k σ rs Γ proof (idt A a b) =
     checkTy k σ rs Γ A >>
-    check k σ rs Γ dead a A >>
-    check k σ rs Γ dead b A >>
+    check k σ rs Γ proof a A >>
+    check k σ rs Γ proof b A >>
     ok (typ , u0s)
 
   -- rfl must be checked (⇐-refl)
@@ -573,7 +576,7 @@ mutual
 
   -- ⇒-rwt
   infer′ k σ rs Γ m (rwt eq P t) =
-    infer k σ rs Γ dead eq >>= λ (et , _) →
+    infer k σ rs Γ proof eq >>= λ (et , _) →
     viewId k σ et >>= λ (A , l , r) →
     checkTy k σ (extRec rs false false) (ext Γ affine A) P >>
     check k σ rs Γ m t (inst P r) >>= λ tu →
@@ -612,11 +615,11 @@ mutual
   -- ⇒-def
   infer′ {n} k σ rs Γ m (def i) =
     lookupDef σ i >>= λ d →
-    (if eqMode m live ∧ eqMode (Def.dmode d) dead
-     then fail ("no promotion: dead definition " ++ Def.dname d ++ " in live mode")
+    (if eqMode m run ∧ eqMode (Def.dmode d) proof
+     then fail ("no promotion: proof definition " ++ Def.dname d ++ " in run mode")
      else ok tt) >>
-    (if eqMode m live ∧ not (isLiveType k σ (closed {n} (Def.dtype d)))
-     then fail ("no promotion: definition " ++ Def.dname d ++ " has a dead type")
+    (if eqMode m run ∧ not (isRunType k σ (closed {n} (Def.dtype d)))
+     then fail ("no promotion: definition " ++ Def.dname d ++ " has a proof type")
      else ok tt) >>
     ok (closed {n} (Def.dtype d) , u0s)
 

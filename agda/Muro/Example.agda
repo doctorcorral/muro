@@ -170,11 +170,11 @@ halfOkTm-ok  = is-ok _
 
 book : Sig
 book =
-  mkDef "plus"     live (out plusTy-ok)    (out plusTm-ok)    ∷
-  mkDef "IsEven"   dead (out isEvenTy-ok)  (out isEvenTm-ok)  ∷
-  mkDef "half"     live (out halfTy-ok)    (out halfTm-ok)    ∷
-  mkDef "plus_suc" dead (out plusSucTy-ok) (out plusSucTm-ok) ∷
-  mkDef "half_ok"  dead (out halfOkTy-ok)  (out halfOkTm-ok)  ∷
+  mkDef "plus"     run   (out plusTy-ok)    (out plusTm-ok)    ∷
+  mkDef "IsEven"   proof (out isEvenTy-ok)  (out isEvenTm-ok)  ∷
+  mkDef "half"     run   (out halfTy-ok)    (out halfTm-ok)    ∷
+  mkDef "plus_suc" proof (out plusSucTy-ok) (out plusSucTm-ok) ∷
+  mkDef "half_ok"  proof (out halfOkTy-ok)  (out halfOkTm-ok)  ∷
   []
 
 -- Closed computation: plus (half 2) (half 2) ≡ 2.
