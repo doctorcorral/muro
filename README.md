@@ -327,7 +327,7 @@ Dec P  =  P ⊎ (P → Empty)
 
 `Dec` is a spec: a decision for a particular `P`, not LEM. There is no inhabitant of `Π (P : Type) → Dec P`. Closures `P → Empty` are not Data; no `+` on the refutation. `evenDec` is evidence and is not emitted.
 
-See `examples/even_dec.muro`. Glyph `⊎` is source syntax only; do not add logo assets.
+See `examples/even_dec.muro`.
 
 ---
 
