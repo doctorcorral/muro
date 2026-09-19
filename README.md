@@ -45,17 +45,25 @@ A definition is in the book the moment `Parser.parse/1` returns it. The checker 
 This is the grammar `lib/muro/parser.ex` actually implements. ASCII aliases are in parentheses.
 
 ```
-book       ::= def*
+book       ::= (nu | def)*
+nu         ::= ("ν" | "nu") "Stream" binder ":" term "where" "uncons" ":" term
 def        ::= "def" ident ":" tag term ":=" term
 tag        ::= "run" "internal"? | "spec" | "evidence"
 
 term       ::= atom atom*                  -- juxtaposition is application
+             | term ("×" | "*") term
+             | term ("→" | "->") term      -- non-dependent, = Π (_ : A) → B
 atom       ::= "Type" | "Nat" | "Unit" | "Empty" | "refl" | "tt" | "0"
              | suc | pi | lam | match | matchEmpty | rewrite | idt
-             | "(" term ")"
+             | stream | unfold | uncons | "fst" atom | "snd" atom
+             | "head" atom | "tail" atom
+             | "(" term ")" | "(" term "," term ")"
              | ident
 
-suc        ::= "suc" "(" term ")"          -- constructor; parens required
+suc        ::= "suc" "(" term ")" | "suc" atom
+stream     ::= "Stream" atom
+unfold     ::= "unfold" atom atom         -- seed, λ s → (head, next_seed)
+uncons     ::= "uncons" atom
 qty        ::= "+" | "-" | ε               -- ε = affine (default)
 binder     ::= "(" qty ident ":" term ")"
 pi         ::= ("Π" | "Pi") binder ("→" | "->") term
@@ -69,7 +77,7 @@ rewrite    ::= "rewrite" term "motive" mot "in" term
 mot        ::= "(" ("λ" | "lam")? ident ("→" | "->") term ")"
 idt        ::= "{" term ("≡" | "==") term ":" term "}"
 
-ident      ::= [A-Za-z_][A-Za-z0-9_]*
+ident      ::= [A-Za-z_][A-Za-z0-9_-]*
 comment    ::= "--" through end of line
 space      ::= [ \t\n\r] | comment
 ```
@@ -199,6 +207,8 @@ Three, on purpose. Do not add a fourth, and do not use raw HOAS (`Tm → Tm`) as
 {:rwt, eq, x, p, t}
 {:def, name}
 {:ann, e, a}                  -- kernel only; no parser production
+{:prod, a, b} | {:pair, a, b} | {:fst, t} | {:snd, t}
+{:stream, a} | {:unf, seed, f} | {:ucons, s}
 ```
 
 `qty` is `:affine | :reuse | :erased`. A book entry:
@@ -282,6 +292,21 @@ def half_ok  : evidence Π (n : Nat) → Π (e : IsEven n) →
 
 Evidence is an ordinary term: `match` + `refl` + `rewrite` with motives. `half` of eight is four. `examples/internal_ok.muro` is a `run internal` helper (`step` → `defp`) called from a `run` def (`inc` → `def`).
 
+### ν
+
+μ descends (`match` on Nat). ν unfolds (`unfold` / `uncons` on `Stream`). Only a run Stream becomes an Elixir `Stream`. Spec and evidence stay erased. `+` is still only for Data (`Nat`, `Unit`, `Empty`), not Stream. A non-productive run unfold is rejected.
+
+See `examples/zeros.muro` (kernel: `head zeros ≡ 0`) and `examples/nats.muro` (IEx):
+
+```
+{:ok, src} = Muro.emit_file("examples/nats.muro", Muro.Nats)
+Code.eval_string(src)
+Muro.Nats.natsFrom(0) |> Stream.take(3) |> Enum.to_list()
+# [0, {:suc, 0}, {:suc, {:suc, 0}}]
+```
+
+A coinductive `Safe` predicate on traces is next; it is not in this pass.
+
 ---
 
 ## Layout
@@ -293,6 +318,7 @@ agda/Muro/Syntax.agda   Tm n, PTm V
 agda/Muro/Subst.agda    wk, sub, toPHOAS, unembed
 agda/Muro/Check.agda    ⊢ and the decision procedure
 agda/Muro/Example.agda  plus / IsEven / half / plus_suc / half_ok
+agda/Muro/ExampleStream.agda  zeros / head-zeros
 lib/muro/parser.ex      .muro → named FOAS
 lib/muro/ast.ex         named FOAS, to_db
 lib/muro/subst.ex       de Bruijn subst
@@ -302,6 +328,8 @@ lib/muro/example.ex     same book as Agda
 lib/mix/tasks/muro.check.ex
 examples/half_ok.muro
 examples/internal_ok.muro
+examples/zeros.muro
+examples/nats.muro
 test/muro_check_test.exs
 ```
 
@@ -343,4 +371,4 @@ mix muro.check examples/half_ok.muro
 
 ## Not in v1
 
-Type : Type, cubical, tactics, implicits, unification, metavariables, extra quantities, ν / codata, typing raw Elixir, emitting spec or evidence.
+Type : Type, cubical, tactics, implicits, unification, metavariables, extra quantities, user-defined ν-predicates, `+` on Stream, typing raw Elixir, emitting spec or evidence.

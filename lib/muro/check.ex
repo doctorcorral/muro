@@ -28,8 +28,8 @@ defmodule Muro.Check do
 
   # -- rec state -------------------------------------------------------------
 
-  defp empty_rec, do: %{self: nil, smaller: [], rec_ok: [], next_ok: false}
-  defp def_rec(name), do: %{self: name, smaller: [], rec_ok: [], next_ok: true}
+  defp empty_rec, do: %{self: nil, smaller: [], rec_ok: [], next_ok: false, guarded: false}
+  defp def_rec(name), do: %{self: name, smaller: [], rec_ok: [], next_ok: true, guarded: false}
 
   defp ext_rec(rs, new_small, new_ok) do
     %{
@@ -144,7 +144,11 @@ defmodule Muro.Check do
   defp check_rec(book, mode, rs, t) when mode in [:run, :evidence] do
     case apps(t) do
       {{:def, name}, args} when rs.self == name ->
-        descend(book, mode, rs, name, args, 0)
+        if rs.guarded do
+          :ok
+        else
+          descend(book, mode, rs, name, args, 0)
+        end
 
       _ ->
         :ok
@@ -201,6 +205,34 @@ defmodule Muro.Check do
   end
 
   defp whnf(k, book, {:ann, e, _}), do: whnf(k - 1, book, e)
+
+  defp whnf(k, book, {:fst, e}) do
+    case whnf(k - 1, book, e) do
+      {:pair, a, _} -> whnf(k - 1, book, a)
+      e1 -> {:fst, e1}
+    end
+  end
+
+  defp whnf(k, book, {:snd, e}) do
+    case whnf(k - 1, book, e) do
+      {:pair, _, b} -> whnf(k - 1, book, b)
+      e1 -> {:snd, e1}
+    end
+  end
+
+  defp whnf(k, book, {:ucons, e}) do
+    case whnf(k - 1, book, e) do
+      {:unf, s, f} ->
+        case whnf(k - 1, book, {:app, f, s}) do
+          {:pair, h, t} -> {:pair, h, {:unf, t, f}}
+          _ -> {:ucons, {:unf, s, f}}
+        end
+
+      e1 ->
+        {:ucons, e1}
+    end
+  end
+
   defp whnf(_, _, t), do: t
 
   defp is_data?(k, book, t) do
@@ -218,6 +250,8 @@ defmodule Muro.Check do
       :unit -> true
       :empty -> true
       {:pi, _, _, b} -> run_ty?(k, book, b)
+      {:stream, a} -> run_ty?(k, book, a)
+      {:prod, a, b} -> run_ty?(k, book, a) and run_ty?(k, book, b)
       _ -> false
     end
   end
@@ -307,6 +341,24 @@ defmodule Muro.Check do
     with :ok <- conv(k, book, e, e1), do: conv(k, book, a, a1)
   end
 
+  defp conv_n(k, book, {:prod, a, b}, {:prod, a1, b1}) do
+    with :ok <- conv(k, book, a, a1), do: conv(k, book, b, b1)
+  end
+
+  defp conv_n(k, book, {:pair, a, b}, {:pair, a1, b1}) do
+    with :ok <- conv(k, book, a, a1), do: conv(k, book, b, b1)
+  end
+
+  defp conv_n(k, book, {:fst, t}, {:fst, t1}), do: conv(k, book, t, t1)
+  defp conv_n(k, book, {:snd, t}, {:snd, t1}), do: conv(k, book, t, t1)
+  defp conv_n(k, book, {:stream, a}, {:stream, a1}), do: conv(k, book, a, a1)
+
+  defp conv_n(k, book, {:unf, s, f}, {:unf, s1, f1}) do
+    with :ok <- conv(k, book, s, s1), do: conv(k, book, f, f1)
+  end
+
+  defp conv_n(k, book, {:ucons, s}, {:ucons, s1}), do: conv(k, book, s, s1)
+
   defp conv_n(_k, _book, u, v),
     do: {:error, "cannot convert #{inspect(u)} ≁ #{inspect(v)}"}
 
@@ -323,6 +375,62 @@ defmodule Muro.Check do
       t1 -> {:error, "expected Id, got #{inspect(t1)}"}
     end
   end
+
+  defp view_prod(k, book, t) do
+    case whnf(k, book, t) do
+      {:prod, a, b} -> {:ok, {a, b}}
+      t1 -> {:error, "expected ×, got #{inspect(t1)}"}
+    end
+  end
+
+  defp view_stream(k, book, t) do
+    case whnf(k, book, t) do
+      {:stream, a} -> {:ok, a}
+      t1 -> {:error, "expected Stream, got #{inspect(t1)}"}
+    end
+  end
+
+  # ⇒-unf productivity: self may not occur in the pair's head.
+  defp has_self?(self, {:def, name}) when self == name, do: true
+  defp has_self?(self, {:app, f, a}), do: has_self?(self, f) or has_self?(self, a)
+  defp has_self?(self, {:su, t}), do: has_self?(self, t)
+  defp has_self?(self, {:pair, a, b}), do: has_self?(self, a) or has_self?(self, b)
+  defp has_self?(self, {:fst, t}), do: has_self?(self, t)
+  defp has_self?(self, {:snd, t}), do: has_self?(self, t)
+  defp has_self?(self, {:unf, s, f}), do: has_self?(self, s) or has_self?(self, f)
+  defp has_self?(self, {:ucons, s}), do: has_self?(self, s)
+  defp has_self?(self, {:lam, _, a, t}), do: has_self?(self, a) or has_self?(self, t)
+  defp has_self?(self, {:pi, _, a, b}), do: has_self?(self, a) or has_self?(self, b)
+  defp has_self?(self, {:prod, a, b}), do: has_self?(self, a) or has_self?(self, b)
+  defp has_self?(self, {:stream, a}), do: has_self?(self, a)
+  defp has_self?(_, _), do: false
+
+  defp check_unfold(_k, _book, :spec, _rs, _f), do: :ok
+
+  defp check_unfold(k, book, _m, rs, f) do
+    go_unfold(whnf(k, book, f), rs.self)
+  end
+
+  defp go_unfold({:lam, _, _, t}, self), do: go_unfold(t, self)
+
+  defp go_unfold({:pair, h, _}, self) do
+    if has_self?(self, h),
+      do: {:error, "unguarded recursive call"},
+      else: :ok
+  end
+
+  defp go_unfold(_, _), do: {:error, "unfold body must be a pair"}
+
+  defp check_nu(:spec, _ty, _body), do: :ok
+
+  defp check_nu(_mode, ty, body) do
+    go_nu(ty, body)
+  end
+
+  defp go_nu({:pi, _, _, b}, {:lam, _, _, t}), do: go_nu(b, t)
+  defp go_nu({:stream, _}, {:unf, _, _}), do: :ok
+  defp go_nu({:stream, _}, _), do: {:error, "stream value must be an unfold"}
+  defp go_nu(_, _), do: :ok
 
   # -- infer / check ---------------------------------------------------------
 
@@ -490,6 +598,65 @@ defmodule Muro.Check do
              {:ok, u} <- check(k, book, rs, gamma, m, e, a),
              do: {:ok, {a, u}}
 
+      # ⇒-prod
+      {m, {:prod, _, _}} when m in [:run, :evidence] ->
+        {:error, "no promotion: × is an erased term"}
+
+      {:spec, {:prod, a, b}} ->
+        with :ok <- check_ty(k, book, rs, gamma, a),
+             :ok <- check_ty(k, book, rs, gamma, b),
+             do: {:ok, {:typ, u0s(n)}}
+
+      # ⇒-stream
+      {m, {:stream, _}} when m in [:run, :evidence] ->
+        {:error, "no promotion: Stream is an erased term"}
+
+      {:spec, {:stream, a}} ->
+        with :ok <- check_ty(k, book, rs, gamma, a),
+             do: {:ok, {:typ, u0s(n)}}
+
+      # ⇒-pair
+      {m, {:pair, a, b}} ->
+        with {:ok, {ta, au}} <- infer(k, book, rs, gamma, m, a),
+             {:ok, {tb, bu}} <- infer(k, book, rs, gamma, m, b),
+             {:ok, uses} <- combine(m, au, bu) do
+          {:ok, {{:prod, ta, tb}, uses}}
+        end
+
+      # ⇒-fst
+      {m, {:fst, t1}} ->
+        with {:ok, {tt, u}} <- infer(k, book, rs, gamma, m, t1),
+             {:ok, {a, _}} <- view_prod(k, book, tt) do
+          {:ok, {a, u}}
+        end
+
+      # ⇒-snd
+      {m, {:snd, t1}} ->
+        with {:ok, {tt, u}} <- infer(k, book, rs, gamma, m, t1),
+             {:ok, {_, b}} <- view_prod(k, book, tt) do
+          {:ok, {b, u}}
+        end
+
+      # ⇒-unf
+      {m, {:unf, seed, f}} ->
+        with {:ok, {s_ty, seed_u}} <- infer(k, book, rs, gamma, m, seed),
+             {:ok, {ft, fu}} <- infer(k, book, rs, gamma, m, f),
+             {:ok, {_q, s1, body}} <- view_pi(k, book, ft),
+             :ok <- conv(k, book, s1, s_ty),
+             {:ok, {a, s2}} <- view_prod(k, book, Subst.inst(body, seed)),
+             :ok <- conv(k, book, s2, s_ty),
+             :ok <- check_unfold(k, book, m, rs, f),
+             {:ok, uses} <- combine(m, seed_u, fu) do
+          {:ok, {{:stream, a}, uses}}
+        end
+
+      # ⇒-ucons
+      {m, {:ucons, s}} ->
+        with {:ok, {tt, u}} <- infer(k, book, rs, gamma, m, s),
+             {:ok, a} <- view_stream(k, book, tt) do
+          {:ok, {{:prod, a, {:stream, a}}, u}}
+        end
+
       {_, t1} ->
         {:error, "cannot infer #{inspect(t1)}"}
     end
@@ -613,7 +780,8 @@ defmodule Muro.Check do
 
     with :ok <- tag("#{name} type", check_ty(k, book, empty_rec(), [], ty)),
          {:ok, _} <-
-           tag("#{name} body", check(k, book, def_rec(name), [], mode, body, ty)) do
+           tag("#{name} body", check(k, book, def_rec(name), [], mode, body, ty)),
+         :ok <- tag("#{name} productivity", check_nu(mode, ty, body)) do
       :ok
     end
   end

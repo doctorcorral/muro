@@ -2,6 +2,10 @@ defmodule Muro.Emit do
   @moduledoc """
   Emit run definitions to Elixir. Specs and evidence erase.
   A spec never becomes evidence. Evidence never becomes a run.
+
+  A checked run Stream is emitted as `Stream.unfold/2`. The pair in an
+  unfold body is `{head, next_seed}`. `uncons` is two replayable views
+  (`Enum.take/2` + `Stream.drop/2`); affinity was already checked.
   """
 
   alias Muro.Ast
@@ -77,6 +81,18 @@ defmodule Muro.Emit do
 
   defp emit_db({:munit, e, _, u}, d) do
     "(#{emit_db(e, d)}; #{emit_db(u, d)})"
+  end
+
+  defp emit_db({:pair, a, b}, d), do: "{#{emit_db(a, d)}, #{emit_db(b, d)}}"
+  defp emit_db({:fst, t}, d), do: "elem(#{emit_db(t, d)}, 0)"
+  defp emit_db({:snd, t}, d), do: "elem(#{emit_db(t, d)}, 1)"
+
+  defp emit_db({:unf, seed, f}, d) do
+    "Stream.unfold(#{emit_db(seed, d)}, #{emit_db(f, d)})"
+  end
+
+  defp emit_db({:ucons, s}, d) do
+    "(fn s -> {s |> Enum.take(1) |> hd(), Stream.drop(s, 1)} end).(#{emit_db(s, d)})"
   end
 
   defp emit_db({:app, _, _} = t, d) do

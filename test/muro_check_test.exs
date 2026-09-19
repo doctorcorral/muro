@@ -124,4 +124,52 @@ defmodule Muro.CheckTest do
     eight = Enum.reduce(1..8, 0, fn _, n -> {:suc, n} end)
     assert Muro.NatLive.half(eight) == {:suc, {:suc, {:suc, {:suc, 0}}}}
   end
+
+  test "zeros.muro parses, checks, and emits only zeros" do
+    src = File.read!("examples/zeros.muro")
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+
+    out = Emit.emit_module(Muro.Zeros, book)
+    assert out =~ ~r/\bdef zeros\b/
+    refute out =~ "head-zeros"
+    refute out =~ "head_zeros"
+  end
+
+  test "nats.muro parses, checks, and emits natsFrom" do
+    src = File.read!("examples/nats.muro")
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+
+    out = Emit.emit_module(Muro.Nats, book)
+    assert out =~ ~r/\bdef natsFrom\b/
+    assert out =~ "Stream.unfold"
+    Code.eval_string(out)
+
+    assert Muro.Nats.natsFrom(0) |> Stream.take(3) |> Enum.to_list() == [
+             0,
+             {:suc, 0},
+             {:suc, {:suc, 0}}
+           ]
+  end
+
+  test "non-guarded unfold fails in run and in evidence" do
+    f = {:lam, :affine, :nat, "_", {:var, "bad"}}
+
+    run = %{
+      name: "bad",
+      mode: :run,
+      export: true,
+      type: {:stream, :nat},
+      body: {:unf, :ze, f}
+    }
+
+    evid = %{name: "bad", mode: :evidence, type: {:stream, :nat}, body: {:unf, :ze, f}}
+
+    assert {:error, r} = Check.check_sig([run])
+    assert r =~ "pair" or r =~ "unguarded" or r =~ "unfold" or r =~ "×" or r =~ "Stream"
+
+    assert {:error, e} = Check.check_sig([evid])
+    assert e =~ "pair" or e =~ "unguarded" or e =~ "unfold" or e =~ "×" or e =~ "Stream"
+  end
 end

@@ -1,0 +1,7 @@
+-- nats.muro — run generator; emit is Stream.unfold.
+ν Stream (A : Type) : Type where
+  uncons : Stream A → A × Stream A
+
+def natsFrom : run Π (n : Nat) → Stream Nat :=
+  λ (n : Nat) →
+    unfold n (λ (+ k : Nat) → (k, suc k))

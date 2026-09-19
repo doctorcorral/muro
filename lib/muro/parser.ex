@@ -24,13 +24,43 @@ defmodule Muro.Parser do
   defp parse_book(s, acc) do
     s = skip(s)
 
-    if s == "" do
-      {:ok, Enum.reverse(acc), ""}
-    else
-      case parse_def(s) do
-        {:ok, d, rest} -> parse_book(rest, [d | acc])
-        err -> err
-      end
+    cond do
+      s == "" ->
+        {:ok, Enum.reverse(acc), ""}
+
+      nu_start?(s) ->
+        case parse_nu(s) do
+          {:ok, rest} -> parse_book(rest, acc)
+          err -> err
+        end
+
+      true ->
+        case parse_def(s) do
+          {:ok, d, rest} -> parse_book(rest, [d | acc])
+          err -> err
+        end
+    end
+  end
+
+  defp nu_start?(s), do: word_kw?(s, "ν") or word_kw?(s, "nu")
+
+  # v1: only `ν Stream (A : Type) : Type where uncons : Stream A → A × Stream A`.
+  # Stream is primitive; the block is checked for shape and then dropped.
+  defp parse_nu(s) do
+    rest = s |> skip() |> eat_kw(["ν", "nu"])
+
+    with {:ok, name, rest} <- ident(skip(rest)),
+         :ok <- if(name == "Stream", do: :ok, else: {:error, "v1 only supports ν Stream"}),
+         {:ok, {_q, _x, a}, rest} <- parse_binder(rest),
+         {:ok, rest} <- tok(skip(rest), ":"),
+         {:ok, ty, rest} <- parse_term(skip(rest), 0),
+         {:ok, rest} <- kw(skip(rest), "where"),
+         {:ok, ctor, rest} <- ident(skip(rest)),
+         :ok <- if(ctor == "uncons", do: :ok, else: {:error, "expected uncons"}),
+         {:ok, rest} <- tok(skip(rest), ":"),
+         {:ok, _ctor_ty, rest} <- parse_term(skip(rest), 0) do
+      _ = {a, ty}
+      {:ok, rest}
     end
   end
 
@@ -121,6 +151,18 @@ defmodule Muro.Parser do
     s0 = skip(s)
 
     cond do
+      arrow_tok?(s0) and min_bp <= 5 ->
+        with {:ok, rest} <- eat_arrow(s0),
+             {:ok, right, rest} <- parse_term(skip(rest), 5) do
+          parse_infix(rest, {:pi, :affine, left, "_", right}, min_bp)
+        end
+
+      times_tok?(s0) and min_bp <= 15 ->
+        with {:ok, rest} <- eat_times(s0),
+             {:ok, right, rest} <- parse_term(skip(rest), 16) do
+          parse_infix(rest, {:prod, left, right}, min_bp)
+        end
+
       starts_atom?(s0) and min_bp <= 20 ->
         with {:ok, arg, rest} <- parse_atom(s0) do
           parse_infix(rest, {:app, left, arg}, min_bp)
@@ -128,6 +170,28 @@ defmodule Muro.Parser do
 
       true ->
         {:ok, left, s}
+    end
+  end
+
+  defp arrow_tok?(s) do
+    (has_prefix?(s, "→") or has_prefix?(s, "->")) and not has_prefix?(s, "=>")
+  end
+
+  defp eat_arrow(s) do
+    cond do
+      has_prefix?(s, "→") -> {:ok, after_kw(s, "→")}
+      has_prefix?(s, "->") -> {:ok, after_kw(s, "->")}
+      true -> {:error, "expected →"}
+    end
+  end
+
+  defp times_tok?(s), do: has_prefix?(s, "×") or has_prefix?(s, "*")
+
+  defp eat_times(s) do
+    cond do
+      has_prefix?(s, "×") -> {:ok, after_kw(s, "×")}
+      has_prefix?(s, "*") -> {:ok, after_kw(s, "*")}
+      true -> {:error, "expected ×"}
     end
   end
 
@@ -142,6 +206,9 @@ defmodule Muro.Parser do
         false
 
       word_kw?(s, "def") ->
+        false
+
+      word_kw?(s, "where") ->
         false
 
       true ->
@@ -185,6 +252,31 @@ defmodule Muro.Parser do
       has_prefix?(s, "suc") ->
         parse_suc(s)
 
+      word_kw?(s, "Stream") ->
+        parse_stream(s)
+
+      word_kw?(s, "unfold") ->
+        parse_unf(s)
+
+      word_kw?(s, "uncons") ->
+        parse_ucons(s)
+
+      word_kw?(s, "fst") ->
+        parse_unary(s, "fst", :fst)
+
+      word_kw?(s, "snd") ->
+        parse_unary(s, "snd", :snd)
+
+      word_kw?(s, "head") ->
+        with {:ok, e, rest} <- parse_unary_arg(s, "head") do
+          {:ok, {:fst, {:ucons, e}}, rest}
+        end
+
+      word_kw?(s, "tail") ->
+        with {:ok, e, rest} <- parse_unary_arg(s, "tail") do
+          {:ok, {:snd, {:ucons, e}}, rest}
+        end
+
       has_prefix?(s, "Π") or has_prefix?(s, "Pi") ->
         parse_pi(s)
 
@@ -205,9 +297,20 @@ defmodule Muro.Parser do
 
       first_char(s) == ?( ->
         with {:ok, rest} <- tok(s, "("),
-             {:ok, t, rest} <- parse_term(skip(rest), 0),
-             {:ok, rest} <- tok(skip(rest), ")") do
-          {:ok, t, rest}
+             {:ok, t, rest} <- parse_term(skip(rest), 0) do
+          rest1 = skip(rest)
+
+          if has_prefix?(rest1, ",") do
+            with {:ok, rest} <- tok(rest1, ","),
+                 {:ok, u, rest} <- parse_term(skip(rest), 0),
+                 {:ok, rest} <- tok(skip(rest), ")") do
+              {:ok, {:pair, t, u}, rest}
+            end
+          else
+            with {:ok, rest} <- tok(rest1, ")") do
+              {:ok, t, rest}
+            end
+          end
         end
 
       true ->
@@ -229,11 +332,52 @@ defmodule Muro.Parser do
   defp resolve_name(other), do: other
 
   defp parse_suc(s) do
-    with {:ok, rest} <- kw(s, "suc"),
-         {:ok, rest} <- tok(skip(rest), "("),
-         {:ok, t, rest} <- parse_term(skip(rest), 0),
-         {:ok, rest} <- tok(skip(rest), ")") do
-      {:ok, {:su, t}, rest}
+    with {:ok, rest} <- kw(s, "suc") do
+      rest = skip(rest)
+
+      if has_prefix?(rest, "(") do
+        with {:ok, rest} <- tok(rest, "("),
+             {:ok, t, rest} <- parse_term(skip(rest), 0),
+             {:ok, rest} <- tok(skip(rest), ")") do
+          {:ok, {:su, t}, rest}
+        end
+      else
+        with {:ok, t, rest} <- parse_atom(rest) do
+          {:ok, {:su, t}, rest}
+        end
+      end
+    end
+  end
+
+  defp parse_stream(s) do
+    with {:ok, rest} <- kw(s, "Stream"),
+         {:ok, a, rest} <- parse_atom(skip(rest)) do
+      {:ok, {:stream, a}, rest}
+    end
+  end
+
+  defp parse_unf(s) do
+    with {:ok, rest} <- kw(s, "unfold"),
+         {:ok, seed, rest} <- parse_atom(skip(rest)),
+         {:ok, f, rest} <- parse_atom(skip(rest)) do
+      {:ok, {:unf, seed, f}, rest}
+    end
+  end
+
+  defp parse_ucons(s) do
+    parse_unary(s, "uncons", :ucons)
+  end
+
+  defp parse_unary(s, w, tag) do
+    with {:ok, e, rest} <- parse_unary_arg(s, w) do
+      {:ok, {tag, e}, rest}
+    end
+  end
+
+  defp parse_unary_arg(s, w) do
+    with {:ok, rest} <- kw(s, w),
+         {:ok, e, rest} <- parse_atom(skip(rest)) do
+      {:ok, e, rest}
     end
   end
 
@@ -406,14 +550,14 @@ defmodule Muro.Parser do
   end
 
   defp take_ident(<<c, r::binary>>, acc)
-       when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_ do
+       when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_ or c == ?- do
     take_ident(r, acc <> <<c>>)
   end
 
   defp take_ident(s, acc), do: {acc, s}
 
   defp ident_char?(nil), do: false
-  defp ident_char?(<<c>>), do: c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_
+  defp ident_char?(<<c>>), do: c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_ or c == ?-
   defp ident_char?(s) when is_binary(s), do: ident_char?(String.first(s))
 
   defp first_char(<<c, _::binary>>), do: c

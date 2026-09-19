@@ -68,6 +68,27 @@ defmodule Muro.Subst do
 
       {:ann, e, a} ->
         {:ann, ren(rho, e), ren(rho, a)}
+
+      {:prod, a, b} ->
+        {:prod, ren(rho, a), ren(rho, b)}
+
+      {:pair, a, b} ->
+        {:pair, ren(rho, a), ren(rho, b)}
+
+      {:fst, t} ->
+        {:fst, ren(rho, t)}
+
+      {:snd, t} ->
+        {:snd, ren(rho, t)}
+
+      {:stream, a} ->
+        {:stream, ren(rho, a)}
+
+      {:unf, s, f} ->
+        {:unf, ren(rho, s), ren(rho, f)}
+
+      {:ucons, s} ->
+        {:ucons, ren(rho, s)}
     end
   end
 
@@ -140,6 +161,27 @@ defmodule Muro.Subst do
 
       {:ann, e, a} ->
         {:ann, sub(sigma, e), sub(sigma, a)}
+
+      {:prod, a, b} ->
+        {:prod, sub(sigma, a), sub(sigma, b)}
+
+      {:pair, a, b} ->
+        {:pair, sub(sigma, a), sub(sigma, b)}
+
+      {:fst, t} ->
+        {:fst, sub(sigma, t)}
+
+      {:snd, t} ->
+        {:snd, sub(sigma, t)}
+
+      {:stream, a} ->
+        {:stream, sub(sigma, a)}
+
+      {:unf, s, f} ->
+        {:unf, sub(sigma, s), sub(sigma, f)}
+
+      {:ucons, s} ->
+        {:ucons, sub(sigma, s)}
     end
   end
 

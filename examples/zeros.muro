@@ -1,0 +1,9 @@
+-- zeros.muro — a productive run Stream; head computes to 0.
+ν Stream (A : Type) : Type where
+  uncons : Stream A → A × Stream A
+
+def zeros : run Stream Nat :=
+  unfold 0 (λ (_ : Nat) → (0, 0))
+
+def head-zeros : evidence {head zeros ≡ 0 : Nat} :=
+  refl
