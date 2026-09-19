@@ -340,14 +340,79 @@ defmodule Muro.CheckTest do
     assert msg =~ "positive"
   end
 
-  test "indices are rejected" do
+  test "vec.muro checks; lookup of fzero on a singleton" do
+    src = File.read!("examples/vec.muro")
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+
+    out = Emit.emit_module(Muro.Vecs, book)
+    assert out =~ ~r/\bdef lookup\b/
+    assert out =~ ~r/\bdef ones1\b/
+    refute out =~ "lookup-ok"
+    Code.eval_string(out)
+    ones1 = {:vcons, 0, {:suc, 0}, :vnil}
+    assert Muro.Vecs.lookup({:suc, 0}, {:fzero, 0}, ones1) == {:suc, 0}
+  end
+
+  test "indexed positivity rejects Bad" do
+    src = """
+    data Bad : Nat → Type where
+      mk : Π (n : Nat) → (Bad n → Nat) → Bad n
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "positive"
+  end
+
+  test "wrong constructor target index fails" do
+    src = File.read!("examples/vec.muro")
+    assert {:ok, book} = Parser.parse(src)
+
+    bad = %{
+      name: "badnil",
+      mode: :run,
+      export: true,
+      type: {:app, {:app, {:var, "Vec"}, :nat}, :ze},
+      body: {:app, {:app, {:app, {:var, "vcons"}, :ze}, {:su, :ze}}, {:var, "vnil"}}
+    }
+
+    assert {:error, msg} = Check.check_sig(book ++ [bad])
+    assert is_binary(msg)
+  end
+
+  test "constructor target missing an index fails" do
     src = """
     data Vec (A : Type) : Nat → Type where
       vnil : Vec A
     """
 
-    assert {:error, msg} = Parser.parse(src)
-    assert msg =~ "indices" or msg =~ "Type"
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    assert is_binary(msg)
+  end
+
+  test "non-descending Vec recursion fails" do
+    src = File.read!("examples/vec.muro")
+    assert {:ok, book} = Parser.parse(src)
+
+    bad = %{
+      name: "loopV",
+      mode: :run,
+      export: true,
+      type:
+        {:pi, :erased, :typ, "A",
+         {:pi, :affine, :nat, "n",
+          {:pi, :affine, {:app, {:app, {:var, "Vec"}, {:var, "A"}}, {:var, "n"}}, "xs", :nat}}},
+      body:
+        {:lam, :erased, :typ, "A",
+         {:lam, :affine, :nat, "n",
+          {:lam, :affine, {:app, {:app, {:var, "Vec"}, {:var, "A"}}, {:var, "n"}}, "xs",
+           {:app, {:app, {:app, {:var, "loopV"}, {:var, "A"}}, {:var, "n"}}, {:var, "xs"}}}}}
+    }
+
+    assert {:error, msg} = Check.check_sig([bad | book])
+    assert msg =~ "descend"
   end
 
   test "non-descending Maybe recursion fails" do

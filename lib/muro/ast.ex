@@ -244,10 +244,13 @@ defmodule Muro.Ast do
     end
   end
 
-  def data_to_db(%{name: n, params: params, ctors: ctors}) do
+  def data_to_db(%{name: n, params: params, ctors: ctors} = d) do
+    indices = Map.get(d, :indices, [])
+
     with {:ok, params1} <- params_to_db(params),
+         {:ok, indices1} <- params_to_db(indices),
          {:ok, ctors1} <- ctors_to_db(params, ctors) do
-      {:ok, %{kind: :data, name: n, params: params1, ctors: ctors1}}
+      {:ok, %{kind: :data, name: n, params: params1, indices: indices1, ctors: ctors1}}
     end
   end
 

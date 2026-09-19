@@ -72,23 +72,27 @@ defmodule Muro.Parser do
 
   defp data_start?(s), do: word_kw?(s, "data")
 
-  # Non-indexed data. Parameters before `: Type`; reject indices.
+  # Parameters before `:`. Index telescope after `:` before Type.
   defp parse_data(s) do
     with {:ok, rest} <- kw(s, "data"),
          {:ok, name, rest} <- ident(skip(rest)),
          {:ok, params, rest} <- parse_param_binders(skip(rest)),
          {:ok, rest} <- tok(skip(rest), ":"),
          {:ok, sort, rest} <- parse_term(skip(rest), 0),
-         :ok <-
-           if(sort == :typ,
-             do: :ok,
-             else: {:error, "data sort must be Type (indices are not in this pass)"}
-           ),
+         {:ok, indices} <- peel_indices(sort),
          {:ok, rest} <- kw(skip(rest), "where"),
          {:ok, ctors, rest} <- parse_ctors(skip(rest), []) do
-      {:ok, %{kind: :data, name: name, params: params, ctors: ctors}, rest}
+      {:ok, %{kind: :data, name: name, params: params, indices: indices, ctors: ctors}, rest}
     end
   end
+
+  defp peel_indices(:typ), do: {:ok, []}
+
+  defp peel_indices({:pi, q, a, x, b}) do
+    with {:ok, rest} <- peel_indices(b), do: {:ok, [{q, x, a} | rest]}
+  end
+
+  defp peel_indices(_), do: {:error, "data sort must end in Type"}
 
   defp parse_param_binders(s) do
     s = skip(s)

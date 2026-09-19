@@ -82,9 +82,9 @@ defmodule Muro.Emit do
       |> Enum.join("\n")
 
     """
-    case #{emit_db(e, d, book)} do
+    (case #{emit_db(e, d, book)} do
     #{clauses}
-    end
+    end)
     """
     |> String.trim()
   end

@@ -197,10 +197,18 @@ defmodule Muro.Check do
   defp descend(book, mode, rs, name, args, j),
     do: descend(book, mode, rs, name, args, j, false)
 
-  defp descend(_book, _mode, _rs, _name, [], _j, seen_comp) do
-    if seen_comp,
-      do: {:error, "recursive call does not descend on a smaller argument"},
-      else: :ok
+  defp descend(book, _mode, _rs, name, [], j, seen_comp) do
+    with {:ok, d} <- lookup_def(book, name) do
+      case nth_qty(d.type, j) do
+        {:ok, _} ->
+          :ok
+
+        {:error, _} ->
+          if seen_comp,
+            do: {:error, "recursive call does not descend on a smaller argument"},
+            else: :ok
+      end
+    end
   end
 
   defp descend(book, mode, rs, name, [a | as], j, seen_comp) do
@@ -304,11 +312,27 @@ defmodule Muro.Check do
     {h, as} = apps(whnf(k, book, t))
 
     case h do
-      :nat -> as == []
-      :unit -> as == []
-      :empty -> as == []
-      {:def, n} -> data_name?(book, n) and Enum.all?(as, &is_data?(k, book, &1))
-      _ -> false
+      :nat ->
+        as == []
+
+      :unit ->
+        as == []
+
+      :empty ->
+        as == []
+
+      {:def, n} ->
+        case lookup_data(book, n) do
+          {:ok, d} ->
+            np = length(d.params)
+            Enum.all?(Enum.take(as, np), &is_data?(k, book, &1))
+
+          _ ->
+            false
+        end
+
+      _ ->
+        false
     end
   end
 
@@ -509,13 +533,23 @@ defmodule Muro.Check do
   end
 
   defp view_data(k, book, t) do
-    {h, params} = apps(whnf(k, book, t))
+    {h, args} = apps(whnf(k, book, t))
 
     case h do
       {:def, n} ->
         case lookup_data(book, n) do
-          {:ok, d} -> {:ok, {d, n, params}}
-          _ -> {:error, "expected data type, got #{inspect(h)}"}
+          {:ok, d} ->
+            np = length(d.params)
+            ni = length(Map.get(d, :indices, []))
+
+            if length(args) == np + ni do
+              {:ok, {d, n, Enum.take(args, np), Enum.drop(args, np)}}
+            else
+              {:error, "data applied to the wrong number of arguments"}
+            end
+
+          _ ->
+            {:error, "expected data type, got #{inspect(h)}"}
         end
 
       _ ->
@@ -680,15 +714,26 @@ defmodule Muro.Check do
       # ⇒-mData
       {m, {:mdata, e, p, bs}} ->
         with {:ok, {et, eu}} <- infer(k, book, rs, gamma, m, e),
-             {:ok, {d, dname, params}} <- view_data(k, book, et),
+             {:ok, {d, dname, params, idxs}} <- view_data(k, book, et),
              :ok <- match_arity(bs, d.ctors),
-             dty = Subst.apps_from({:def, dname}, params),
-             :ok <-
-               check_ty(k, book, ext_rec(rs, false, false), ext(gamma, :affine, dty), p),
+             :ok <- check_motive(k, book, rs, gamma, d, dname, params, p),
+             mot_fun = first_mot_lam(d, dname, params, p),
              {:ok, bu} <-
-               check_branches(k, book, rs, gamma, m, dname, params, p, d.ctors, bs),
+               check_branches(
+                 k,
+                 book,
+                 rs,
+                 gamma,
+                 m,
+                 dname,
+                 params,
+                 idxs,
+                 mot_fun,
+                 d.ctors,
+                 bs
+               ),
              {:ok, uses} <- combine(m, eu, bu) do
-          {:ok, {Subst.inst(p, e), uses}}
+          {:ok, {Subst.apps_from(mot_fun, idxs ++ [e]), uses}}
         end
 
       {:spec, :typ} ->
@@ -803,7 +848,7 @@ defmodule Muro.Check do
           {:error, _} ->
             case lookup_data(book, name) do
               {:ok, d} when m == :spec ->
-                {:ok, {dty_type(d.params), u0s(n)}}
+                {:ok, {dty_type(d.params, Map.get(d, :indices, [])), u0s(n)}}
 
               {:ok, _} ->
                 {:error, "no promotion: a data former is an erased term"}
@@ -1043,8 +1088,10 @@ defmodule Muro.Check do
       # ⇐-ctor / ⇐-conv
       _ ->
         case {view_data(k, book, a), ctor_spine(book, e)} do
-          {{:ok, {_d, dname, params}}, {:ok, {dname2, _ci, args}}} when dname == dname2 ->
-            check_ctor_app(k, book, rs, gamma, mode, dname, e, params, args)
+          {{:ok, {_d, dname, params, idxs}}, {:ok, {dname2, _ci, args}}}
+          when dname == dname2 ->
+            expected = Subst.apps_from({:def, dname}, params ++ idxs)
+            check_ctor_app(k, book, rs, gamma, mode, dname, e, params, args, expected)
 
           _ ->
             with {:ok, {b, u}} <- infer(k, book, rs, gamma, mode, e),
@@ -1095,8 +1142,13 @@ defmodule Muro.Check do
     end
   end
 
-  defp dty_type(params) do
-    Enum.reduce(Enum.reverse(params), :typ, fn {q, _x, _a}, acc ->
+  defp dty_type(params, indices) do
+    idx_pis =
+      Enum.reduce(Enum.reverse(indices), :typ, fn {q, _x, a}, acc ->
+        {:pi, q, a, acc}
+      end)
+
+    Enum.reduce(Enum.reverse(params), idx_pis, fn {q, _x, _a}, acc ->
       {:pi, q, :typ, acc}
     end)
   end
@@ -1110,32 +1162,33 @@ defmodule Muro.Check do
     end
   end
 
-  defp check_ctor_app(k, book, rs, gamma, m, _dname, e, params, args) do
+  defp check_ctor_app(k, book, rs, gamma, m, _dname, e, params, args, expected) do
     {h, _} = apps(e)
 
     with {:def, cname} <- h,
          {:ok, {_d, _dn, _ci, c}} <- lookup_ctor(book, cname),
          {:ok, rest} <- inst_params(k, book, c.type, params) do
-      check_ctor_args(k, book, rs, gamma, m, rest, args)
+      check_ctor_args(k, book, rs, gamma, m, rest, args, expected)
     else
       _ -> {:error, "ill-formed constructor application"}
     end
   end
 
-  defp check_ctor_args(k, book, _rs, gamma, _m, ty, []) do
+  defp check_ctor_args(k, book, _rs, gamma, _m, ty, [], expected) do
     case whnf(k, book, ty) do
       {:pi, _, _, _} -> {:error, "too few constructor arguments"}
-      _ -> {:ok, u0s(nctx(gamma))}
+      ty1 -> with :ok <- conv(k, book, ty1, expected), do: {:ok, u0s(nctx(gamma))}
     end
   end
 
-  defp check_ctor_args(k, book, rs, gamma, m, ty, [a | as]) do
+  defp check_ctor_args(k, book, rs, gamma, m, ty, [a | as], expected) do
     case whnf(k, book, ty) do
       {:pi, q, a_ty, b} ->
         am = if q == :erased, do: :spec, else: m
 
         with {:ok, au} <- check(k, book, rs, gamma, am, a, a_ty),
-             {:ok, asu} <- check_ctor_args(k, book, rs, gamma, m, Subst.inst(b, a), as) do
+             {:ok, asu} <-
+               check_ctor_args(k, book, rs, gamma, m, Subst.inst(b, a), as, expected) do
           if q == :erased do
             if m == :spec, do: {:ok, u0s(nctx(gamma))}, else: {:ok, asu}
           else
@@ -1148,66 +1201,231 @@ defmodule Muro.Check do
     end
   end
 
-  defp check_branches(_k, _book, _rs, gamma, m, _dname, _params, _mot, [], []) do
-    {:ok, u0s(nctx(gamma)) |> then(fn us -> if m == :spec, do: us, else: us end)}
+  defp check_branches(_k, _book, _rs, gamma, _m, _dname, _params, _idxs, _mot, [], []) do
+    {:ok, u0s(nctx(gamma))}
   end
 
-  defp check_branches(k, book, rs, gamma, m, dname, params, mot, [c | cs], [
-         {bname, arity, body} | bs
-       ]) do
-    if c.name != bname do
-      {:error, "expected constructor #{c.name}, got #{bname}"}
-    else
-      with {:ok, rest} <- inst_params(k, book, c.type, params),
-           dty = Subst.apps_from({:def, dname}, params),
-           mot_fun = {:lam, :affine, dty, mot},
-           {:ok, u} <-
-             check_br(k, book, rs, gamma, m, dname, c.name, rest, arity, body, mot_fun, []),
-           {:ok, v} <- check_branches(k, book, rs, gamma, m, dname, params, mot, cs, bs) do
-        {:ok, combine_alt(m, u, v)}
+  defp check_branches(k, book, rs, gamma, m, dname, params, idxs, mot, [c | cs], bs) do
+    with {:ok, rest} <- inst_params(k, book, c.type, params) do
+      np = nparams_of(book, dname)
+
+      case analyze_forces(k, book, np, idxs, rest) do
+        {:error, "impossible constructor"} ->
+          case bs do
+            [] -> {:error, "missing branch for #{c.name}"}
+            [_ | bs1] -> check_branches(k, book, rs, gamma, m, dname, params, idxs, mot, cs, bs1)
+          end
+
+        {:error, e} ->
+          {:error, e}
+
+        {:ok, forces} ->
+          case bs do
+            [] ->
+              {:error, "missing branch for #{c.name}"}
+
+            [{bname, _ar, body} | bs1] ->
+              if bname != c.name do
+                {:error, "expected constructor #{c.name}, got #{bname}"}
+              else
+                wrapped = wrap_tel(rest, body)
+
+                with {:ok, u} <-
+                       check_br(
+                         k,
+                         book,
+                         rs,
+                         gamma,
+                         m,
+                         dname,
+                         c.name,
+                         rest,
+                         wrapped,
+                         mot,
+                         [],
+                         forces
+                       ),
+                     {:ok, v} <-
+                       check_branches(k, book, rs, gamma, m, dname, params, idxs, mot, cs, bs1) do
+                  {:ok, combine_alt(m, u, v)}
+                end
+              end
+          end
       end
     end
   end
 
-  defp check_branches(_, _, _, _, _, _, _, _, _, _),
+  defp check_branches(_, _, _, _, _, _, _, _, _, [], [_ | _]),
     do: {:error, "match branch count does not match constructors"}
 
-  defp check_br(k, book, rs, gamma, m, dname, cname, ty, arity, body, mot_fun, args) do
-    case whnf(k, book, ty) do
-      {:pi, q, a, b} ->
-        rec? = is_d_type?(book, dname, a)
-        rs1 = ext_rec(rs, rec?, rec?)
-        rs2 = if q == :erased, do: keep_next(rs, rs1), else: rs1
-        args1 = Enum.map(args, &Subst.wk/1) ++ [{:var, 0}]
+  defp wrap_tel({:pi, q, a, b}, body), do: {:lam, q, a, wrap_tel(b, body)}
+  defp wrap_tel(_, body), do: body
 
-        with {:ok, uses} <-
-               check_br(
-                 k,
-                 book,
-                 rs2,
-                 ext(gamma, q, a),
-                 m,
-                 dname,
-                 cname,
-                 b,
-                 arity,
-                 body,
-                 Subst.wk(mot_fun),
-                 args1
-               ),
-             [u0 | us] <- uses,
-             :ok <- check_bound(m, q, u0) do
-          {:ok, us}
-        else
-          [] -> {:error, "match branch binder mismatch"}
-          err -> err
-        end
-
-      _ ->
-        ctor_tm = Subst.apps_from({:def, cname}, args)
-        check(k, book, rs, gamma, m, body, {:app, mot_fun, ctor_tm})
+  defp nparams_of(book, dname) do
+    case lookup_data(book, dname) do
+      {:ok, d} -> length(d.params)
+      _ -> 0
     end
   end
+
+  defp check_br(k, book, rs, gamma, m, dname, cname, ty, br, mot, args, forces) do
+    case whnf(k, book, ty) do
+      {:pi, q, a, b} ->
+        case {forces, br} do
+          {[u | fs], {:lam, q1, a1, t}} when not is_nil(u) ->
+            with :ok <- if(q == q1, do: :ok, else: {:error, "λ/Π quantity mismatch"}),
+                 :ok <- check_ty(k, book, rs, gamma, a1),
+                 :ok <- conv(k, book, a1, a) do
+              check_br(
+                k,
+                book,
+                rs,
+                gamma,
+                m,
+                dname,
+                cname,
+                Subst.inst(b, u),
+                Subst.inst(t, u),
+                mot,
+                args ++ [u],
+                fs
+              )
+            end
+
+          {[nil | fs], {:lam, q1, a1, t}} ->
+            rec? = is_d_type?(book, dname, a)
+            rs1 = ext_rec(rs, rec?, rec?)
+            rs2 = if q == :erased, do: keep_next(rs, rs1), else: rs1
+            args1 = Enum.map(args, &Subst.wk/1) ++ [{:var, 0}]
+
+            with :ok <- if(q == q1, do: :ok, else: {:error, "λ/Π quantity mismatch"}),
+                 :ok <- check_ty(k, book, rs, gamma, a1),
+                 :ok <- conv(k, book, a1, a),
+                 {:ok, [u0 | us]} <-
+                   check_br(
+                     k,
+                     book,
+                     rs2,
+                     ext(gamma, q, a),
+                     m,
+                     dname,
+                     cname,
+                     b,
+                     t,
+                     Subst.wk(mot),
+                     args1,
+                     wk_forces(fs)
+                   ),
+                 :ok <- check_bound(m, q, u0) do
+              {:ok, us}
+            end
+
+          {[_ | _], _} ->
+            {:error, "match branch expected a λ for a constructor argument"}
+
+          {[], _} ->
+            {:error, "constructor telescope / force list mismatch"}
+        end
+
+      ty1 ->
+        np = nparams_of(book, dname)
+        {_, targs} = apps(ty1)
+        idxs = Enum.drop(targs, np)
+        ctor_tm = Subst.apps_from({:def, cname}, args)
+        check(k, book, rs, gamma, m, br, Subst.apps_from(mot, idxs ++ [ctor_tm]))
+    end
+  end
+
+  defp wk_forces(fs) do
+    Enum.map(fs, fn
+      nil -> nil
+      t -> Subst.wk(t)
+    end)
+  end
+
+  defp first_mot_lam(d, dname, params, p) do
+    case Map.get(d, :indices, []) do
+      [] -> {:lam, :affine, Subst.apps_from({:def, dname}, params), p}
+      [{q, _, t} | _] -> {:lam, q, t, p}
+    end
+  end
+
+  defp check_motive(k, book, rs, gamma, d, dname, params, p) do
+    case Map.get(d, :indices, []) do
+      [] ->
+        dty = Subst.apps_from({:def, dname}, params)
+        check_ty(k, book, ext_rec(rs, false, false), ext(gamma, :affine, dty), p)
+
+      [{q, _, t} | rest] ->
+        gamma1 = ext(gamma, q, t)
+        args = Enum.map(params, &Subst.wk/1) ++ [{:var, 0}]
+        tail = motive_tail(dname, args, rest)
+
+        with {:ok, _} <- check(k, book, ext_rec(rs, false, false), gamma1, :spec, p, tail),
+             do: :ok
+    end
+  end
+
+  defp motive_tail(dname, args, []),
+    do: {:pi, :affine, Subst.apps_from({:def, dname}, args), :typ}
+
+  defp motive_tail(dname, args, [{q, _, t} | rest]) do
+    {:pi, q, t, motive_tail(dname, Enum.map(args, &Subst.wk/1) ++ [{:var, 0}], rest)}
+  end
+
+  defp analyze_forces(k, book, np, expected, tel) do
+    d = count_pis(tel)
+
+    with {:ok, pairs} <- walk_forces(k, book, np, expected, tel, 0) do
+      {:ok, forces_for(d, pairs)}
+    end
+  end
+
+  defp walk_forces(k, book, np, expected, {:pi, _, _, b}, d),
+    do: walk_forces(k, book, np, expected, b, d + 1)
+
+  defp walk_forces(k, book, np, expected, t, d) do
+    {_h, args} = apps(whnf(k, book, t))
+    match_idxs(k, book, d, expected, Enum.drop(args, np))
+  end
+
+  defp count_pis({:pi, _, _, b}), do: 1 + count_pis(b)
+  defp count_pis(_), do: 0
+
+  defp match_idxs(_k, _book, _d, [], []), do: {:ok, []}
+
+  defp match_idxs(k, book, d, [e | es], [t | ts]) do
+    with {:ok, fs} <- match_idx(k, book, d, e, t),
+         {:ok, gs} <- match_idxs(k, book, d, es, ts) do
+      {:ok, fs ++ gs}
+    end
+  end
+
+  defp match_idxs(_, _, _, _, _), do: {:error, "index telescope length mismatch"}
+
+  defp match_idx(k, book, d, e, t) do
+    case {whnf(k, book, e), whnf(k, book, t)} do
+      {{:su, e1}, {:su, t1}} -> match_idx(k, book, d, e1, t1)
+      {:ze, :ze} -> {:ok, []}
+      {{:su, _}, :ze} -> {:error, "impossible constructor"}
+      {:ze, {:su, _}} -> {:error, "impossible constructor"}
+      {e1, {:var, j}} when j < d -> {:ok, [{d - 1 - j, e1}]}
+      {_, _} -> {:ok, []}
+    end
+  end
+
+  defp forces_for(0, _), do: []
+
+  defp forces_for(n, pairs) do
+    [lookup_force(pairs, 0) | forces_for(n - 1, shift_forces(pairs))]
+  end
+
+  defp lookup_force([], _), do: nil
+  defp lookup_force([{j, u} | rest], i), do: if(j == i, do: u, else: lookup_force(rest, i))
+
+  defp shift_forces([]), do: []
+  defp shift_forces([{0, _} | rest]), do: shift_forces(rest)
+  defp shift_forces([{j, u} | rest]), do: [{j - 1, u} | shift_forces(rest)]
 
   defp occurs_d?(i, {:def, n}), do: n == i
   defp occurs_d?(i, {:app, f, a}), do: occurs_d?(i, f) or occurs_d?(i, a)
@@ -1231,38 +1449,48 @@ defmodule Muro.Check do
 
   defp pos_arg?(book, dname, a), do: is_d_type?(book, dname, a) or not occurs_d?(dname, a)
 
-  defp check_tel_pos(book, dname, {:pi, _, a, b}) do
+  defp check_tel_pos(book, dname, np, ni, {:pi, _, a, b}) do
     if pos_arg?(book, dname, a) do
-      check_tel_pos(book, dname, b)
+      check_tel_pos(book, dname, np, ni, b)
     else
       {:error, "constructor is not strictly positive"}
     end
   end
 
-  defp check_tel_pos(book, dname, t) do
-    if is_d_type?(book, dname, t) do
-      :ok
-    else
-      {:error, "constructor does not target the data type"}
+  defp check_tel_pos(book, dname, np, ni, t) do
+    {_h, args} = apps(t)
+
+    cond do
+      not is_d_type?(book, dname, t) ->
+        {:error, "constructor does not target the data type"}
+
+      length(args) != np + ni ->
+        {:error, "constructor target has the wrong number of arguments"}
+
+      true ->
+        :ok
     end
   end
 
-  defp check_ctor_rest(book, dname, np, {:pi, _, _, b}) when np > 0,
-    do: check_ctor_rest(book, dname, np - 1, b)
+  defp check_ctor_rest(book, dname, np, ni, t), do: skip_params(book, dname, np, ni, np, t)
 
-  defp check_ctor_rest(_book, _dname, np, _) when np > 0,
+  defp skip_params(book, dname, np, ni, 0, t), do: check_tel_pos(book, dname, np, ni, t)
+
+  defp skip_params(book, dname, np, ni, k, {:pi, _, _, b}) when k > 0,
+    do: skip_params(book, dname, np, ni, k - 1, b)
+
+  defp skip_params(_, _, _, _, k, _) when k > 0,
     do: {:error, "constructor type has too few parameter binders"}
 
-  defp check_ctor_rest(book, dname, 0, t), do: check_tel_pos(book, dname, t)
-
-  defp check_data(book, %{name: name, params: params, ctors: ctors}) do
+  defp check_data(book, %{name: name, params: params, ctors: ctors} = d) do
     np = length(params)
+    ni = length(Map.get(d, :indices, []))
     k = @fuel
 
     Enum.reduce_while(ctors, :ok, fn c, :ok ->
       result =
         with :ok <- tag("#{c.name} type", check_ty(k, book, empty_rec(), [], c.type)) do
-          check_ctor_rest(book, name, np, c.type)
+          check_ctor_rest(book, name, np, ni, c.type)
         end
 
       case tag(name, result) do
