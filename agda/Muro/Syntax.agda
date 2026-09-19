@@ -35,6 +35,12 @@ data Tm (n : ℕ) : Set where
   unit  : Tm n
   one   : Tm n
   empty : Tm n
+  -- List A
+  lst   : Tm n → Tm n
+  nil   : Tm n
+  cons  : Tm n → Tm n → Tm n
+  mLst  : (scrut : Tm n) (mot : Tm (suc n))
+          (tn : Tm n) (tc : Tm (suc (suc n))) → Tm n
   -- coproduct A ⊎ B (Either)
   sum   : Tm n → Tm n → Tm n
   left  : Tm n → Tm n
@@ -79,6 +85,10 @@ data PTm (V : Set) : Set where
   unit  : PTm V
   one   : PTm V
   empty : PTm V
+  lst   : PTm V → PTm V
+  nil   : PTm V
+  cons  : PTm V → PTm V → PTm V
+  mLst  : PTm V → (V → PTm V) → PTm V → (V → V → PTm V) → PTm V
   sum   : PTm V → PTm V → PTm V
   left  : PTm V → PTm V
   right : PTm V → PTm V
@@ -138,6 +148,12 @@ showTm (su t)       = "suc(" ++ showTm t ++ ")"
 showTm unit         = "Unit"
 showTm one          = "tt"
 showTm empty        = "Empty"
+showTm (lst A)      = "List " ++ showTm A
+showTm nil          = "nil"
+showTm (cons a as)  = "cons(" ++ showTm a ++ ", " ++ showTm as ++ ")"
+showTm (mLst e P n c) =
+  "matchList " ++ showTm e ++ " motive " ++ showTm P ++
+  " | nil => " ++ showTm n ++ " | cons => " ++ showTm c
 showTm (sum A B)    = "(" ++ showTm A ++ " ⊎ " ++ showTm B ++ ")"
 showTm (left t)     = "left(" ++ showTm t ++ ")"
 showTm (right t)    = "right(" ++ showTm t ++ ")"

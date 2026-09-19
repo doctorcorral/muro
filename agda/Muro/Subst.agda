@@ -32,6 +32,10 @@ ren ρ (su t)        = su (ren ρ t)
 ren ρ unit          = unit
 ren ρ one           = one
 ren ρ empty         = empty
+ren ρ (lst A)       = lst (ren ρ A)
+ren ρ nil           = nil
+ren ρ (cons a as)   = cons (ren ρ a) (ren ρ as)
+ren ρ (mLst e P n c)= mLst (ren ρ e) (ren (lift ρ) P) (ren ρ n) (ren (lift (lift ρ)) c)
 ren ρ (sum A B)     = sum (ren ρ A) (ren ρ B)
 ren ρ (left t)      = left (ren ρ t)
 ren ρ (right t)     = right (ren ρ t)
@@ -90,6 +94,10 @@ sub σ (su t)         = su (sub σ t)
 sub σ unit           = unit
 sub σ one            = one
 sub σ empty          = empty
+sub σ (lst A)        = lst (sub σ A)
+sub σ nil            = nil
+sub σ (cons a as)    = cons (sub σ a) (sub σ as)
+sub σ (mLst e P n c) = mLst (sub σ e) (sub (lifts σ) P) (sub σ n) (sub (lifts (lifts σ)) c)
 sub σ (sum A B)      = sum (sub σ A) (sub σ B)
 sub σ (left t)       = left (sub σ t)
 sub σ (right t)      = right (sub σ t)
@@ -119,6 +127,15 @@ instσ u (suc i) = var i
 inst : ∀ {n} → Tm (suc n) → Tm n → Tm n
 inst t u = sub (instσ u) t
 
+-- cons branch: var 0 = tail, var 1 = head.
+instConsσ : ∀ {n} → Tm n → Tm n → Fin (suc (suc n)) → Tm n
+instConsσ a as zero          = as
+instConsσ a as (suc zero)    = a
+instConsσ a as (suc (suc i)) = var i
+
+instCons : ∀ {n} → Tm (suc (suc n)) → Tm n → Tm n → Tm n
+instCons t a as = sub (instConsσ a as) t
+
 ------------------------------------------------------------------------
 -- toPHOAS : de Bruijn → PHOAS
 ------------------------------------------------------------------------
@@ -135,6 +152,16 @@ toPHOAS ρ (su t)         = su (toPHOAS ρ t)
 toPHOAS ρ unit           = unit
 toPHOAS ρ one            = one
 toPHOAS ρ empty          = empty
+toPHOAS ρ (lst A)        = lst (toPHOAS ρ A)
+toPHOAS ρ nil            = nil
+toPHOAS ρ (cons a as)    = cons (toPHOAS ρ a) (toPHOAS ρ as)
+toPHOAS ρ (mLst e P n c) = mLst (toPHOAS ρ e)
+                                (λ v → toPHOAS (λ { zero → v ; (suc i) → ρ i }) P)
+                                (toPHOAS ρ n)
+                                (λ a as → toPHOAS (λ
+                                  { zero          → as
+                                  ; (suc zero)    → a
+                                  ; (suc (suc i)) → ρ i }) c)
 toPHOAS ρ (sum A B)      = sum (toPHOAS ρ A) (toPHOAS ρ B)
 toPHOAS ρ (left t)       = left (toPHOAS ρ t)
 toPHOAS ρ (right t)      = right (toPHOAS ρ t)
@@ -208,6 +235,15 @@ unembedN nxt env (su t)         = su <$> unembedN nxt env t
 unembedN nxt env unit           = ok unit
 unembedN nxt env one            = ok one
 unembedN nxt env empty          = ok empty
+unembedN nxt env (lst A)        = lst <$> unembedN nxt env A
+unembedN nxt env nil            = ok nil
+unembedN nxt env (cons a as)    =
+  cons <$> unembedN nxt env a ⊛ unembedN nxt env as
+unembedN nxt env (mLst e P n c) =
+  mLst <$> unembedN nxt env e
+       ⊛ unembedN (suc nxt) (nxt ∷ env) (P nxt)
+       ⊛ unembedN nxt env n
+       ⊛ unembedN (suc (suc nxt)) (suc nxt ∷ nxt ∷ env) (c nxt (suc nxt))
 unembedN nxt env (sum A B)      =
   sum <$> unembedN nxt env A ⊛ unembedN nxt env B
 unembedN nxt env (left t)       = left <$> unembedN nxt env t

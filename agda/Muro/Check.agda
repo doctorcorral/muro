@@ -95,6 +95,12 @@ extRec : ∀ {n} → RecSt n → Bool → Bool → RecSt (suc n)
 extRec (recst sl sm rok _ g) newSmall newOk =
   recst sl (newSmall ∷ sm) (newOk ∷ rok) false g
 
+-- Erased binders do not consume the next recursive argument.
+keepNext : ∀ {n} → RecSt n → RecSt (suc n) → RecSt (suc n)
+keepNext old new =
+  recst (RecSt.self new) (RecSt.smaller new) (RecSt.recOk new)
+        (RecSt.nextOk old) (RecSt.guarded new)
+
 scrutOk : ∀ {n} → RecSt n → Tm n → Bool
 scrutOk rs (var x) = lookup (RecSt.recOk rs) x ∨ lookup (RecSt.smaller rs) x
 scrutOk _  _       = false
@@ -210,6 +216,10 @@ mutual
   ... | left a  = whnf k σ (inst l a)
   ... | right b = whnf k σ (inst r b)
   ... | e′      = mSum e′ P l r
+  whnf (suc k) σ (mLst e P n c) with whnf k σ e
+  ... | nil        = whnf k σ n
+  ... | cons a as  = whnf k σ (instCons c a as)
+  ... | e′         = mLst e′ P n c
   whnf (suc k) σ (def i) with lookupDef σ i
   ... | ok d    = whnf k σ (closed (Def.dbody d))
   ... | fail _  = def i
@@ -229,11 +239,13 @@ mutual
   ... | _        = ucons (unf s f)
   uconsWhnf _ _ e = ucons e
 
+{-# TERMINATING #-}
 isData : ∀ {n} → ℕ → Sig → Tm n → Bool
 isData k σ t with whnf k σ t
 ... | nat   = true
 ... | unit  = true
 ... | empty = true
+... | lst A = isData k σ A
 ... | _     = false
 
 {-# TERMINATING #-}
@@ -245,6 +257,7 @@ runTy (pi _ _ B)  = runTy B
 runTy (nu F)      = runTy (inst F unit)
 runTy (prod A B)  = runTy A ∧ runTy B
 runTy (sum A B)   = runTy A ∧ runTy B
+runTy (lst _)     = true
 runTy _           = false
 
 isRunType : ∀ {n} → ℕ → Sig → Tm n → Bool
@@ -268,6 +281,11 @@ synEq (su a)         (su b)         = synEq a b
 synEq unit           unit           = true
 synEq one            one            = true
 synEq empty          empty          = true
+synEq (lst A)        (lst A′)       = synEq A A′
+synEq nil            nil            = true
+synEq (cons a as)    (cons a′ as′)  = synEq a a′ ∧ synEq as as′
+synEq (mLst e P n c) (mLst e′ P′ n′ c′) =
+  synEq e e′ ∧ synEq P P′ ∧ synEq n n′ ∧ synEq c c′
 synEq (sum A B)      (sum A′ B′)    = synEq A A′ ∧ synEq B B′
 synEq (left t)       (left t′)      = synEq t t′
 synEq (right t)      (right t′)     = synEq t t′
@@ -292,12 +310,14 @@ synEq (ucons s)      (ucons s′)     = synEq s s′
 synEq _              _              = false
 
 ctorHead : ∀ {n} → Tm n → Bool
-ctorHead ze      = true
-ctorHead (su _)  = true
-ctorHead one     = true
+ctorHead ze        = true
+ctorHead (su _)    = true
+ctorHead one       = true
 ctorHead (left _)  = true
 ctorHead (right _) = true
-ctorHead _       = false
+ctorHead nil       = true
+ctorHead (cons _ _) = true
+ctorHead _         = false
 
 mutual
   {-# TERMINATING #-}
@@ -327,6 +347,11 @@ mutual
   convN k σ nat           nat           = ok tt
   convN k σ unit          unit          = ok tt
   convN k σ empty         empty         = ok tt
+  convN k σ (lst A)       (lst A′)      = conv k σ A A′
+  convN k σ nil           nil           = ok tt
+  convN k σ (cons a as)   (cons a′ as′) = conv k σ a a′ >> conv k σ as as′
+  convN k σ (mLst e P n c) (mLst e′ P′ n′ c′) =
+    conv k σ e e′ >> conv k σ P P′ >> conv k σ n n′ >> conv k σ c c′
   convN k σ (sum A B)     (sum A′ B′)   = conv k σ A A′ >> conv k σ B B′
   convN k σ (left t)      (left t′)     = conv k σ t t′
   convN k σ (right t)     (right t′)    = conv k σ t t′
@@ -387,6 +412,8 @@ data _≈[_]_ {n} : Tm n → Sig → Tm n → Set where
               app f s ≈[ σ ] pair h t →
               ucons (unf s f) ≈[ σ ] pair h (unf t f)
   ≈-ιleft  : ∀ {σ a P l r} → mSum (left a) P l r ≈[ σ ] inst l a
+  ≈-ιnil   : ∀ {σ P n c} → mLst nil P n c ≈[ σ ] n
+  ≈-ιcons  : ∀ {σ a as P n c} → mLst (cons a as) P n c ≈[ σ ] instCons c a as
   ≈-ιright : ∀ {σ b P l r} → mSum (right b) P l r ≈[ σ ] inst r b
 
 ------------------------------------------------------------------------
@@ -460,6 +487,24 @@ data _,_⊢[_]_⇒_ σ Γ where
     → σ , ext Γ affine A ⊢ P wf
     → σ , Γ ⊢[ m ] t ⇐ inst P r
     → σ , Γ ⊢[ m ] rwt eq P t ⇒ inst P l
+
+  ⇒-lst : ∀ {A}
+    → σ , Γ ⊢ A wf
+    → σ , Γ ⊢[ spec ] lst A ⇒ typ
+
+  ⇒-cons : ∀ {m A a as}
+    → σ , Γ ⊢[ m ] a ⇐ A
+    → σ , Γ ⊢[ m ] as ⇐ lst A
+    → σ , Γ ⊢[ m ] cons a as ⇒ lst A
+
+  ⇒-mLst : ∀ {m A e P n c}
+    → σ , Γ ⊢[ m ] e ⇐ lst A
+    → σ , ext Γ affine (lst A) ⊢ P wf
+    → σ , Γ ⊢[ m ] n ⇐ inst P nil
+    → σ , ext (ext Γ affine A) affine (lst (wk A)) ⊢[ m ] c ⇐
+        sub (λ { zero → cons (var (suc zero)) (var zero)
+               ; (suc i) → var (suc (suc i)) }) P
+    → σ , Γ ⊢[ m ] mLst e P n c ⇒ inst P e
 
   ⇒-mNat : ∀ {m e P z s}
     → σ , Γ ⊢[ m ] e ⇐ nat
@@ -547,6 +592,14 @@ data _,_⊢[_]_⇐_ σ Γ where
     → a ≈[ σ ] b
     → σ , Γ ⊢[ m ] rfl ⇐ idt A a b
 
+  ⇐-nil : ∀ {m A}
+    → σ , Γ ⊢[ m ] nil ⇐ lst A
+
+  ⇐-cons : ∀ {m A a as}
+    → σ , Γ ⊢[ m ] a ⇐ A
+    → σ , Γ ⊢[ m ] as ⇐ lst A
+    → σ , Γ ⊢[ m ] cons a as ⇐ lst A
+
   ⇐-left : ∀ {m A B a}
     → σ , Γ ⊢[ m ] a ⇐ A
     → σ , Γ ⊢[ m ] left a ⇐ sum A B
@@ -613,6 +666,9 @@ hasSelf s (sum A B)      = hasSelf s A ∨ hasSelf s B
 hasSelf s (left t)       = hasSelf s t
 hasSelf s (right t)      = hasSelf s t
 hasSelf s (mSum e P l r) = hasSelf s e ∨ hasSelf s P ∨ hasSelf s l ∨ hasSelf s r
+hasSelf s (lst A)        = hasSelf s A
+hasSelf s (cons a as)    = hasSelf s a ∨ hasSelf s as
+hasSelf s (mLst e P n c) = hasSelf s e ∨ hasSelf s P ∨ hasSelf s n ∨ hasSelf s c
 hasSelf s (mNat e P z u) = hasSelf s e ∨ hasSelf s P ∨ hasSelf s z ∨ hasSelf s u
 hasSelf s (mEmp e P)     = hasSelf s e ∨ hasSelf s P
 hasSelf s (mUnit e P u)  = hasSelf s e ∨ hasSelf s P ∨ hasSelf s u
@@ -655,6 +711,9 @@ occurs x (sum A B)      = occurs x A ∨ occurs x B
 occurs x (left t)       = occurs x t
 occurs x (right t)      = occurs x t
 occurs x (mSum e P l r) = occurs x e ∨ occurs (suc x) P ∨ occurs (suc x) l ∨ occurs (suc x) r
+occurs x (lst A)        = occurs x A
+occurs x (cons a as)    = occurs x a ∨ occurs x as
+occurs x (mLst e P n c) = occurs x e ∨ occurs (suc x) P ∨ occurs x n ∨ occurs (suc (suc x)) c
 occurs x (mNat e P z s) = occurs x e ∨ occurs (suc x) P ∨ occurs x z ∨ occurs (suc x) s
 occurs x (mEmp e P)     = occurs x e ∨ occurs (suc x) P
 occurs x (mUnit e P u)  = occurs x e ∨ occurs (suc x) P ∨ occurs x u
@@ -689,6 +748,18 @@ motSucσ (suc i) = var (suc i)
 motSuc : ∀ {n} → Tm (suc n) → Tm (suc n)
 motSuc P = sub motSucσ P
 
+motConsσ : ∀ {n} → Fin (suc n) → Tm (suc (suc n))
+motConsσ zero    = cons (var (suc zero)) (var zero)
+motConsσ (suc i) = var (suc (suc i))
+
+motCons : ∀ {n} → Tm (suc n) → Tm (suc (suc n))
+motCons P = sub motConsσ P
+
+viewLst : ∀ {n} → ℕ → Sig → Tm n → Result (Tm n)
+viewLst k σ t with whnf k σ t
+... | lst A = ok A
+... | t′    = fail ("expected List, got " ++ showTm t′)
+
 motLeftσ : ∀ {n} → Fin (suc n) → Tm (suc n)
 motLeftσ zero    = left (var zero)
 motLeftσ (suc i) = var (suc i)
@@ -707,23 +778,25 @@ checkRec : ∀ {n} → ℕ → Sig → Mode → RecSt n → Tm n → Result ⊤
 checkRec _ _ spec _ _ = ok tt
 checkRec {n} k σ m rs t = go (apps t)
   where
-    descend : ℕ → ℕ → List (Tm n) → Result ⊤
-    descend _ _ [] = fail "recursive call does not descend on a smaller argument"
-    descend i j (a ∷ as) =
-      if isSmallerVar rs a
-      then (lookupDef σ i >>= λ d →
-            nthQty (Def.dtype d) j >>= λ q →
-            if eqQty q erased
-            then descend i (suc j) as
-            else ok tt)
-      else descend i (suc j) as
+    descend : ℕ → ℕ → List (Tm n) → Bool → Result ⊤
+    descend _ _ [] seenComp =
+      if seenComp then fail "recursive call does not descend on a smaller argument"
+      else ok tt
+    descend i j (a ∷ as) seenComp =
+      lookupDef σ i >>= λ d →
+      nthQty (Def.dtype d) j >>= λ q →
+      if eqQty q erased
+      then descend i (suc j) as seenComp
+      else if isSmallerVar rs a
+      then ok tt
+      else descend i (suc j) as true
 
     go : Tm n × List (Tm n) → Result ⊤
     go (def i , args) =
       case RecSt.self rs of λ where
         nothing  → ok tt
         (just j) → if i ≡ᵇ j
-          then (if RecSt.guarded rs then ok tt else descend i 0 args)
+          then (if RecSt.guarded rs then ok tt else descend i 0 args false)
           else ok tt
     go _ = ok tt
 
@@ -797,7 +870,9 @@ mutual
     (if eqQty q reuse
      then guard "+ requires a Data type" (isData k σ A)
      else ok tt) >>
-    infer k σ (extRec rs false (RecSt.nextOk rs)) (ext Γ q A) m t >>= λ (B , uses) →
+    let rs1 = extRec rs false (RecSt.nextOk rs)
+        rs′ = if eqQty q erased then keepNext rs rs1 else rs1
+    in infer k σ rs′ (ext Γ q A) m t >>= λ (B , uses) →
     let (u₀ , us) = headTail uses
     in checkBound m q u₀ >> ok (pi q A B , us)
     where
@@ -849,6 +924,44 @@ mutual
     checkTy k σ (extRec rs false false) (ext Γ affine A) P >>
     check k σ rs Γ m t (inst P r) >>= λ tu →
     ok (inst P l , tu)
+
+  -- ⇒-lst
+  infer′ k σ rs Γ run  (lst _) = fail "no promotion: List is an erased term"
+  infer′ k σ rs Γ evid (lst _) = fail "no promotion: List is an erased term"
+  infer′ k σ rs Γ spec (lst A) =
+    checkTy k σ rs Γ A >>
+    ok (typ , u0s)
+
+  -- nil is checked (⇐-nil)
+  infer′ k σ rs Γ m nil = fail "nil requires an expected List type"
+
+  -- ⇒-cons
+  infer′ k σ rs Γ m (cons a as) =
+    infer k σ rs Γ m a >>= λ (A , au) →
+    check k σ rs Γ m as (lst A) >>= λ asu →
+    combine m au asu >>= λ uses →
+    ok (lst A , uses)
+
+  -- ⇒-mLst
+  infer′ k σ rs Γ m (mLst e P n c) =
+    infer k σ rs Γ m e >>= λ (et , eu) →
+    viewLst k σ et >>= λ A →
+    checkTy k σ (extRec rs false false) (ext Γ affine (lst A)) P >>
+    check k σ rs Γ m n (inst P nil) >>= λ nu →
+    let ok? = scrutOk rs e
+        rsA  = extRec rs false false
+        rsAs = extRec rsA ok? ok?
+        Γc   = ext (ext Γ affine A) affine (lst (wk A))
+    in check k σ rsAs Γc m c (motCons P) >>= λ cu-uses →
+    let (uAs , rest1) = headTail cu-uses
+        (uA  , rest0) = headTail rest1
+    in checkBound m affine uAs >>
+       checkBound m affine uA >>
+       let bu = combineAlt m nu rest0
+       in combine m eu bu >>= λ uses → ok (inst P e , uses)
+    where
+      headTail : ∀ {n} → UseVec (suc n) → Use × UseVec n
+      headTail (u ∷ us) = u , us
 
   -- ⇒-mNat
   infer′ k σ rs Γ m (mNat e P z s) =
@@ -989,7 +1102,9 @@ mutual
     checkTy k σ rs Γ A >>
     conv k σ A A′ >>
     (if eqQty q reuse then guard "+ requires a Data type" (isData k σ A′) else ok tt) >>
-    check k σ (extRec rs false (RecSt.nextOk rs)) (ext Γ q A′) m t B >>= λ uses →
+    let rs1 = extRec rs false (RecSt.nextOk rs)
+        rs′ = if eqQty q erased then keepNext rs rs1 else rs1
+    in check k σ rs′ (ext Γ q A′) m t B >>= λ uses →
     let (u₀ , us) = headTail uses
     in checkBound m q u₀ >> ok us
     where
@@ -1000,6 +1115,18 @@ mutual
   check′ k σ rs Γ m rfl T =
     viewId k σ T >>= λ (_ , a , b) →
     conv k σ a b >> ok u0s
+
+  -- ⇐-nil
+  check′ k σ rs Γ m nil T =
+    viewLst k σ T >>= λ _ →
+    ok u0s
+
+  -- ⇐-cons
+  check′ k σ rs Γ m (cons a as) T =
+    viewLst k σ T >>= λ A →
+    check k σ rs Γ m a A >>= λ au →
+    check k σ rs Γ m as (lst A) >>= λ asu →
+    combine m au asu
 
   -- ⇐-left
   check′ k σ rs Γ m (left a) T =

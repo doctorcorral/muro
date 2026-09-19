@@ -1,0 +1,58 @@
+------------------------------------------------------------------------
+-- List A, length, and length (cons 1 (cons 1 nil)) ≡ 2.
+------------------------------------------------------------------------
+
+module Muro.ExampleList where
+
+open import Data.List.Base using (List; []; _∷_)
+open import Data.Unit.Base using (⊤; tt)
+open import Relation.Binary.PropositionalEquality.Core using (_≡_; refl)
+
+open import Muro.Base
+open import Muro.Syntax
+open import Muro.Subst
+open import Muro.Check
+
+lengthTy : ∀ {V} → PTm V
+lengthTy = pi erased typ (λ A → pi affine (lst (var A)) (λ _ → nat))
+
+lengthTm : ∀ {V} → PTm V
+lengthTm =
+  lam erased typ (λ A →
+  lam affine (lst (var A)) (λ xs →
+    mLst (var xs) (λ _ → nat)
+      ze
+      (λ _ as → su (app (app (def 0) (var A)) (var as)))))
+
+ones2Ty : Tm 0
+ones2Ty = lst nat
+
+ones2Tm : Tm 0
+ones2Tm = cons (su ze) (cons (su ze) nil)
+
+lenOkTy : Tm 0
+lenOkTy = idt nat (app (app (def 0) nat) (def 1)) (su (su ze))
+
+lenOkTm : Tm 0
+lenOkTm = rfl
+
+data IsOk {A : Set} : Result A → Set where
+  is-ok : (x : A) → IsOk (ok x)
+
+out : ∀ {A} {r : Result A} → IsOk r → A
+out (is-ok x) = x
+
+lengthTy-ok : IsOk (unembed∀ lengthTy)
+lengthTm-ok : IsOk (unembed∀ lengthTm)
+lengthTy-ok = is-ok _
+lengthTm-ok = is-ok _
+
+listBook : Sig
+listBook =
+  mkDef "length"       run  (out lengthTy-ok) (out lengthTm-ok) ∷
+  mkDef "ones2"        run  ones2Ty           ones2Tm           ∷
+  mkDef "length-ones2" evid lenOkTy           lenOkTm           ∷
+  []
+
+length-ones2-checks : checkSig! listBook ≡ ok tt
+length-ones2-checks = refl
