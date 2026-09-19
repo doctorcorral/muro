@@ -35,6 +35,12 @@ data Tm (n : ℕ) : Set where
   unit  : Tm n
   one   : Tm n
   empty : Tm n
+  -- coproduct A ⊎ B (Either)
+  sum   : Tm n → Tm n → Tm n
+  left  : Tm n → Tm n
+  right : Tm n → Tm n
+  mSum  : (scrut : Tm n) (mot : Tm (suc n))
+          (tl tr : Tm (suc n)) → Tm n
   -- match with explicit motive
   mNat  : (scrut : Tm n) (mot : Tm (suc n))
           (tz : Tm n) (ts : Tm (suc n)) → Tm n
@@ -73,6 +79,10 @@ data PTm (V : Set) : Set where
   unit  : PTm V
   one   : PTm V
   empty : PTm V
+  sum   : PTm V → PTm V → PTm V
+  left  : PTm V → PTm V
+  right : PTm V → PTm V
+  mSum  : PTm V → (V → PTm V) → (V → PTm V) → (V → PTm V) → PTm V
   mNat  : PTm V → (V → PTm V) → PTm V → (V → PTm V) → PTm V
   mEmp  : PTm V → (V → PTm V) → PTm V
   mUnit : PTm V → (V → PTm V) → PTm V → PTm V
@@ -128,6 +138,12 @@ showTm (su t)       = "suc(" ++ showTm t ++ ")"
 showTm unit         = "Unit"
 showTm one          = "tt"
 showTm empty        = "Empty"
+showTm (sum A B)    = "(" ++ showTm A ++ " ⊎ " ++ showTm B ++ ")"
+showTm (left t)     = "left(" ++ showTm t ++ ")"
+showTm (right t)    = "right(" ++ showTm t ++ ")"
+showTm (mSum e P l r) =
+  "matchEither " ++ showTm e ++ " motive " ++ showTm P ++
+  " | left => " ++ showTm l ++ " | right => " ++ showTm r
 showTm (mNat e P z s) =
   "matchNat " ++ showTm e ++ " motive " ++ showTm P ++
   " | 0 => " ++ showTm z ++ " | suc => " ++ showTm s

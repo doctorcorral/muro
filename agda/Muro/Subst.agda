@@ -32,6 +32,10 @@ ren ρ (su t)        = su (ren ρ t)
 ren ρ unit          = unit
 ren ρ one           = one
 ren ρ empty         = empty
+ren ρ (sum A B)     = sum (ren ρ A) (ren ρ B)
+ren ρ (left t)      = left (ren ρ t)
+ren ρ (right t)     = right (ren ρ t)
+ren ρ (mSum e P l r)= mSum (ren ρ e) (ren (lift ρ) P) (ren (lift ρ) l) (ren (lift ρ) r)
 ren ρ (mNat e P z s)= mNat (ren ρ e) (ren (lift ρ) P) (ren ρ z) (ren (lift ρ) s)
 ren ρ (mEmp e P)    = mEmp (ren ρ e) (ren (lift ρ) P)
 ren ρ (mUnit e P u) = mUnit (ren ρ e) (ren (lift ρ) P) (ren ρ u)
@@ -73,6 +77,10 @@ sub σ (su t)         = su (sub σ t)
 sub σ unit           = unit
 sub σ one            = one
 sub σ empty          = empty
+sub σ (sum A B)      = sum (sub σ A) (sub σ B)
+sub σ (left t)       = left (sub σ t)
+sub σ (right t)      = right (sub σ t)
+sub σ (mSum e P l r) = mSum (sub σ e) (sub (lifts σ) P) (sub (lifts σ) l) (sub (lifts σ) r)
 sub σ (mNat e P z s) = mNat (sub σ e) (sub (lifts σ) P) (sub σ z) (sub (lifts σ) s)
 sub σ (mEmp e P)     = mEmp (sub σ e) (sub (lifts σ) P)
 sub σ (mUnit e P u)  = mUnit (sub σ e) (sub (lifts σ) P) (sub σ u)
@@ -114,6 +122,13 @@ toPHOAS ρ (su t)         = su (toPHOAS ρ t)
 toPHOAS ρ unit           = unit
 toPHOAS ρ one            = one
 toPHOAS ρ empty          = empty
+toPHOAS ρ (sum A B)      = sum (toPHOAS ρ A) (toPHOAS ρ B)
+toPHOAS ρ (left t)       = left (toPHOAS ρ t)
+toPHOAS ρ (right t)      = right (toPHOAS ρ t)
+toPHOAS ρ (mSum e P l r) = mSum (toPHOAS ρ e)
+                                (λ v → toPHOAS (λ { zero → v ; (suc i) → ρ i }) P)
+                                (λ v → toPHOAS (λ { zero → v ; (suc i) → ρ i }) l)
+                                (λ v → toPHOAS (λ { zero → v ; (suc i) → ρ i }) r)
 toPHOAS ρ (mNat e P z s) = mNat (toPHOAS ρ e)
                                 (λ v → toPHOAS (λ { zero → v ; (suc i) → ρ i }) P)
                                 (toPHOAS ρ z)
@@ -180,6 +195,15 @@ unembedN nxt env (su t)         = su <$> unembedN nxt env t
 unembedN nxt env unit           = ok unit
 unembedN nxt env one            = ok one
 unembedN nxt env empty          = ok empty
+unembedN nxt env (sum A B)      =
+  sum <$> unembedN nxt env A ⊛ unembedN nxt env B
+unembedN nxt env (left t)       = left <$> unembedN nxt env t
+unembedN nxt env (right t)      = right <$> unembedN nxt env t
+unembedN nxt env (mSum e P l r) =
+  mSum <$> unembedN nxt env e
+       ⊛ unembedN (suc nxt) (nxt ∷ env) (P nxt)
+       ⊛ unembedN (suc nxt) (nxt ∷ env) (l nxt)
+       ⊛ unembedN (suc nxt) (nxt ∷ env) (r nxt)
 unembedN nxt env (mNat e P z s) =
   mNat <$> unembedN nxt env e
        ⊛ unembedN (suc nxt) (nxt ∷ env) (P nxt)

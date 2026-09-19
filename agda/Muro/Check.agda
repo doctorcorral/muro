@@ -206,6 +206,10 @@ mutual
   ... | one = whnf k σ u
   ... | e′  = mUnit e′ P u
   whnf (suc k) σ (mEmp e P) = mEmp (whnf k σ e) P
+  whnf (suc k) σ (mSum e P l r) with whnf k σ e
+  ... | left a  = whnf k σ (inst l a)
+  ... | right b = whnf k σ (inst r b)
+  ... | e′      = mSum e′ P l r
   whnf (suc k) σ (def i) with lookupDef σ i
   ... | ok d    = whnf k σ (closed (Def.dbody d))
   ... | fail _  = def i
@@ -242,6 +246,7 @@ isRunType k σ t = runTy (whnf k σ t)
     runTy (pi _ _ B)  = runTy B
     runTy (stream A)  = runTy A
     runTy (prod A B)  = runTy A ∧ runTy B
+    runTy (sum A B)   = runTy A ∧ runTy B
     runTy _           = false
 
 ------------------------------------------------------------------------
@@ -262,6 +267,11 @@ synEq (su a)         (su b)         = synEq a b
 synEq unit           unit           = true
 synEq one            one            = true
 synEq empty          empty          = true
+synEq (sum A B)      (sum A′ B′)    = synEq A A′ ∧ synEq B B′
+synEq (left t)       (left t′)      = synEq t t′
+synEq (right t)      (right t′)     = synEq t t′
+synEq (mSum e P l r) (mSum e′ P′ l′ r′) =
+  synEq e e′ ∧ synEq P P′ ∧ synEq l l′ ∧ synEq r r′
 synEq (mNat e P z s) (mNat e′ P′ z′ s′) =
   synEq e e′ ∧ synEq P P′ ∧ synEq z z′ ∧ synEq s s′
 synEq (mEmp e P)     (mEmp e′ P′)   = synEq e e′ ∧ synEq P P′
@@ -281,10 +291,12 @@ synEq (ucons s)      (ucons s′)     = synEq s s′
 synEq _              _              = false
 
 ctorHead : ∀ {n} → Tm n → Bool
-ctorHead ze     = true
-ctorHead (su _) = true
-ctorHead one    = true
-ctorHead _      = false
+ctorHead ze      = true
+ctorHead (su _)  = true
+ctorHead one     = true
+ctorHead (left _)  = true
+ctorHead (right _) = true
+ctorHead _       = false
 
 mutual
   {-# TERMINATING #-}
@@ -314,6 +326,11 @@ mutual
   convN k σ nat           nat           = ok tt
   convN k σ unit          unit          = ok tt
   convN k σ empty         empty         = ok tt
+  convN k σ (sum A B)     (sum A′ B′)   = conv k σ A A′ >> conv k σ B B′
+  convN k σ (left t)      (left t′)     = conv k σ t t′
+  convN k σ (right t)     (right t′)    = conv k σ t t′
+  convN k σ (mSum e P l r) (mSum e′ P′ l′ r′) =
+    conv k σ e e′ >> conv k σ P P′ >> conv k σ l l′ >> conv k σ r r′
   convN k σ ze            ze            = ok tt
   convN k σ one           one           = ok tt
   convN k σ rfl           rfl           = ok tt
@@ -368,6 +385,8 @@ data _≈[_]_ {n} : Tm n → Sig → Tm n → Set where
   ≈-ιuncons : ∀ {σ s f h t} →
               app f s ≈[ σ ] pair h t →
               ucons (unf s f) ≈[ σ ] pair h (unf t f)
+  ≈-ιleft  : ∀ {σ a P l r} → mSum (left a) P l r ≈[ σ ] inst l a
+  ≈-ιright : ∀ {σ b P l r} → mSum (right b) P l r ≈[ σ ] inst r b
 
 ------------------------------------------------------------------------
 -- Spec: bidirectional judgments.
@@ -499,6 +518,18 @@ data _,_⊢[_]_⇒_ σ Γ where
     → σ , Γ ⊢[ m ] s ⇐ stream A
     → σ , Γ ⊢[ m ] ucons s ⇒ prod A (stream A)
 
+  ⇒-sum : ∀ {A B}
+    → σ , Γ ⊢ A wf
+    → σ , Γ ⊢ B wf
+    → σ , Γ ⊢[ spec ] sum A B ⇒ typ
+
+  ⇒-mSum : ∀ {m A B e P l r}
+    → σ , Γ ⊢[ m ] e ⇐ sum A B
+    → σ , ext Γ affine (sum A B) ⊢ P wf
+    → σ , ext Γ affine A ⊢[ m ] l ⇐ sub (λ { zero → left (var zero) ; (suc i) → var (suc i) }) P
+    → σ , ext Γ affine B ⊢[ m ] r ⇐ sub (λ { zero → right (var zero) ; (suc i) → var (suc i) }) P
+    → σ , Γ ⊢[ m ] mSum e P l r ⇒ inst P e
+
 data _,_⊢[_]_⇐_ σ Γ where
   ⇐-conv : ∀ {m e A B}
     → σ , Γ ⊢[ m ] e ⇒ B
@@ -514,6 +545,14 @@ data _,_⊢[_]_⇐_ σ Γ where
   ⇐-refl : ∀ {m A a b}
     → a ≈[ σ ] b
     → σ , Γ ⊢[ m ] rfl ⇐ idt A a b
+
+  ⇐-left : ∀ {m A B a}
+    → σ , Γ ⊢[ m ] a ⇐ A
+    → σ , Γ ⊢[ m ] left a ⇐ sum A B
+
+  ⇐-right : ∀ {m A B b}
+    → σ , Γ ⊢[ m ] b ⇐ B
+    → σ , Γ ⊢[ m ] right b ⇐ sum A B
 
 -- Intentionally absent: spec ⇒ evid, evid ⇒ run, spec ⇒ run.
 
@@ -541,6 +580,11 @@ viewStream k σ t with whnf k σ t
 ... | stream A = ok A
 ... | t′       = fail ("expected Stream, got " ++ showTm t′)
 
+viewSum : ∀ {n} → ℕ → Sig → Tm n → Result (Tm n × Tm n)
+viewSum k σ t with whnf k σ t
+... | sum A B = ok (A , B)
+... | t′      = fail ("expected Either, got " ++ showTm t′)
+
 hasSelf : ∀ {n} → Maybe ℕ → Tm n → Bool
 hasSelf (just j) (def i) = i ≡ᵇ j
 hasSelf s (app f a)      = hasSelf s f ∨ hasSelf s a
@@ -554,6 +598,10 @@ hasSelf s (lam _ A t)    = hasSelf s A ∨ hasSelf s t
 hasSelf s (pi _ A B)     = hasSelf s A ∨ hasSelf s B
 hasSelf s (prod A B)     = hasSelf s A ∨ hasSelf s B
 hasSelf s (stream A)     = hasSelf s A
+hasSelf s (sum A B)      = hasSelf s A ∨ hasSelf s B
+hasSelf s (left t)       = hasSelf s t
+hasSelf s (right t)      = hasSelf s t
+hasSelf s (mSum e P l r) = hasSelf s e ∨ hasSelf s P ∨ hasSelf s l ∨ hasSelf s r
 hasSelf s (mNat e P z u) = hasSelf s e ∨ hasSelf s P ∨ hasSelf s z ∨ hasSelf s u
 hasSelf s (mEmp e P)     = hasSelf s e ∨ hasSelf s P
 hasSelf s (mUnit e P u)  = hasSelf s e ∨ hasSelf s P ∨ hasSelf s u
@@ -592,6 +640,20 @@ motSucσ (suc i) = var (suc i)
 
 motSuc : ∀ {n} → Tm (suc n) → Tm (suc n)
 motSuc P = sub motSucσ P
+
+motLeftσ : ∀ {n} → Fin (suc n) → Tm (suc n)
+motLeftσ zero    = left (var zero)
+motLeftσ (suc i) = var (suc i)
+
+motLeft : ∀ {n} → Tm (suc n) → Tm (suc n)
+motLeft P = sub motLeftσ P
+
+motRightσ : ∀ {n} → Fin (suc n) → Tm (suc n)
+motRightσ zero    = right (var zero)
+motRightσ (suc i) = var (suc i)
+
+motRight : ∀ {n} → Tm (suc n) → Tm (suc n)
+motRight P = sub motRightσ P
 
 checkRec : ∀ {n} → ℕ → Sig → Mode → RecSt n → Tm n → Result ⊤
 checkRec _ _ spec _ _ = ok tt
@@ -838,6 +900,38 @@ mutual
     viewStream k σ T >>= λ A →
     ok (prod A (stream A) , u)
 
+  -- ⇒-sum
+  infer′ k σ rs Γ run  (sum _ _) = fail "no promotion: Either is an erased term"
+  infer′ k σ rs Γ evid (sum _ _) = fail "no promotion: Either is an erased term"
+  infer′ k σ rs Γ spec (sum A B) =
+    checkTy k σ rs Γ A >>
+    checkTy k σ rs Γ B >>
+    ok (typ , u0s)
+
+  -- left / right are checked (⇐-left / ⇐-right)
+  infer′ k σ rs Γ m (left _)  = fail "left requires an expected Either type"
+  infer′ k σ rs Γ m (right _) = fail "right requires an expected Either type"
+
+  -- ⇒-mSum
+  infer′ k σ rs Γ m (mSum e P l r) =
+    infer k σ rs Γ m e >>= λ (et , eu) →
+    viewSum k σ et >>= λ (A , B) →
+    checkTy k σ (extRec rs false false) (ext Γ affine (sum A B)) P >>
+    let ok? = scrutOk rs e
+        rsL = extRec rs ok? ok?
+        rsR = extRec rs ok? ok?
+    in check k σ rsL (ext Γ affine A) m l (motLeft P) >>= λ lu-uses →
+    check k σ rsR (ext Γ affine B) m r (motRight P) >>= λ ru-uses →
+    let (uL , lus) = headTail lu-uses
+        (uR , rus) = headTail ru-uses
+    in checkBound m affine uL >>
+       checkBound m affine uR >>
+       let bu = combineAlt m lus rus
+       in combine m eu bu >>= λ uses → ok (inst P e , uses)
+    where
+      headTail : ∀ {n} → UseVec (suc n) → Use × UseVec n
+      headTail (u ∷ us) = u , us
+
   -- ⇐-lam
   check′ k σ rs Γ m (lam q A t) T with viewPi k σ T
   ... | fail _ = infer k σ rs Γ m (lam q A t) >>= λ (B , u) → conv k σ B T >> ok u
@@ -857,6 +951,16 @@ mutual
   check′ k σ rs Γ m rfl T =
     viewId k σ T >>= λ (_ , a , b) →
     conv k σ a b >> ok u0s
+
+  -- ⇐-left
+  check′ k σ rs Γ m (left a) T =
+    viewSum k σ T >>= λ (A , _) →
+    check k σ rs Γ m a A
+
+  -- ⇐-right
+  check′ k σ rs Γ m (right b) T =
+    viewSum k σ T >>= λ (_ , B) →
+    check k σ rs Γ m b B
 
   -- ⇐-conv (default)
   check′ k σ rs Γ m e A =
