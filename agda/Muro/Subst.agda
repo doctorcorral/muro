@@ -63,6 +63,11 @@ stream A = nu (prod (wk A) (var zero))
 always : ∀ {n} → Tm n → Tm n → Tm n
 always P s = nu (prod (wk (app P (fst (ucons s)))) (var zero))
 
+-- σ ~ τ = ν R. {head σ ≡ head τ : A} × R
+bisim : ∀ {n} → Tm n → Tm n → Tm n → Tm n
+bisim A σ τ =
+  nu (prod (wk (idt A (fst (ucons σ)) (fst (ucons τ)))) (var zero))
+
 fromZero : ∀ {n} → Fin 0 → Fin n
 fromZero ()
 

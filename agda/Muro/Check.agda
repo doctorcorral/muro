@@ -1018,7 +1018,20 @@ mutual
     check k σ rs Γ m b B >>= λ bu →
     combine m au bu
 
-  -- ⇐-unf
+  -- ⇐-unf (λ may be affine or + on Data)
+  check′ k σ rs Γ m (unf seed (lam q A t)) T =
+    viewNu k σ T >>= λ F →
+    infer k σ rs Γ m seed >>= λ (S , seedU) →
+    conv k σ A S >>
+    check k σ (extRec rs false (RecSt.nextOk rs)) (ext Γ q S) m t (wk (inst F S)) >>= λ uses →
+    let (u₀ , us) = headTail uses
+    in checkBound m q u₀ >>
+       checkUnfold k σ m rs (lam q A t) >>
+       combine m seedU us
+    where
+      headTail : ∀ {n} → UseVec (suc n) → Use × UseVec n
+      headTail (u ∷ us) = u , us
+
   check′ k σ rs Γ m (unf seed f) T =
     viewNu k σ T >>= λ F →
     infer k σ rs Γ m seed >>= λ (S , seedU) →
