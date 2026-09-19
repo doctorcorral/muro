@@ -102,6 +102,30 @@ defmodule Muro.Subst do
 
       {:ucons, s} ->
         {:ucons, ren(rho, s)}
+
+      :i64 ->
+        :i64
+
+      :f32ty ->
+        :f32ty
+
+      {:tensor, d, s} ->
+        {:tensor, ren(rho, d), ren(rho, s)}
+
+      {:addi, x, y} ->
+        {:addi, ren(rho, x), ren(rho, y)}
+
+      {:muli, x, y} ->
+        {:muli, ren(rho, x), ren(rho, y)}
+
+      {:addt, t, u} ->
+        {:addt, ren(rho, t), ren(rho, u)}
+
+      {:toi64, t} ->
+        {:toi64, ren(rho, t)}
+
+      {:packi, x, y} ->
+        {:packi, ren(rho, x), ren(rho, y)}
     end
   end
 
@@ -202,6 +226,30 @@ defmodule Muro.Subst do
 
       {:ucons, s} ->
         {:ucons, sub(sigma, s)}
+
+      :i64 ->
+        :i64
+
+      :f32ty ->
+        :f32ty
+
+      {:tensor, d, s} ->
+        {:tensor, sub(sigma, d), sub(sigma, s)}
+
+      {:addi, x, y} ->
+        {:addi, sub(sigma, x), sub(sigma, y)}
+
+      {:muli, x, y} ->
+        {:muli, sub(sigma, x), sub(sigma, y)}
+
+      {:addt, t, u} ->
+        {:addt, sub(sigma, t), sub(sigma, u)}
+
+      {:toi64, t} ->
+        {:toi64, sub(sigma, t)}
+
+      {:packi, x, y} ->
+        {:packi, sub(sigma, x), sub(sigma, y)}
     end
   end
 

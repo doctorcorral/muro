@@ -19,6 +19,6 @@ defmodule Muro.MixProject do
   defp elixirc_paths(_), do: ["lib"]
 
   defp deps do
-    []
+    [{:nx, "~> 0.9"}]
   end
 end

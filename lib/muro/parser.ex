@@ -347,6 +347,30 @@ defmodule Muro.Parser do
       has_prefix?(s, "Nat") ->
         {:ok, :nat, after_kw(s, "Nat")}
 
+      word_kw?(s, "I64") ->
+        {:ok, :i64, after_kw(s, "I64")}
+
+      word_kw?(s, "F32") ->
+        {:ok, :f32ty, after_kw(s, "F32")}
+
+      word_kw?(s, "Tensor") ->
+        parse_binary(s, "Tensor", :tensor)
+
+      word_kw?(s, "addi") ->
+        parse_binary(s, "addi", :addi)
+
+      word_kw?(s, "muli") ->
+        parse_binary(s, "muli", :muli)
+
+      word_kw?(s, "addt") ->
+        parse_binary(s, "addt", :addt)
+
+      word_kw?(s, "toI64") ->
+        parse_unary(s, "toI64", :toi64)
+
+      word_kw?(s, "packI") ->
+        parse_binary(s, "packI", :packi)
+
       has_prefix?(s, "Unit") ->
         {:ok, :unit, after_kw(s, "Unit")}
 
@@ -510,6 +534,14 @@ defmodule Muro.Parser do
   defp parse_unary(s, w, tag) do
     with {:ok, e, rest} <- parse_unary_arg(s, w) do
       {:ok, {tag, e}, rest}
+    end
+  end
+
+  defp parse_binary(s, w, tag) do
+    with {:ok, rest} <- kw(s, w),
+         {:ok, a, rest} <- parse_atom(skip(rest)),
+         {:ok, b, rest} <- parse_atom(skip(rest)) do
+      {:ok, {tag, a, b}, rest}
     end
   end
 

@@ -321,6 +321,15 @@ defmodule Muro.Check do
       :empty ->
         as == []
 
+      :i64 ->
+        as == []
+
+      :f32ty ->
+        as == []
+
+      {:tensor, _, _} ->
+        as == []
+
       {:def, n} ->
         case lookup_data(book, n) do
           {:ok, d} ->
@@ -342,6 +351,9 @@ defmodule Muro.Check do
       :nat -> true
       :unit -> true
       :empty -> true
+      :i64 -> true
+      :f32ty -> true
+      {:tensor, _, _} -> true
       {:pi, _, _, b} -> run_ty?(k, book, b)
       {:nu, f} -> run_ty?(k, book, Subst.inst(f, :unit))
       {:prod, a, b} -> run_ty?(k, book, a) and run_ty?(k, book, b)
@@ -454,6 +466,28 @@ defmodule Muro.Check do
 
   defp conv_n(k, book, {:ucons, s}, {:ucons, s1}), do: conv(k, book, s, s1)
 
+  defp conv_n(k, book, {:tensor, d, s}, {:tensor, d1, s1}) do
+    with :ok <- conv(k, book, d, d1), do: conv(k, book, s, s1)
+  end
+
+  defp conv_n(k, book, {:addi, x, y}, {:addi, x1, y1}) do
+    with :ok <- conv(k, book, x, x1), do: conv(k, book, y, y1)
+  end
+
+  defp conv_n(k, book, {:muli, x, y}, {:muli, x1, y1}) do
+    with :ok <- conv(k, book, x, x1), do: conv(k, book, y, y1)
+  end
+
+  defp conv_n(k, book, {:addt, t, u}, {:addt, t1, u1}) do
+    with :ok <- conv(k, book, t, t1), do: conv(k, book, u, u1)
+  end
+
+  defp conv_n(k, book, {:toi64, t}, {:toi64, t1}), do: conv(k, book, t, t1)
+
+  defp conv_n(k, book, {:packi, x, y}, {:packi, x1, y1}) do
+    with :ok <- conv(k, book, x, x1), do: conv(k, book, y, y1)
+  end
+
   defp conv_n(k, book, {:mdata, e, p, bs}, {:mdata, e1, p1, bs1}) do
     with :ok <- conv(k, book, e, e1),
          :ok <- conv(k, book, p, p1) do
@@ -485,6 +519,33 @@ defmodule Muro.Check do
       t1 -> {:error, "expected Id, got #{inspect(t1)}"}
     end
   end
+
+  defp nx_dtype?(k, book, t) do
+    case whnf(k, book, t) do
+      :i64 -> true
+      :f32ty -> true
+      _ -> false
+    end
+  end
+
+  defp float_id_forbidden?(k, book, a) do
+    case whnf(k, book, a) do
+      :f32ty ->
+        true
+
+      {:tensor, d, _} ->
+        case whnf(k, book, d) do
+          :f32ty -> true
+          _ -> false
+        end
+
+      _ ->
+        false
+    end
+  end
+
+  # packI shape: toI64 (suc (suc 0))
+  defp i64two, do: {:toi64, {:su, {:su, :ze}}}
 
   defp view_prod(k, book, t) do
     case whnf(k, book, t) do
@@ -588,6 +649,12 @@ defmodule Muro.Check do
   defp has_self?(self, {:snd, t}), do: has_self?(self, t)
   defp has_self?(self, {:unf, s, f}), do: has_self?(self, s) or has_self?(self, f)
   defp has_self?(self, {:ucons, s}), do: has_self?(self, s)
+  defp has_self?(self, {:tensor, d, s}), do: has_self?(self, d) or has_self?(self, s)
+  defp has_self?(self, {:addi, x, y}), do: has_self?(self, x) or has_self?(self, y)
+  defp has_self?(self, {:muli, x, y}), do: has_self?(self, x) or has_self?(self, y)
+  defp has_self?(self, {:addt, t, u}), do: has_self?(self, t) or has_self?(self, u)
+  defp has_self?(self, {:toi64, t}), do: has_self?(self, t)
+  defp has_self?(self, {:packi, x, y}), do: has_self?(self, x) or has_self?(self, y)
   defp has_self?(self, {:lam, _, a, t}), do: has_self?(self, a) or has_self?(self, t)
   defp has_self?(self, {:pi, _, a, b}), do: has_self?(self, a) or has_self?(self, b)
   defp has_self?(self, {:prod, a, b}), do: has_self?(self, a) or has_self?(self, b)
@@ -621,6 +688,12 @@ defmodule Muro.Check do
   defp occurs?(x, {:unf, s, f}), do: occurs?(x, s) or occurs?(x, f)
   defp occurs?(x, {:ucons, s}), do: occurs?(x, s)
   defp occurs?(x, {:idt, a, b, c}), do: occurs?(x, a) or occurs?(x, b) or occurs?(x, c)
+  defp occurs?(x, {:tensor, d, s}), do: occurs?(x, d) or occurs?(x, s)
+  defp occurs?(x, {:addi, a, b}), do: occurs?(x, a) or occurs?(x, b)
+  defp occurs?(x, {:muli, a, b}), do: occurs?(x, a) or occurs?(x, b)
+  defp occurs?(x, {:addt, t, u}), do: occurs?(x, t) or occurs?(x, u)
+  defp occurs?(x, {:toi64, t}), do: occurs?(x, t)
+  defp occurs?(x, {:packi, a, b}), do: occurs?(x, a) or occurs?(x, b)
   defp occurs?(_, _), do: false
 
   defp spos?(_x, {:var, _}), do: true
@@ -777,6 +850,11 @@ defmodule Muro.Check do
       # ⇒-idt
       {:spec, {:idt, a, x, y}} ->
         with :ok <- check_ty(k, book, rs, gamma, a),
+             :ok <-
+               if(float_id_forbidden?(k, book, a),
+                 do: {:error, "kernel identity is not defined on F32"},
+                 else: :ok
+               ),
              {:ok, _} <- check(k, book, rs, gamma, :spec, x, a),
              {:ok, _} <- check(k, book, rs, gamma, :spec, y, a),
              do: {:ok, {:typ, u0s(n)}}
@@ -942,6 +1020,76 @@ defmodule Muro.Check do
           {:ok, {Subst.inst(f, tt), u}}
         end
 
+      # ⇒-i64 / ⇒-f32ty / ⇒-tensor
+      {m, :i64} when m in [:run, :evidence] ->
+        {:error, "no promotion: I64 is an erased term"}
+
+      {m, :f32ty} when m in [:run, :evidence] ->
+        {:error, "no promotion: F32 is an erased term"}
+
+      {m, {:tensor, _, _}} when m in [:run, :evidence] ->
+        {:error, "no promotion: Tensor is an erased term"}
+
+      {:spec, :i64} ->
+        {:ok, {:typ, u0s(n)}}
+
+      {:spec, :f32ty} ->
+        {:ok, {:typ, u0s(n)}}
+
+      {:spec, {:tensor, d, s}} ->
+        with :ok <- check_ty(k, book, rs, gamma, d),
+             :ok <-
+               if(nx_dtype?(k, book, d),
+                 do: :ok,
+                 else: {:error, "Tensor dtype must be I64 or F32"}
+               ),
+             {:ok, _} <- check(k, book, rs, gamma, :spec, s, :i64) do
+          {:ok, {:typ, u0s(n)}}
+        end
+
+      # ⇒-addi / ⇒-muli
+      {m, {:addi, x, y}} ->
+        with {:ok, xu} <- check(k, book, rs, gamma, m, x, :i64),
+             {:ok, yu} <- check(k, book, rs, gamma, m, y, :i64),
+             {:ok, uses} <- combine(m, xu, yu) do
+          {:ok, {:i64, uses}}
+        end
+
+      {m, {:muli, x, y}} ->
+        with {:ok, xu} <- check(k, book, rs, gamma, m, x, :i64),
+             {:ok, yu} <- check(k, book, rs, gamma, m, y, :i64),
+             {:ok, uses} <- combine(m, xu, yu) do
+          {:ok, {:i64, uses}}
+        end
+
+      # ⇒-addt
+      {m, {:addt, t, u}} ->
+        with {:ok, {tt, tu}} <- infer(k, book, rs, gamma, m, t) do
+          case whnf(k, book, tt) do
+            {:tensor, d, s} ->
+              with {:ok, uu} <- check(k, book, rs, gamma, m, u, {:tensor, d, s}),
+                   {:ok, uses} <- combine(m, tu, uu) do
+                {:ok, {{:tensor, d, s}, uses}}
+              end
+
+            t1 ->
+              {:error, "addt expected a Tensor, got #{inspect(t1)}"}
+          end
+        end
+
+      # ⇒-toi64
+      {m, {:toi64, n1}} ->
+        with {:ok, u} <- check(k, book, rs, gamma, m, n1, :nat),
+             do: {:ok, {:i64, u}}
+
+      # ⇒-packi
+      {m, {:packi, x, y}} ->
+        with {:ok, xu} <- check(k, book, rs, gamma, m, x, :i64),
+             {:ok, yu} <- check(k, book, rs, gamma, m, y, :i64),
+             {:ok, uses} <- combine(m, xu, yu) do
+          {:ok, {{:tensor, :i64, i64two()}, uses}}
+        end
+
       {_, t1} ->
         {:error, "cannot infer #{inspect(t1)}"}
     end
@@ -1039,7 +1187,12 @@ defmodule Muro.Check do
 
       # ⇐-refl
       :rfl ->
-        with {:ok, {_a, x, y}} <- view_id(k, book, a),
+        with {:ok, {sort, x, y}} <- view_id(k, book, a),
+             :ok <-
+               if(float_id_forbidden?(k, book, sort),
+                 do: {:error, "kernel identity is not defined on F32"},
+                 else: :ok
+               ),
              :ok <- conv(k, book, x, y),
              do: {:ok, u0s(nctx(gamma))}
 
@@ -1441,6 +1594,12 @@ defmodule Muro.Check do
   defp occurs_d?(i, {:unf, s, f}), do: occurs_d?(i, s) or occurs_d?(i, f)
   defp occurs_d?(i, {:ucons, s}), do: occurs_d?(i, s)
   defp occurs_d?(i, {:ann, e, a}), do: occurs_d?(i, e) or occurs_d?(i, a)
+  defp occurs_d?(i, {:tensor, d, s}), do: occurs_d?(i, d) or occurs_d?(i, s)
+  defp occurs_d?(i, {:addi, a, b}), do: occurs_d?(i, a) or occurs_d?(i, b)
+  defp occurs_d?(i, {:muli, a, b}), do: occurs_d?(i, a) or occurs_d?(i, b)
+  defp occurs_d?(i, {:addt, t, u}), do: occurs_d?(i, t) or occurs_d?(i, u)
+  defp occurs_d?(i, {:toi64, t}), do: occurs_d?(i, t)
+  defp occurs_d?(i, {:packi, a, b}), do: occurs_d?(i, a) or occurs_d?(i, b)
 
   defp occurs_d?(i, {:mdata, e, p, bs}),
     do: occurs_d?(i, e) or occurs_d?(i, p) or Enum.any?(bs, fn {_, _, b} -> occurs_d?(i, b) end)

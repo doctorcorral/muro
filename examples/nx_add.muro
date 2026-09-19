@@ -1,0 +1,15 @@
+-- I64 and Tensor I64 n wrap %Nx.Tensor{}. Nat stays Peano.
+-- toI64 is the only Nat → I64 map (total on Peano; example uses small values).
+-- Shape is an I64, not a Peano Nat. No Vec in this file.
+
+def addI : run Π (x : I64) → Π (y : I64) → I64 :=
+  λ (x : I64) → λ (y : I64) → addi x y
+
+def addT : run Π (- n : I64) → Π (+ t : Tensor I64 n) → Tensor I64 n :=
+  λ (- n : I64) → λ (+ t : Tensor I64 n) → addt t t
+
+def t1 : run Tensor I64 (toI64 suc(suc 0)) :=
+  packI (toI64 suc 0) (toI64 suc(suc 0))
+
+def doubled : run Tensor I64 (toI64 suc(suc 0)) :=
+  addT (toI64 suc(suc 0)) t1

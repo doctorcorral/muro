@@ -472,4 +472,58 @@ defmodule Muro.CheckTest do
     assert {:error, msg} = Check.check_sig([bad | book])
     assert msg =~ "descend"
   end
+
+  test "nx_add.muro checks; emitted module runs Nx.add" do
+    src = File.read!("examples/nx_add.muro")
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+
+    out = Emit.emit_module(Muro.NxAdd, book)
+    assert out =~ ~r/\bdef addI\b/
+    assert out =~ ~r/\bdef addT\b/
+    assert out =~ "Nx.add"
+    refute out =~ "defn"
+    refute out =~ "@defn_compiler"
+    Code.eval_string(out)
+
+    t1 = Muro.NxAdd.t1()
+    assert %Nx.Tensor{} = t1
+    assert Nx.to_flat_list(t1) == [1, 2]
+    assert Nx.to_flat_list(Muro.NxAdd.doubled()) == [2, 4]
+    assert Nx.to_flat_list(Muro.NxAdd.addT(Nx.tensor([1, 2], type: :s64))) == [2, 4]
+
+    sum = Muro.NxAdd.addI(Nx.tensor(3, type: :s64), Nx.tensor(4, type: :s64))
+    assert %Nx.Tensor{} = sum
+    assert Nx.to_number(sum) == 7
+  end
+
+  test "Peano Nat is not emitted as s64 except through toI64" do
+    src = File.read!("examples/nx_add.muro")
+    assert {:ok, book} = Parser.parse(src)
+    out = Emit.emit_module(Muro.NxNatEmit, book)
+    assert out =~ "{:suc,"
+    assert out =~ "muro_nat_to_int"
+  end
+
+  test "kernel identity on F32 is refused" do
+    src = """
+    def bad : spec Π (x : F32) → Π (y : F32) → {x ≡ y : F32} :=
+      λ (x : F32) → λ (y : F32) → refl
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "F32"
+  end
+
+  test "kernel identity on Tensor F32 is refused" do
+    src = """
+    def badT : spec Π (n : I64) → Π (x : Tensor F32 n) → Π (y : Tensor F32 n) → {x ≡ y : Tensor F32 n} :=
+      λ (n : I64) → λ (x : Tensor F32 n) → λ (y : Tensor F32 n) → refl
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "F32"
+  end
 end

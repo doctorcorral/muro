@@ -39,6 +39,14 @@ defmodule Muro.Ast do
           | {:nu, name, named}
           | {:unf, named, named}
           | {:ucons, named}
+          | :i64
+          | :f32ty
+          | {:tensor, named, named}
+          | {:addi, named, named}
+          | {:muli, named, named}
+          | {:addt, named, named}
+          | {:toi64, named}
+          | {:packi, named, named}
 
   # de Bruijn. Indices count from the nearest binder (0).
   @type db ::
@@ -70,6 +78,14 @@ defmodule Muro.Ast do
           | {:bisim, db, db}
           | {:unf, db, db}
           | {:ucons, db}
+          | :i64
+          | :f32ty
+          | {:tensor, db, db}
+          | {:addi, db, db}
+          | {:muli, db, db}
+          | {:addt, db, db}
+          | {:toi64, db}
+          | {:packi, db, db}
 
   @type defn :: %{
           name: name,
@@ -206,6 +222,39 @@ defmodule Muro.Ast do
   end
 
   def to_db({:ucons, s}, env), do: map1(s, env, &{:ucons, &1})
+  def to_db(:i64, _), do: {:ok, :i64}
+  def to_db(:f32ty, _), do: {:ok, :f32ty}
+  def to_db({:toi64, t}, env), do: map1(t, env, &{:toi64, &1})
+
+  def to_db({:tensor, d, s}, env) do
+    with {:ok, d1} <- to_db(d, env),
+         {:ok, s1} <- to_db(s, env),
+         do: {:ok, {:tensor, d1, s1}}
+  end
+
+  def to_db({:addi, x, y}, env) do
+    with {:ok, x1} <- to_db(x, env),
+         {:ok, y1} <- to_db(y, env),
+         do: {:ok, {:addi, x1, y1}}
+  end
+
+  def to_db({:muli, x, y}, env) do
+    with {:ok, x1} <- to_db(x, env),
+         {:ok, y1} <- to_db(y, env),
+         do: {:ok, {:muli, x1, y1}}
+  end
+
+  def to_db({:addt, t, u}, env) do
+    with {:ok, t1} <- to_db(t, env),
+         {:ok, u1} <- to_db(u, env),
+         do: {:ok, {:addt, t1, u1}}
+  end
+
+  def to_db({:packi, x, y}, env) do
+    with {:ok, x1} <- to_db(x, env),
+         {:ok, y1} <- to_db(y, env),
+         do: {:ok, {:packi, x1, y1}}
+  end
 
   def to_db({:unf, s, f}, env) do
     with {:ok, s1} <- to_db(s, env),
