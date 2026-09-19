@@ -289,4 +289,36 @@ defmodule Muro.CheckTest do
     assert {:error, msg} = Check.check_sig(book ++ [bad])
     assert msg =~ "unfold" or msg =~ "ν" or msg =~ "unguarded" or msg =~ "convert"
   end
+
+  test "list.muro checks; evidence is not emitted; length runs" do
+    src = File.read!("examples/list.muro")
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+
+    out = Emit.emit_module(Muro.Lists, book)
+    assert out =~ ~r/\bdef length\b/
+    assert out =~ ~r/\bdef ones2\b/
+    refute out =~ "length-ones2"
+    Code.eval_string(out)
+    assert Muro.Lists.length(Muro.Lists.ones2()) == {:suc, {:suc, 0}}
+  end
+
+  test "non-descending list recursion fails" do
+    src = File.read!("examples/list.muro")
+    assert {:ok, book} = Parser.parse(src)
+
+    bad = %{
+      name: "badlen",
+      mode: :run,
+      export: true,
+      type: {:pi, :erased, :typ, "A", {:pi, :affine, {:lst, {:var, "A"}}, "xs", :nat}},
+      body:
+        {:lam, :erased, :typ, "A",
+         {:lam, :affine, {:lst, {:var, "A"}}, "xs",
+          {:app, {:app, {:var, "badlen"}, {:var, "A"}}, {:var, "xs"}}}}
+    }
+
+    assert {:error, msg} = Check.check_sig([bad | book])
+    assert msg =~ "descend"
+  end
 end

@@ -40,6 +40,13 @@ defmodule Muro.Check do
     }
   end
 
+  defp keep_next(old, new), do: %{new | next_ok: old.next_ok}
+
+  defp bind_rec(rs, q) do
+    new = ext_rec(rs, false, rs.next_ok)
+    if q == :erased, do: keep_next(rs, new), else: new
+  end
+
   defp at(list, i), do: Enum.at(list, i) == true
 
   defp scrut_ok(rs, {:var, x}), do: at(rs.rec_ok, x) or at(rs.smaller, x)
@@ -134,6 +141,8 @@ defmodule Muro.Check do
   defp ctor_head?(:one), do: true
   defp ctor_head?({:left, _}), do: true
   defp ctor_head?({:right, _}), do: true
+  defp ctor_head?(:lnil), do: true
+  defp ctor_head?({:cons, _, _}), do: true
   defp ctor_head?(_), do: false
 
   defp nth_qty({:pi, q, _, _}, 0), do: {:ok, q}
@@ -157,17 +166,28 @@ defmodule Muro.Check do
     end
   end
 
-  defp descend(_book, _mode, _rs, _name, [], _j),
-    do: {:error, "recursive call does not descend on a smaller argument"}
+  defp descend(book, mode, rs, name, args, j),
+    do: descend(book, mode, rs, name, args, j, false)
 
-  defp descend(book, mode, rs, name, [a | as], j) do
-    if smaller_var?(rs, a) do
-      with {:ok, d} <- lookup_def(book, name),
-           {:ok, q} <- nth_qty(d.type, j) do
-        if q == :erased, do: descend(book, mode, rs, name, as, j + 1), else: :ok
+  defp descend(_book, _mode, _rs, _name, [], _j, seen_comp) do
+    if seen_comp,
+      do: {:error, "recursive call does not descend on a smaller argument"},
+      else: :ok
+  end
+
+  defp descend(book, mode, rs, name, [a | as], j, seen_comp) do
+    with {:ok, d} <- lookup_def(book, name),
+         {:ok, q} <- nth_qty(d.type, j) do
+      cond do
+        q == :erased ->
+          descend(book, mode, rs, name, as, j + 1, seen_comp)
+
+        smaller_var?(rs, a) ->
+          :ok
+
+        true ->
+          descend(book, mode, rs, name, as, j + 1, true)
       end
-    else
-      descend(book, mode, rs, name, as, j + 1)
     end
   end
 
@@ -195,6 +215,14 @@ defmodule Muro.Check do
       {:left, a} -> whnf(k - 1, book, Subst.inst(l, a))
       {:right, b} -> whnf(k - 1, book, Subst.inst(r, b))
       e1 -> {:msum, e1, p, l, r}
+    end
+  end
+
+  defp whnf(k, book, {:mlst, e, p, n, c}) do
+    case whnf(k - 1, book, e) do
+      :lnil -> whnf(k - 1, book, n)
+      {:cons, a, as} -> whnf(k - 1, book, Subst.inst_cons(c, a, as))
+      e1 -> {:mlst, e1, p, n, c}
     end
   end
 
@@ -250,6 +278,7 @@ defmodule Muro.Check do
       :nat -> true
       :unit -> true
       :empty -> true
+      {:lst, a} -> is_data?(k, book, a)
       _ -> false
     end
   end
@@ -263,6 +292,7 @@ defmodule Muro.Check do
       {:nu, f} -> run_ty?(k, book, Subst.inst(f, :unit))
       {:prod, a, b} -> run_ty?(k, book, a) and run_ty?(k, book, b)
       {:sum, a, b} -> run_ty?(k, book, a) and run_ty?(k, book, b)
+      {:lst, _} -> true
       _ -> false
     end
   end
@@ -384,6 +414,20 @@ defmodule Muro.Check do
          do: conv(k, book, r, r1)
   end
 
+  defp conv_n(k, book, {:lst, a}, {:lst, a1}), do: conv(k, book, a, a1)
+  defp conv_n(_k, _book, :lnil, :lnil), do: :ok
+
+  defp conv_n(k, book, {:cons, a, as}, {:cons, a1, as1}) do
+    with :ok <- conv(k, book, a, a1), do: conv(k, book, as, as1)
+  end
+
+  defp conv_n(k, book, {:mlst, e, p, n, c}, {:mlst, e1, p1, n1, c1}) do
+    with :ok <- conv(k, book, e, e1),
+         :ok <- conv(k, book, p, p1),
+         :ok <- conv(k, book, n, n1),
+         do: conv(k, book, c, c1)
+  end
+
   defp conv_n(_k, _book, u, v),
     do: {:error, "cannot convert #{inspect(u)} ≁ #{inspect(v)}"}
 
@@ -447,6 +491,13 @@ defmodule Muro.Check do
     end
   end
 
+  defp view_lst(k, book, t) do
+    case whnf(k, book, t) do
+      {:lst, a} -> {:ok, a}
+      t1 -> {:error, "expected List, got #{inspect(t1)}"}
+    end
+  end
+
   defp view_sum(k, book, t) do
     case whnf(k, book, t) do
       {:sum, a, b} -> {:ok, {a, b}}
@@ -476,6 +527,13 @@ defmodule Muro.Check do
     has_self?(self, e) or has_self?(self, p) or has_self?(self, l) or has_self?(self, r)
   end
 
+  defp has_self?(self, {:lst, a}), do: has_self?(self, a)
+  defp has_self?(self, {:cons, a, as}), do: has_self?(self, a) or has_self?(self, as)
+
+  defp has_self?(self, {:mlst, e, p, n, c}) do
+    has_self?(self, e) or has_self?(self, p) or has_self?(self, n) or has_self?(self, c)
+  end
+
   defp has_self?(_, _), do: false
 
   defp occurs?(x, {:var, y}), do: x == y
@@ -492,6 +550,13 @@ defmodule Muro.Check do
   defp occurs?(x, {:snd, t}), do: occurs?(x, t)
   defp occurs?(x, {:nu, f}), do: occurs?(x + 1, f)
   defp occurs?(x, {:bisim, s, t}), do: occurs?(x, s) or occurs?(x, t)
+  defp occurs?(x, {:lst, a}), do: occurs?(x, a)
+  defp occurs?(x, {:cons, a, as}), do: occurs?(x, a) or occurs?(x, as)
+
+  defp occurs?(x, {:mlst, e, p, n, c}) do
+    occurs?(x, e) or occurs?(x + 1, p) or occurs?(x, n) or occurs?(x + 2, c)
+  end
+
   defp occurs?(x, {:unf, s, f}), do: occurs?(x, s) or occurs?(x, f)
   defp occurs?(x, {:ucons, s}), do: occurs?(x, s)
   defp occurs?(x, {:idt, a, b, c}), do: occurs?(x, a) or occurs?(x, b) or occurs?(x, c)
@@ -500,6 +565,7 @@ defmodule Muro.Check do
   defp spos?(_x, {:var, _}), do: true
   defp spos?(x, {:prod, a, b}), do: spos?(x, a) and spos?(x, b)
   defp spos?(x, {:sum, a, b}), do: spos?(x, a) and spos?(x, b)
+  defp spos?(x, {:lst, a}), do: spos?(x, a)
   defp spos?(x, {:pi, _, a, b}), do: not occurs?(x, a) and spos?(x + 1, b)
   defp spos?(x, {:nu, f}), do: not occurs?(x + 1, f)
   defp spos?(x, t), do: not occurs?(x, t)
@@ -573,6 +639,9 @@ defmodule Muro.Check do
       {m, :empty} when m in [:run, :evidence] ->
         {:error, "no promotion: Empty is an erased term"}
 
+      {m, {:lst, _}} when m in [:run, :evidence] ->
+        {:error, "no promotion: List is an erased term"}
+
       {m, :typ} when m in [:run, :evidence] ->
         {:error, "no promotion: Type is an erased term"}
 
@@ -585,6 +654,52 @@ defmodule Muro.Check do
 
       {:spec, :empty} ->
         {:ok, {:typ, u0s(n)}}
+
+      {:spec, {:lst, a}} ->
+        with :ok <- check_ty(k, book, rs, gamma, a),
+             do: {:ok, {:typ, u0s(n)}}
+
+      {_, :lnil} ->
+        {:error, "nil requires an expected List type"}
+
+      # ⇒-cons
+      {m, {:cons, a, as}} ->
+        with {:ok, {ta, au}} <- infer(k, book, rs, gamma, m, a),
+             {:ok, asu} <- check(k, book, rs, gamma, m, as, {:lst, ta}),
+             {:ok, uses} <- combine(m, au, asu) do
+          {:ok, {{:lst, ta}, uses}}
+        end
+
+      # ⇒-mLst
+      {m, {:mlst, e, p, n, c}} ->
+        with {:ok, {et, eu}} <- infer(k, book, rs, gamma, m, e),
+             {:ok, a} <- view_lst(k, book, et),
+             :ok <-
+               check_ty(
+                 k,
+                 book,
+                 ext_rec(rs, false, false),
+                 ext(gamma, :affine, {:lst, a}),
+                 p
+               ),
+             {:ok, nu} <- check(k, book, rs, gamma, m, n, Subst.inst(p, :lnil)),
+             ok? = scrut_ok(rs, e),
+             rs_as = ext_rec(ext_rec(rs, false, false), ok?, ok?),
+             {:ok, [u_as, u_a | rest]} <-
+               check(
+                 k,
+                 book,
+                 rs_as,
+                 ext(ext(gamma, :affine, a), :affine, {:lst, Subst.wk(a)}),
+                 m,
+                 c,
+                 Subst.mot_cons(p)
+               ),
+             :ok <- check_bound(m, :affine, u_as),
+             :ok <- check_bound(m, :affine, u_a),
+             {:ok, uses} <- combine(m, eu, combine_alt(m, nu, rest)) do
+          {:ok, {Subst.inst(p, e), uses}}
+        end
 
       {:spec, :typ} ->
         {:error, "Type has no type (no Type : Type)"}
@@ -607,7 +722,7 @@ defmodule Muro.Check do
                  else: :ok
                ),
              {:ok, {b, [u0 | us]}} <-
-               infer(k, book, ext_rec(rs, false, rs.next_ok), ext(gamma, q, a), m, t1),
+               infer(k, book, bind_rec(rs, q), ext(gamma, q, a), m, t1),
              :ok <- check_bound(m, q, u0) do
           {:ok, {{:pi, q, a, b}, us}}
         end
@@ -906,7 +1021,7 @@ defmodule Muro.Check do
                    check(
                      k,
                      book,
-                     ext_rec(rs, false, rs.next_ok),
+                     bind_rec(rs, q),
                      ext(gamma, q, a1),
                      mode,
                      t,
@@ -927,6 +1042,18 @@ defmodule Muro.Check do
         with {:ok, {_a, x, y}} <- view_id(k, book, a),
              :ok <- conv(k, book, x, y),
              do: {:ok, u0s(nctx(gamma))}
+
+      # ⇐-nil
+      :lnil ->
+        with {:ok, _} <- view_lst(k, book, a),
+             do: {:ok, u0s(nctx(gamma))}
+
+      # ⇐-cons
+      {:cons, hd, tl} ->
+        with {:ok, a1} <- view_lst(k, book, a),
+             {:ok, au} <- check(k, book, rs, gamma, mode, hd, a1),
+             {:ok, tu} <- check(k, book, rs, gamma, mode, tl, {:lst, a1}),
+             do: combine(mode, au, tu)
 
       # ⇐-left
       {:left, t} ->

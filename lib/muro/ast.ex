@@ -20,6 +20,10 @@ defmodule Muro.Ast do
           | :unit
           | :one
           | :empty
+          | {:lst, named}
+          | :lnil
+          | {:cons, named, named}
+          | {:mlst, named, name, named, named, name, name, named}
           | {:mnat, named, name, named, named, name, named}
           | {:memp, named, name, named}
           | {:munit, named, name, named, named}
@@ -56,6 +60,10 @@ defmodule Muro.Ast do
           | :unit
           | :one
           | :empty
+          | {:lst, db}
+          | :lnil
+          | {:cons, db, db}
+          | {:mlst, db, db, db, db}
           | {:mnat, db, db, db, db}
           | {:memp, db, db}
           | {:munit, db, db, db}
@@ -101,9 +109,25 @@ defmodule Muro.Ast do
   def to_db(:unit, _), do: {:ok, :unit}
   def to_db(:one, _), do: {:ok, :one}
   def to_db(:empty, _), do: {:ok, :empty}
+  def to_db(:lnil, _), do: {:ok, :lnil}
   def to_db(:rfl, _), do: {:ok, :rfl}
   def to_db({:def, n}, _), do: {:ok, {:def, n}}
   def to_db({:su, t}, env), do: map1(t, env, &{:su, &1})
+  def to_db({:lst, a}, env), do: map1(a, env, &{:lst, &1})
+
+  def to_db({:cons, a, as}, env) do
+    with {:ok, a1} <- to_db(a, env),
+         {:ok, as1} <- to_db(as, env),
+         do: {:ok, {:cons, a1, as1}}
+  end
+
+  def to_db({:mlst, e, x, p, n, a, as, c}, env) do
+    with {:ok, e1} <- to_db(e, env),
+         {:ok, p1} <- to_db(p, [x | env]),
+         {:ok, n1} <- to_db(n, env),
+         {:ok, c1} <- to_db(c, [as, a | env]),
+         do: {:ok, {:mlst, e1, p1, n1, c1}}
+  end
 
   def to_db({:pi, q, a, x, b}, env) do
     with {:ok, a1} <- to_db(a, env),

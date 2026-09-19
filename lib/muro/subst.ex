@@ -45,6 +45,18 @@ defmodule Muro.Subst do
       :empty ->
         :empty
 
+      {:lst, a} ->
+        {:lst, ren(rho, a)}
+
+      :lnil ->
+        :lnil
+
+      {:cons, a, as} ->
+        {:cons, ren(rho, a), ren(rho, as)}
+
+      {:mlst, e, p, n, c} ->
+        {:mlst, ren(rho, e), ren(lift(rho), p), ren(rho, n), ren(lift(lift(rho)), c)}
+
       {:mnat, e, p, z, s} ->
         {:mnat, ren(rho, e), ren(lift(rho), p), ren(rho, z), ren(lift(rho), s)}
 
@@ -153,6 +165,18 @@ defmodule Muro.Subst do
       :empty ->
         :empty
 
+      {:lst, a} ->
+        {:lst, sub(sigma, a)}
+
+      :lnil ->
+        :lnil
+
+      {:cons, a, as} ->
+        {:cons, sub(sigma, a), sub(sigma, as)}
+
+      {:mlst, e, p, n, c} ->
+        {:mlst, sub(sigma, e), sub(lifts(sigma), p), sub(sigma, n), sub(lifts(lifts(sigma)), c)}
+
       {:mnat, e, p, z, s} ->
         {:mnat, sub(sigma, e), sub(lifts(sigma), p), sub(sigma, z), sub(lifts(sigma), s)}
 
@@ -222,6 +246,27 @@ defmodule Muro.Subst do
         i -> {:var, i - 1}
       end,
       t
+    )
+  end
+
+  def inst_cons(t, a, as) do
+    sub(
+      fn
+        0 -> as
+        1 -> a
+        i -> {:var, i - 2}
+      end,
+      t
+    )
+  end
+
+  def mot_cons(p) do
+    sub(
+      fn
+        0 -> {:cons, {:var, 1}, {:var, 0}}
+        i -> {:var, i + 1}
+      end,
+      p
     )
   end
 

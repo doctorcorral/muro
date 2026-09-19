@@ -72,12 +72,20 @@ defmodule Muro.Parser do
 
   defp data_start?(s), do: word_kw?(s, "data")
 
-  # v1: only built-in Either. The block is shape-checked and dropped.
+  # v1: built-in Either and List. The block is shape-checked and dropped.
   defp parse_data(s) do
     with {:ok, rest} <- kw(s, "data"),
-         {:ok, name, rest} <- ident(skip(rest)),
-         :ok <- if(name == "Either", do: :ok, else: {:error, "v1 only supports data Either"}),
-         {:ok, _, rest} <- parse_binder(rest),
+         {:ok, name, rest} <- ident(skip(rest)) do
+      case name do
+        "Either" -> parse_data_either(rest)
+        "List" -> parse_data_list(rest)
+        _ -> {:error, "v1 only supports data Either or data List"}
+      end
+    end
+  end
+
+  defp parse_data_either(rest) do
+    with {:ok, _, rest} <- parse_binder(rest),
          {:ok, _, rest} <- parse_binder(rest),
          {:ok, rest} <- tok(skip(rest), ":"),
          {:ok, _ty, rest} <- parse_term(skip(rest), 0),
@@ -88,6 +96,23 @@ defmodule Muro.Parser do
          {:ok, _, rest} <- parse_term(skip(rest), 0),
          {:ok, c2, rest} <- ident(skip(rest)),
          :ok <- if(c2 == "right", do: :ok, else: {:error, "expected right"}),
+         {:ok, rest} <- tok(skip(rest), ":"),
+         {:ok, _, rest} <- parse_term(skip(rest), 0) do
+      {:ok, rest}
+    end
+  end
+
+  defp parse_data_list(rest) do
+    with {:ok, _, rest} <- parse_binder(rest),
+         {:ok, rest} <- tok(skip(rest), ":"),
+         {:ok, _ty, rest} <- parse_term(skip(rest), 0),
+         {:ok, rest} <- kw(skip(rest), "where"),
+         {:ok, c1, rest} <- ident(skip(rest)),
+         :ok <- if(c1 == "nil", do: :ok, else: {:error, "expected nil"}),
+         {:ok, rest} <- tok(skip(rest), ":"),
+         {:ok, _, rest} <- parse_term(skip(rest), 0),
+         {:ok, c2, rest} <- ident(skip(rest)),
+         :ok <- if(c2 == "cons", do: :ok, else: {:error, "expected cons"}),
          {:ok, rest} <- tok(skip(rest), ":"),
          {:ok, _, rest} <- parse_term(skip(rest), 0) do
       {:ok, rest}
@@ -199,6 +224,12 @@ defmodule Muro.Parser do
           parse_infix(rest, {:sum, left, right}, min_bp)
         end
 
+      cons_tok?(s0) and min_bp <= 18 ->
+        with {:ok, rest} <- eat_cons(s0),
+             {:ok, right, rest} <- parse_term(skip(rest), 18) do
+          parse_infix(rest, {:cons, left, right}, min_bp)
+        end
+
       bisim_tok?(s0) and min_bp <= 10 ->
         with {:ok, rest} <- eat_bisim(s0),
              {:ok, right, rest} <- parse_term(skip(rest), 11) do
@@ -249,6 +280,12 @@ defmodule Muro.Parser do
     if bisim_tok?(s), do: {:ok, after_kw(s, "~")}, else: {:error, "expected ~"}
   end
 
+  defp cons_tok?(s), do: has_prefix?(s, "::")
+
+  defp eat_cons(s) do
+    if cons_tok?(s), do: {:ok, after_kw(s, "::")}, else: {:error, "expected ::"}
+  end
+
   defp starts_atom?(s) do
     s = skip(s)
 
@@ -274,11 +311,17 @@ defmodule Muro.Parser do
       word_kw?(s, "right") ->
         false
 
+      word_kw?(s, "nil") ->
+        false
+
+      word_kw?(s, "cons") ->
+        false
+
       true ->
         case s do
           <<c, _::binary>>
           when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_ or c == ?( or
-                 c == ?{ ->
+                 c == ?{ or c == ?[ ->
             true
 
           _ ->
@@ -314,6 +357,18 @@ defmodule Muro.Parser do
 
       has_prefix?(s, "suc") ->
         parse_suc(s)
+
+      word_kw?(s, "List") ->
+        parse_lst(s)
+
+      word_kw?(s, "nil") ->
+        {:ok, :lnil, after_kw(s, "nil")}
+
+      word_kw?(s, "cons") ->
+        parse_cons(s)
+
+      has_prefix?(s, "[]") ->
+        {:ok, :lnil, after_kw(s, "[]")}
 
       word_kw?(s, "Either") ->
         parse_either(s)
@@ -526,6 +581,7 @@ defmodule Muro.Parser do
 
       cond do
         word_kw?(rest, "left") -> parse_msum_cases(e, x, p, rest)
+        word_kw?(rest, "nil") -> parse_mlst_cases(e, x, p, rest)
         true -> parse_mnat_cases(e, x, p, rest)
       end
     end
@@ -565,6 +621,35 @@ defmodule Muro.Parser do
          {:ok, rest} <- tok(skip(rest), "=>"),
          {:ok, r, rest} <- parse_term(skip(rest), 0) do
       {:ok, {:msum, e, x, p, a, l, b, r}, rest}
+    end
+  end
+
+  defp parse_mlst_cases(e, x, p, rest) do
+    with {:ok, rest} <- kw(rest, "nil"),
+         {:ok, rest} <- tok(skip(rest), "=>"),
+         {:ok, n, rest} <- parse_term(skip(rest), 0),
+         {:ok, rest} <- tok(skip(rest), "|"),
+         {:ok, rest} <- kw(skip(rest), "cons"),
+         {:ok, a, rest} <- ident(skip(rest)),
+         {:ok, as, rest} <- ident(skip(rest)),
+         {:ok, rest} <- tok(skip(rest), "=>"),
+         {:ok, c, rest} <- parse_term(skip(rest), 0) do
+      {:ok, {:mlst, e, x, p, n, a, as, c}, rest}
+    end
+  end
+
+  defp parse_lst(s) do
+    with {:ok, rest} <- kw(s, "List"),
+         {:ok, a, rest} <- parse_atom(skip(rest)) do
+      {:ok, {:lst, a}, rest}
+    end
+  end
+
+  defp parse_cons(s) do
+    with {:ok, rest} <- kw(s, "cons"),
+         {:ok, a, rest} <- parse_atom(skip(rest)),
+         {:ok, as, rest} <- parse_atom(skip(rest)) do
+      {:ok, {:cons, a, as}, rest}
     end
   end
 
