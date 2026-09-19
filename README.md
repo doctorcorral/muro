@@ -47,7 +47,8 @@ This is the grammar `lib/muro/parser.ex` actually implements. ASCII aliases are 
 ```
 book       ::= (nu | data | def)*
 nu         ::= ("ν" | "nu") "Stream" binder ":" term "where" "uncons" ":" term
-data       ::= "data" ident binder* ":" "Type" "where" (ident ":" term)+
+data       ::= "data" ident binder* ":" telescope "where" (ident ":" term)+
+telescope  ::= "Type" | binder ("→" | "->") telescope | term ("→" | "->") "Type"
 def        ::= "def" ident ":" tag term ":=" term
 tag        ::= "run" "internal"? | "spec" | "evidence"
 
@@ -81,6 +82,7 @@ match      ::= "match" term "motive" mot
 matchEmpty ::= "matchEmpty" term "motive" mot
 rewrite    ::= "rewrite" term "motive" mot "in" term
 mot        ::= "(" ("λ" | "lam")? (ident | binder) ("→" | "->") term ")"
+               -- nested λ in the body cover index binders (Vec / Fin)
 idt        ::= "{" term ("≡" | "==") term ":" term "}"
 
 ident      ::= [A-Za-z_][A-Za-z0-9_-]*
@@ -317,9 +319,9 @@ Muro.Nats.natsFrom(0) |> Stream.take(3) |> Enum.to_list()
 # [0, {:suc, 0}, {:suc, {:suc, 0}}]
 ```
 
-### Data (non-indexed)
+### Data (indexed)
 
-A `data` declaration is a book entry the checker uses. Parameters are the binders before `: Type`. There are no indices in this pass (`data Vec (A : Type) : Nat → Type` is rejected). Nat, Unit, Empty, and ν stay primitive. Either and List are instances of this schema, not special Tm constructors. See `examples/maybe.muro`.
+A `data` declaration is a book entry the checker uses. Binders before `:` are parameters; the telescope after `:` before `Type` is indices. Nat, Unit, Empty, and ν stay primitive. There is no Tm constructor named after a user type (Vec, Fin, Maybe, List all use `dty` / `ctor` / `mData`). This pass is indexed data. See `examples/vec.muro`.
 
 ```
 data Maybe (A : Type) : Type where
@@ -327,14 +329,16 @@ data Maybe (A : Type) : Type where
   just    : A → Maybe A
 ```
 
-The type former is spec. Constructors compute in run and may appear in evidence. Match has one named branch per constructor and an explicit motive. A self-call in run or evidence must use a constructor argument whose type is `D …`. Strict positivity: `D` must not occur left of Π in a constructor telescope (`mk : (Bad → Nat) → Bad` is rejected). `D as` is Data iff every parameter is Data (`Maybe Nat` is; `Maybe (Nat → Nat)` is not).
+The type former is spec. Constructors compute in run and may appear in evidence. Match has one named branch per constructor and an explicit motive over the scrutinee and its indices. Constructor targets are compared with conversion (no metavariables); `suc` is inverted so `vcons` against `Vec A (suc m)` forces the length argument. A self-call in run or evidence must use a constructor argument whose type is `D …`. Strict positivity: `D` must not occur left of Π in a constructor telescope (`mk : Π (n : Nat) → (Bad n → Nat) → Bad n` is rejected). `Vec A n` is Data iff `A` is Data (the index `n` is Nat).
 
 ```
-{:ok, src} = Muro.emit_file("examples/maybe.muro", Muro.MaybeEx)
+{:ok, src} = Muro.emit_file("examples/vec.muro", Muro.Vecs)
 Code.eval_string(src)
-Muro.MaybeEx.fromMaybe(0, {:just, {:suc, 0}})
+Muro.Vecs.lookup({:suc, 0}, {:fzero, 0}, Muro.Vecs.ones1())
 # {:suc, 0}
 ```
+
+`lookup` takes `Fin n` and `Vec A n`; there is no runtime bounds check if the types line up. Maybe and List are the same schema with an empty index telescope; see `examples/maybe.muro`.
 
 ### ⊎ / Dec
 
@@ -375,6 +379,7 @@ agda/Muro/Example.agda  plus / IsEven / half / plus_suc / half_ok
 agda/Muro/ExampleStream.agda  zeros / head-zeros
 agda/Muro/ExampleEither.agda  IsEven / Dec / evenDec
 agda/Muro/ExampleList.agda  length / ones2
+agda/Muro/ExampleVec.agda   Fin / Vec / lookup
 lib/muro/parser.ex      .muro → named FOAS
 lib/muro/ast.ex         named FOAS, to_db
 lib/muro/subst.ex       de Bruijn subst
@@ -392,6 +397,7 @@ examples/either_run.muro
 examples/list.muro
 examples/maybe.muro
 examples/tree.muro
+examples/vec.muro
 test/muro_check_test.exs
 ```
 
@@ -433,4 +439,4 @@ mix muro.check examples/half_ok.muro
 
 ## Not in v1
 
-Type : Type, cubical, tactics, implicits, unification, metavariables, extra quantities, user-defined ν-predicates, indexed data, `+` on Stream or Either, typing raw Elixir, emitting spec or evidence.
+Type : Type, cubical, tactics, implicits, unification, metavariables, extra quantities, user-defined ν-predicates, `+` on Stream or Either, typing raw Elixir, emitting spec or evidence.
