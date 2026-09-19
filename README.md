@@ -2,11 +2,11 @@
 
 **A spec never becomes evidence. Evidence never becomes a run.**
 
-An explicit affine dependent type theory. Elixir parses, checks, and emits it. Agda specifies the judgments. Only run terms become running code.
+An explicit affine dependent type theory. Elixir parses, checks, and emits `.muro`. Only run terms become running code. Users do not need Agda.
 
 Named after the wall between spec, evidence, and run. Types, erased arguments, equations, and paradoxes never execute. (Formerly *nothing dead runs* / *a proof never becomes a run*; those are history, not syntax.)
 
-If Agda and Elixir disagree, Agda wins.
+Agda is not a certificate that a `.muro` file is correct, and it is not what `mix muro.check` runs. It holds the rules of the calculus: a fuelled decision procedure (`Muro.Check`) and an inductive judgment (`Muro.Judgement`) for the core fragment. Example twins (`Example*.agda`) are examples of those rules, not a proof. The mode wall is proved in `Muro.Wall`. Closed evidence of Empty is proved for Core terms (no application or rewrite) in `Muro.Consistency`; the full statement is not proved.
 
 ---
 
@@ -17,7 +17,7 @@ Two jobs. Do not mix them.
 | You want to… | Do this |
 | --- | --- |
 | Add a Muro program | Write a `.muro` file against the grammar below. Check with `mix muro.check path.muro`. Do not change Agda or the Elixir kernel. |
-| Change the type theory | Edit Agda `Muro.Check` first until it decides the new example. Then add the matching Elixir clause, tagged with the ⊢ constructor. |
+| Change the type theory | Edit Agda `Muro.Check` (and `Muro.Judgement` if the fragment is affected) first. Then add the matching Elixir clause, tagged with the ⊢ constructor. Users still only run Mix. |
 
 Copy-paste skeleton:
 
@@ -273,8 +273,8 @@ Order is mandatory:
 
 1. **Agda syntax** (`agda/Muro/Syntax.agda`) if you add a constructor — both `Tm n` and `PTm V`.
 2. **Subst** (`agda/Muro/Subst.agda`): `wk`, `sub`, `toPHOAS`, `unembed`. Pattern-lambdas passed to `sub` do not compute; use a named function (`instσ`, `motSucσ`).
-3. **Check** (`agda/Muro/Check.agda`): a ⊢ constructor and a `decide` clause. Mixfix is `σ , Γ ⊢[ m ] e ⇒ A`.
-4. `make agda` until the example decides (`half_ok-checks` is `refl` for the canonical book).
+3. **Check** (`agda/Muro/Check.agda`): a `decide` clause. Mixfix in `Muro.Judgement` is `σ , Γ ⊢[ m ] e ⇒ A ⊣ u`.
+4. `make agda` until the example twin decides (`half_ok-checks` is `refl` for the canonical book). Twins are not the proof.
 5. **Elixir mirror**, same shapes, each checker clause commented with the Agda constructor (`⇒-var-run`, `⇐-refl`, …):
    - `lib/muro/ast.ex`
    - `lib/muro/subst.ex`
@@ -391,7 +391,10 @@ agda/Muro.agda          public re-export
 agda/Muro/Base.agda     Qty, Mode, Use, Result
 agda/Muro/Syntax.agda   Tm n, PTm V
 agda/Muro/Subst.agda    wk, sub, toPHOAS, unembed
-agda/Muro/Check.agda    ⊢ and the decision procedure
+agda/Muro/Check.agda    fuelled decision procedure
+agda/Muro/Judgement.agda  inductive ⊢ (core fragment)
+agda/Muro/Wall.agda     mode wall lemmas
+agda/Muro/Consistency.agda  Empty-core; Empty-evid is not proved
 agda/Muro/Example.agda  plus / IsEven / half / plus_suc / half_ok
 agda/Muro/ExampleStream.agda  zeros / head-zeros
 agda/Muro/ExampleEither.agda  IsEven / Dec / evenDec

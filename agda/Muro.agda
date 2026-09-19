@@ -11,6 +11,7 @@ open import Muro.Subst public
 open import Muro.Check public
 import Muro.Judgement
 import Muro.Wall
+import Muro.Consistency
 open import Muro.Example public
 open import Muro.ExampleStream public
 import Muro.ExampleEither

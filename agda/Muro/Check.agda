@@ -1,8 +1,9 @@
 ------------------------------------------------------------------------
 -- MuroTT bidirectional checker.
 --
--- Spec: the inductive Γ ⊢[ m ] e ⇒ A / Γ ⊢[ m ] e ⇐ A.
--- Decide: fuel-based Result, each clause commented with its ⊢ constructor.
+-- Decide: fuel-based Result, each clause commented with a ⊢ constructor.
+-- The theorem-oriented inductive spec of the core fragment is
+-- Muro.Judgement (conversion there is α-equality, not this WHNF).
 --
 -- There is no promotion: spec ↛ evid, evid ↛ run, spec ↛ run.
 -- Emit visibility (def vs defp) is an Elixir-only flag on run.
