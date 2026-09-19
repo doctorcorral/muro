@@ -9,6 +9,7 @@ open import Muro.Base public
 open import Muro.Syntax public
 open import Muro.Subst public
 open import Muro.Check public
+import Muro.Judgement
 open import Muro.Example public
 open import Muro.ExampleStream public
 import Muro.ExampleEither
