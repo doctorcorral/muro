@@ -62,6 +62,16 @@ data Tm (n : ℕ) : Set where
   nu    : Tm (suc n) → Tm n
   unf   : Tm n → Tm n → Tm n                   -- unfold seed (λ s → (head, next))
   ucons : Tm n → Tm n
+  -- Nx wrappers. Spec formers; computed values are run.
+  -- Nat stays Peano. toI64 is the only Nat → I64 map.
+  i64    : Tm n
+  f32ty  : Tm n
+  tensor : Tm n → Tm n → Tm n                  -- Tensor D S
+  addi   : Tm n → Tm n → Tm n
+  muli   : Tm n → Tm n → Tm n
+  addt   : Tm n → Tm n → Tm n
+  toi64  : Tm n → Tm n
+  packi  : Tm n → Tm n → Tm n                  -- two I64s; shape toi64 (suc (suc 0))
 
 ------------------------------------------------------------------------
 -- PHOAS terms. Binders are V → PTm V, not Tm → Tm.
@@ -97,6 +107,14 @@ data PTm (V : Set) : Set where
   nu    : (V → PTm V) → PTm V
   unf   : PTm V → PTm V → PTm V
   ucons : PTm V → PTm V
+  i64    : PTm V
+  f32ty  : PTm V
+  tensor : PTm V → PTm V → PTm V
+  addi   : PTm V → PTm V → PTm V
+  muli   : PTm V → PTm V → PTm V
+  addt   : PTm V → PTm V → PTm V
+  toi64  : PTm V → PTm V
+  packi  : PTm V → PTm V → PTm V
 
 ------------------------------------------------------------------------
 -- Global definition identifiers (closed book).
@@ -159,3 +177,11 @@ showTm (snd t)      = "snd(" ++ showTm t ++ ")"
 showTm (nu F)       = "ν(" ++ showTm F ++ ")"
 showTm (unf s f)    = "unfold " ++ showTm s ++ " " ++ showTm f
 showTm (ucons s)    = "uncons " ++ showTm s
+showTm i64          = "I64"
+showTm f32ty        = "F32"
+showTm (tensor d s) = "Tensor(" ++ showTm d ++ " " ++ showTm s ++ ")"
+showTm (addi x y)   = "addi(" ++ showTm x ++ " " ++ showTm y ++ ")"
+showTm (muli x y)   = "muli(" ++ showTm x ++ " " ++ showTm y ++ ")"
+showTm (addt t u)   = "addt(" ++ showTm t ++ " " ++ showTm u ++ ")"
+showTm (toi64 t)    = "toI64(" ++ showTm t ++ ")"
+showTm (packi x y)  = "packI(" ++ showTm x ++ " " ++ showTm y ++ ")"

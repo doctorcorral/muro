@@ -306,11 +306,14 @@ mutual
   {-# TERMINATING #-}
   isData : ∀ {n} → ℕ → Sig → Tm n → Bool
   isData k σ t with apps (whnf k σ t)
-  ... | (nat , [])   = true
-  ... | (unit , [])  = true
-  ... | (empty , []) = true
-  ... | (dty i , as) = dataParamsData k σ i as
-  ... | _            = false
+  ... | (nat , [])        = true
+  ... | (unit , [])       = true
+  ... | (empty , [])      = true
+  ... | (i64 , [])        = true
+  ... | (f32ty , [])      = true
+  ... | (tensor _ _ , []) = true
+  ... | (dty i , as)      = dataParamsData k σ i as
+  ... | _                 = false
 
   {-# TERMINATING #-}
   dataParamsData : ∀ {n} → ℕ → Sig → ℕ → List (Tm n) → Bool
@@ -320,16 +323,19 @@ mutual
 
 {-# TERMINATING #-}
 runTy : ∀ {n} → Tm n → Bool
-runTy (var _)     = true
-runTy nat         = true
-runTy unit        = true
-runTy empty       = true
-runTy (pi _ _ B)  = runTy B
-runTy (nu F)      = runTy (inst F unit)
-runTy (prod A B)  = runTy A ∧ runTy B
-runTy (dty _)     = true
-runTy (app f _)   = runTy f
-runTy _           = false
+runTy (var _)        = true
+runTy nat            = true
+runTy unit           = true
+runTy empty          = true
+runTy i64            = true
+runTy f32ty          = true
+runTy (tensor _ _)   = true
+runTy (pi _ _ B)     = runTy B
+runTy (nu F)         = runTy (inst F unit)
+runTy (prod A B)     = runTy A ∧ runTy B
+runTy (dty _)        = true
+runTy (app f _)      = runTy f
+runTy _              = false
 
 isRunType : ∀ {n} → ℕ → Sig → Tm n → Bool
 isRunType k σ t = runTy (whnf k σ t)
@@ -378,6 +384,14 @@ mutual
   synEq (nu F)         (nu F′)        = synEq F F′
   synEq (unf s f)      (unf s′ f′)    = synEq s s′ ∧ synEq f f′
   synEq (ucons s)      (ucons s′)     = synEq s s′
+  synEq i64            i64            = true
+  synEq f32ty          f32ty          = true
+  synEq (tensor d s)   (tensor d′ s′) = synEq d d′ ∧ synEq s s′
+  synEq (addi x y)     (addi x′ y′)   = synEq x x′ ∧ synEq y y′
+  synEq (muli x y)     (muli x′ y′)   = synEq x x′ ∧ synEq y y′
+  synEq (addt t u)     (addt t′ u′)   = synEq t t′ ∧ synEq u u′
+  synEq (toi64 t)      (toi64 t′)     = synEq t t′
+  synEq (packi x y)    (packi x′ y′)  = synEq x x′ ∧ synEq y y′
   synEq _              _              = false
 
 ctorHead : ∀ {n} → Tm n → Bool
@@ -448,6 +462,14 @@ mutual
   convN k σ (nu F)        (nu F′)       = conv k σ F F′
   convN k σ (unf s f)     (unf s′ f′)   = conv k σ s s′ >> conv k σ f f′
   convN k σ (ucons s)     (ucons s′)    = conv k σ s s′
+  convN k σ i64           i64           = ok tt
+  convN k σ f32ty         f32ty         = ok tt
+  convN k σ (tensor d s)  (tensor d′ s′) = conv k σ d d′ >> conv k σ s s′
+  convN k σ (addi x y)    (addi x′ y′)  = conv k σ x x′ >> conv k σ y y′
+  convN k σ (muli x y)    (muli x′ y′)  = conv k σ x x′ >> conv k σ y y′
+  convN k σ (addt t u)    (addt t′ u′)  = conv k σ t t′ >> conv k σ u u′
+  convN k σ (toi64 t)     (toi64 t′)    = conv k σ t t′
+  convN k σ (packi x y)   (packi x′ y′) = conv k σ x x′ >> conv k σ y y′
   convN _ _ u             v             =
     fail ("cannot convert " ++ showTm u ++ " ≁ " ++ showTm v)
 
@@ -539,6 +561,8 @@ data _,_⊢[_]_⇒_ σ Γ where
     → σ , Γ ⊢[ m ] a ⇐ A
     → σ , Γ ⊢[ m ] app f a ⇒ inst B a
 
+  -- Kernel identity is refused when A WHNFs to F32 or Tensor F32 S
+  -- (see floatIdForbidden in the decision procedure).
   ⇒-idt : ∀ {A a b}
     → σ , Γ ⊢ A wf
     → σ , Γ ⊢[ spec ] a ⇐ A
@@ -618,6 +642,38 @@ data _,_⊢[_]_⇒_ σ Γ where
     → σ , Γ ⊢[ m ] s ⇐ nu F
     → σ , Γ ⊢[ m ] ucons s ⇒ inst F (nu F)
 
+  ⇒-i64 : σ , Γ ⊢[ spec ] i64 ⇒ typ
+  ⇒-f32ty : σ , Γ ⊢[ spec ] f32ty ⇒ typ
+
+  ⇒-tensor : ∀ {D S}
+    → σ , Γ ⊢ D wf
+    → σ , Γ ⊢[ spec ] S ⇐ i64
+    → σ , Γ ⊢[ spec ] tensor D S ⇒ typ
+
+  ⇒-addi : ∀ {m x y}
+    → σ , Γ ⊢[ m ] x ⇐ i64
+    → σ , Γ ⊢[ m ] y ⇐ i64
+    → σ , Γ ⊢[ m ] addi x y ⇒ i64
+
+  ⇒-muli : ∀ {m x y}
+    → σ , Γ ⊢[ m ] x ⇐ i64
+    → σ , Γ ⊢[ m ] y ⇐ i64
+    → σ , Γ ⊢[ m ] muli x y ⇒ i64
+
+  ⇒-addt : ∀ {m D S t u}
+    → σ , Γ ⊢[ m ] t ⇐ tensor D S
+    → σ , Γ ⊢[ m ] u ⇐ tensor D S
+    → σ , Γ ⊢[ m ] addt t u ⇒ tensor D S
+
+  ⇒-toi64 : ∀ {m n}
+    → σ , Γ ⊢[ m ] n ⇐ nat
+    → σ , Γ ⊢[ m ] toi64 n ⇒ i64
+
+  ⇒-packi : ∀ {m x y}
+    → σ , Γ ⊢[ m ] x ⇐ i64
+    → σ , Γ ⊢[ m ] y ⇐ i64
+    → σ , Γ ⊢[ m ] packi x y ⇒ tensor i64 (toi64 (su (su ze)))
+
 data _,_⊢[_]_⇐_ σ Γ where
   ⇐-conv : ∀ {m e A B}
     → σ , Γ ⊢[ m ] e ⇒ B
@@ -664,6 +720,28 @@ viewId k σ t with whnf k σ t
 ... | idt A a b = ok (A , a , b)
 ... | t′        = fail ("expected Id, got " ++ showTm t′)
 
+-- Dtype of Tensor: I64 or F32 after WHNF.
+isNxDtype : ∀ {n} → ℕ → Sig → Tm n → Bool
+isNxDtype k σ t with whnf k σ t
+... | i64   = true
+... | f32ty = true
+... | _     = false
+
+isF32 : ∀ {n} → ℕ → Sig → Tm n → Bool
+isF32 k σ t with whnf k σ t
+... | f32ty = true
+... | _     = false
+
+-- Kernel ≡ is refused on F32 and on Tensor F32 S.
+floatIdForbidden : ∀ {n} → ℕ → Sig → Tm n → Bool
+floatIdForbidden k σ A with whnf k σ A
+... | f32ty      = true
+... | tensor d _ = isF32 k σ d
+... | _          = false
+
+i64two : ∀ {n} → Tm n
+i64two = toi64 (su (su ze))
+
 viewProd : ∀ {n} → ℕ → Sig → Tm n → Result (Tm n × Tm n)
 viewProd k σ t with whnf k σ t
 ... | prod A B = ok (A , B)
@@ -703,6 +781,12 @@ mutual
   hasSelf s (snd t)        = hasSelf s t
   hasSelf s (unf u f)      = hasSelf s u ∨ hasSelf s f
   hasSelf s (ucons u)      = hasSelf s u
+  hasSelf s (tensor d u)   = hasSelf s d ∨ hasSelf s u
+  hasSelf s (addi x y)     = hasSelf s x ∨ hasSelf s y
+  hasSelf s (muli x y)     = hasSelf s x ∨ hasSelf s y
+  hasSelf s (addt t u)     = hasSelf s t ∨ hasSelf s u
+  hasSelf s (toi64 t)      = hasSelf s t
+  hasSelf s (packi x y)    = hasSelf s x ∨ hasSelf s y
   hasSelf s (lam _ A t)    = hasSelf s A ∨ hasSelf s t
   hasSelf s (pi _ A B)     = hasSelf s A ∨ hasSelf s B
   hasSelf s (prod A B)     = hasSelf s A ∨ hasSelf s B
@@ -769,6 +853,12 @@ mutual
   occurs x (nu F)         = occurs (suc x) F
   occurs x (unf s f)      = occurs x s ∨ occurs x f
   occurs x (ucons s)      = occurs x s
+  occurs x (tensor d s)   = occurs x d ∨ occurs x s
+  occurs x (addi a b)     = occurs x a ∨ occurs x b
+  occurs x (muli a b)     = occurs x a ∨ occurs x b
+  occurs x (addt t u)     = occurs x t ∨ occurs x u
+  occurs x (toi64 t)      = occurs x t
+  occurs x (packi a b)    = occurs x a ∨ occurs x b
   occurs _ _              = false
 
   occursList : ∀ {n} → Fin n → List (Tm n) → Bool
@@ -814,6 +904,12 @@ mutual
   occursD i (su t)         = occursD i t
   occursD i (fst t)        = occursD i t
   occursD i (snd t)        = occursD i t
+  occursD i (tensor d s)   = occursD i d ∨ occursD i s
+  occursD i (addi a b)     = occursD i a ∨ occursD i b
+  occursD i (muli a b)     = occursD i a ∨ occursD i b
+  occursD i (addt t u)     = occursD i t ∨ occursD i u
+  occursD i (toi64 t)      = occursD i t
+  occursD i (packi a b)    = occursD i a ∨ occursD i b
   occursD _ _              = false
 
   occursDList : ∀ {n} → ℕ → List (Tm n) → Bool
@@ -1158,6 +1254,7 @@ mutual
   infer′ k σ rs Γ evid (idt _ _ _) = fail "no promotion: identity type is an erased term"
   infer′ k σ rs Γ spec (idt A a b) =
     checkTy k σ rs Γ A >>
+    guard "kernel identity is not defined on F32" (not (floatIdForbidden k σ A)) >>
     check k σ rs Γ spec a A >>
     check k σ rs Γ spec b A >>
     ok (typ , u0s)
@@ -1293,6 +1390,55 @@ mutual
     viewNu k σ T >>= λ F →
     ok (inst F T , u)
 
+  -- ⇒-i64 / ⇒-f32ty / ⇒-tensor  (spec formers)
+  infer′ k σ rs Γ run  i64   = fail "no promotion: I64 is an erased term"
+  infer′ k σ rs Γ evid i64   = fail "no promotion: I64 is an erased term"
+  infer′ k σ rs Γ run  f32ty = fail "no promotion: F32 is an erased term"
+  infer′ k σ rs Γ evid f32ty = fail "no promotion: F32 is an erased term"
+  infer′ k σ rs Γ spec i64   = ok (typ , u0s)
+  infer′ k σ rs Γ spec f32ty = ok (typ , u0s)
+  infer′ k σ rs Γ run  (tensor _ _) = fail "no promotion: Tensor is an erased term"
+  infer′ k σ rs Γ evid (tensor _ _) = fail "no promotion: Tensor is an erased term"
+  infer′ k σ rs Γ spec (tensor D S) =
+    checkTy k σ rs Γ D >>
+    guard "Tensor dtype must be I64 or F32" (isNxDtype k σ D) >>
+    check k σ rs Γ spec S i64 >>= λ _ →
+    ok (typ , u0s)
+
+  -- ⇒-addi / ⇒-muli
+  infer′ k σ rs Γ m (addi x y) =
+    check k σ rs Γ m x i64 >>= λ xu →
+    check k σ rs Γ m y i64 >>= λ yu →
+    combine m xu yu >>= λ uses →
+    ok (i64 , uses)
+  infer′ k σ rs Γ m (muli x y) =
+    check k σ rs Γ m x i64 >>= λ xu →
+    check k σ rs Γ m y i64 >>= λ yu →
+    combine m xu yu >>= λ uses →
+    ok (i64 , uses)
+
+  -- ⇒-addt
+  infer′ k σ rs Γ m (addt t u) =
+    infer k σ rs Γ m t >>= λ (T , tu) →
+    (case whnf k σ T of λ where
+      (tensor D S) →
+        check k σ rs Γ m u (tensor D S) >>= λ uu →
+        combine m tu uu >>= λ uses →
+        ok (tensor D S , uses)
+      T′ → fail ("addt expected a Tensor, got " ++ showTm T′))
+
+  -- ⇒-toi64
+  infer′ k σ rs Γ m (toi64 n) =
+    check k σ rs Γ m n nat >>= λ u →
+    ok (i64 , u)
+
+  -- ⇒-packi
+  infer′ k σ rs Γ m (packi x y) =
+    check k σ rs Γ m x i64 >>= λ xu →
+    check k σ rs Γ m y i64 >>= λ yu →
+    combine m xu yu >>= λ uses →
+    ok (tensor i64 i64two , uses)
+
   -- ⇐-lam
   check′ k σ rs Γ m (lam q A t) T with viewPi k σ T
   ... | fail _ = infer k σ rs Γ m (lam q A t) >>= λ (B , u) → conv k σ B T >> ok u
@@ -1312,7 +1458,8 @@ mutual
 
   -- ⇐-refl
   check′ k σ rs Γ m rfl T =
-    viewId k σ T >>= λ (_ , a , b) →
+    viewId k σ T >>= λ (A , a , b) →
+    guard "kernel identity is not defined on F32" (not (floatIdForbidden k σ A)) >>
     conv k σ a b >> ok u0s
 
   -- ⇐-pair

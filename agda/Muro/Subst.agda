@@ -52,6 +52,14 @@ mutual
   ren ρ (nu F)        = nu (ren (lift ρ) F)
   ren ρ (unf s f)     = unf (ren ρ s) (ren ρ f)
   ren ρ (ucons s)     = ucons (ren ρ s)
+  ren ρ i64           = i64
+  ren ρ f32ty         = f32ty
+  ren ρ (tensor d s)  = tensor (ren ρ d) (ren ρ s)
+  ren ρ (addi x y)    = addi (ren ρ x) (ren ρ y)
+  ren ρ (muli x y)    = muli (ren ρ x) (ren ρ y)
+  ren ρ (addt t u)    = addt (ren ρ t) (ren ρ u)
+  ren ρ (toi64 t)     = toi64 (ren ρ t)
+  ren ρ (packi x y)   = packi (ren ρ x) (ren ρ y)
 
   renList : ∀ {n m} → (Fin n → Fin m) → List (Tm n) → List (Tm m)
   renList ρ []       = []
@@ -114,6 +122,14 @@ mutual
   sub σ (nu F)         = nu (sub (lifts σ) F)
   sub σ (unf s f)      = unf (sub σ s) (sub σ f)
   sub σ (ucons s)      = ucons (sub σ s)
+  sub σ i64            = i64
+  sub σ f32ty          = f32ty
+  sub σ (tensor d s)   = tensor (sub σ d) (sub σ s)
+  sub σ (addi x y)     = addi (sub σ x) (sub σ y)
+  sub σ (muli x y)     = muli (sub σ x) (sub σ y)
+  sub σ (addt t u)     = addt (sub σ t) (sub σ u)
+  sub σ (toi64 t)      = toi64 (sub σ t)
+  sub σ (packi x y)    = packi (sub σ x) (sub σ y)
 
   subList : ∀ {n m} → (Fin n → Tm m) → List (Tm n) → List (Tm m)
   subList σ []       = []
@@ -177,6 +193,14 @@ mutual
   toPHOAS ρ (nu F)         = nu (λ v → toPHOAS (λ { zero → v ; (suc i) → ρ i }) F)
   toPHOAS ρ (unf s f)      = unf (toPHOAS ρ s) (toPHOAS ρ f)
   toPHOAS ρ (ucons s)      = ucons (toPHOAS ρ s)
+  toPHOAS ρ i64            = i64
+  toPHOAS ρ f32ty          = f32ty
+  toPHOAS ρ (tensor d s)   = tensor (toPHOAS ρ d) (toPHOAS ρ s)
+  toPHOAS ρ (addi x y)     = addi (toPHOAS ρ x) (toPHOAS ρ y)
+  toPHOAS ρ (muli x y)     = muli (toPHOAS ρ x) (toPHOAS ρ y)
+  toPHOAS ρ (addt t u)     = addt (toPHOAS ρ t) (toPHOAS ρ u)
+  toPHOAS ρ (toi64 t)      = toi64 (toPHOAS ρ t)
+  toPHOAS ρ (packi x y)    = packi (toPHOAS ρ x) (toPHOAS ρ y)
 
   toPHOASList : ∀ {n} {V : Set} → (Fin n → V) → List (Tm n) → List (PTm V)
   toPHOASList ρ []       = []
@@ -269,6 +293,19 @@ mutual
   unembedN nxt env (unf s f)      =
     unf <$> unembedN nxt env s ⊛ unembedN nxt env f
   unembedN nxt env (ucons s)      = ucons <$> unembedN nxt env s
+  unembedN nxt env i64            = ok i64
+  unembedN nxt env f32ty          = ok f32ty
+  unembedN nxt env (tensor d s)   =
+    tensor <$> unembedN nxt env d ⊛ unembedN nxt env s
+  unembedN nxt env (addi x y)     =
+    addi <$> unembedN nxt env x ⊛ unembedN nxt env y
+  unembedN nxt env (muli x y)     =
+    muli <$> unembedN nxt env x ⊛ unembedN nxt env y
+  unembedN nxt env (addt t u)     =
+    addt <$> unembedN nxt env t ⊛ unembedN nxt env u
+  unembedN nxt env (toi64 t)      = toi64 <$> unembedN nxt env t
+  unembedN nxt env (packi x y)    =
+    packi <$> unembedN nxt env x ⊛ unembedN nxt env y
 
 unembed : PTm ℕ → Result (Tm 0)
 unembed t = unembedN 0 [] t

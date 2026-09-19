@@ -16,3 +16,4 @@ import Muro.ExampleAlways
 import Muro.ExampleBisim
 import Muro.ExampleList
 import Muro.ExampleVec
+import Muro.ExampleNx
