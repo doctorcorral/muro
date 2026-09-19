@@ -35,6 +35,10 @@ defmodule Muro.Ast do
           | {:stream, named}
           | {:unf, named, named}
           | {:ucons, named}
+          | {:sum, named, named}
+          | {:left, named}
+          | {:right, named}
+          | {:msum, named, name, named, name, named, name, named}
 
   # de Bruijn. Indices count from the nearest binder (0).
   @type db ::
@@ -64,6 +68,10 @@ defmodule Muro.Ast do
           | {:stream, db}
           | {:unf, db, db}
           | {:ucons, db}
+          | {:sum, db, db}
+          | {:left, db}
+          | {:right, db}
+          | {:msum, db, db, db, db}
 
   @type defn :: %{
           name: name,
@@ -173,6 +181,23 @@ defmodule Muro.Ast do
     with {:ok, s1} <- to_db(s, env),
          {:ok, f1} <- to_db(f, env),
          do: {:ok, {:unf, s1, f1}}
+  end
+
+  def to_db({:sum, a, b}, env) do
+    with {:ok, a1} <- to_db(a, env),
+         {:ok, b1} <- to_db(b, env),
+         do: {:ok, {:sum, a1, b1}}
+  end
+
+  def to_db({:left, t}, env), do: map1(t, env, &{:left, &1})
+  def to_db({:right, t}, env), do: map1(t, env, &{:right, &1})
+
+  def to_db({:msum, e, x, p, a, l, b, r}, env) do
+    with {:ok, e1} <- to_db(e, env),
+         {:ok, p1} <- to_db(p, [x | env]),
+         {:ok, l1} <- to_db(l, [a | env]),
+         {:ok, r1} <- to_db(r, [b | env]),
+         do: {:ok, {:msum, e1, p1, l1, r1}}
   end
 
   def to_db(other, _), do: {:error, "bad named term #{inspect(other)}"}

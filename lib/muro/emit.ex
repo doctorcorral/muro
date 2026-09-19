@@ -67,6 +67,19 @@ defmodule Muro.Emit do
     "fn x#{d} -> #{emit_db(t, d + 1)} end"
   end
 
+  defp emit_db({:left, t}, d), do: "{:left, #{emit_db(t, d)}}"
+  defp emit_db({:right, t}, d), do: "{:right, #{emit_db(t, d)}}"
+
+  defp emit_db({:msum, e, _p, l, r}, d) do
+    """
+    case #{emit_db(e, d)} do
+      {:left, x#{d}} -> #{emit_db(l, d + 1)}
+      {:right, x#{d}} -> #{emit_db(r, d + 1)}
+    end
+    """
+    |> String.trim()
+  end
+
   defp emit_db({:mnat, e, _p, z, s}, d) do
     """
     case #{emit_db(e, d)} do

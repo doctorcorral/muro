@@ -172,4 +172,62 @@ defmodule Muro.CheckTest do
     assert {:error, e} = Check.check_sig([evid])
     assert e =~ "pair" or e =~ "unguarded" or e =~ "unfold" or e =~ "×" or e =~ "Stream"
   end
+
+  test "even_dec.muro checks; Dec and evenDec are not emitted" do
+    src = File.read!("examples/even_dec.muro")
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+
+    out = Emit.emit_module(Muro.EvenBook, book)
+    refute out =~ ~r/\bevenDec\b/
+    refute out =~ ~r/\bdef Dec\b/
+    refute out =~ ~r/\bdef IsEven\b/
+  end
+
+  test "run Either match emits left/right tags" do
+    src = File.read!("examples/either_run.muro")
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+
+    out = Emit.emit_module(Muro.EitherRun, book)
+    assert out =~ ~r/\bdef fromLeft\b/
+    assert out =~ "{:left,"
+    assert out =~ "{:right,"
+    Code.eval_string(out)
+    assert Muro.EitherRun.fromLeft({:left, 0}) == 0
+    assert Muro.EitherRun.fromLeft({:right, :tt}) == 0
+  end
+
+  test "LEM for arbitrary P is rejected" do
+    src = File.read!("examples/even_dec.muro")
+    assert {:ok, book} = Parser.parse(src)
+
+    lem = %{
+      name: "lem",
+      mode: :evidence,
+      type: {:pi, :affine, :typ, "P", {:app, {:var, "Dec"}, {:var, "P"}}},
+      body: {:lam, :affine, :typ, "P", {:left, :one}}
+    }
+
+    assert {:error, msg} = Check.check_sig([lem | book])
+    assert is_binary(msg)
+  end
+
+  test "affine refutation cannot be used twice in evidence" do
+    src = File.read!("examples/even_dec.muro")
+    assert {:ok, book} = Parser.parse(src)
+
+    arrow = {:pi, :affine, {:app, {:var, "IsEven"}, :ze}, "_", :empty}
+
+    dup = %{
+      name: "dup_contra",
+      mode: :evidence,
+      type: {:pi, :affine, arrow, "c", {:prod, :empty, :empty}},
+      body:
+        {:lam, :affine, arrow, "c", {:pair, {:app, {:var, "c"}, :one}, {:app, {:var, "c"}, :one}}}
+    }
+
+    assert {:error, msg} = Check.check_sig([dup | book])
+    assert msg =~ "affine"
+  end
 end

@@ -1,0 +1,10 @@
+-- either_run.muro — a run sum, emitted as {:left,_} / {:right,_}.
+data Either (A : Type) (B : Type) : Type where
+  left  : A → Either A B
+  right : B → Either A B
+
+def fromLeft : run Π (e : Either Nat Unit) → Nat :=
+  λ (e : Either Nat Unit) →
+    match e motive (λ (_ : Either Nat Unit) → Nat)
+      | left n => n
+      | right _ => 0

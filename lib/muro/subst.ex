@@ -89,6 +89,18 @@ defmodule Muro.Subst do
 
       {:ucons, s} ->
         {:ucons, ren(rho, s)}
+
+      {:sum, a, b} ->
+        {:sum, ren(rho, a), ren(rho, b)}
+
+      {:left, t} ->
+        {:left, ren(rho, t)}
+
+      {:right, t} ->
+        {:right, ren(rho, t)}
+
+      {:msum, e, p, l, r} ->
+        {:msum, ren(rho, e), ren(lift(rho), p), ren(lift(rho), l), ren(lift(rho), r)}
     end
   end
 
@@ -182,6 +194,18 @@ defmodule Muro.Subst do
 
       {:ucons, s} ->
         {:ucons, sub(sigma, s)}
+
+      {:sum, a, b} ->
+        {:sum, sub(sigma, a), sub(sigma, b)}
+
+      {:left, t} ->
+        {:left, sub(sigma, t)}
+
+      {:right, t} ->
+        {:right, sub(sigma, t)}
+
+      {:msum, e, p, l, r} ->
+        {:msum, sub(sigma, e), sub(lifts(sigma), p), sub(lifts(sigma), l), sub(lifts(sigma), r)}
     end
   end
 
@@ -199,6 +223,26 @@ defmodule Muro.Subst do
     sub(
       fn
         0 -> {:su, {:var, 0}}
+        i -> {:var, i}
+      end,
+      p
+    )
+  end
+
+  def mot_left(p) do
+    sub(
+      fn
+        0 -> {:left, {:var, 0}}
+        i -> {:var, i}
+      end,
+      p
+    )
+  end
+
+  def mot_right(p) do
+    sub(
+      fn
+        0 -> {:right, {:var, 0}}
         i -> {:var, i}
       end,
       p

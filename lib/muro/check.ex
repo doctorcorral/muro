@@ -132,6 +132,8 @@ defmodule Muro.Check do
   defp ctor_head?(:ze), do: true
   defp ctor_head?({:su, _}), do: true
   defp ctor_head?(:one), do: true
+  defp ctor_head?({:left, _}), do: true
+  defp ctor_head?({:right, _}), do: true
   defp ctor_head?(_), do: false
 
   defp nth_qty({:pi, q, _, _}, 0), do: {:ok, q}
@@ -185,6 +187,14 @@ defmodule Muro.Check do
       :ze -> whnf(k - 1, book, z)
       {:su, u} -> whnf(k - 1, book, Subst.inst(s, u))
       e1 -> {:mnat, e1, p, z, s}
+    end
+  end
+
+  defp whnf(k, book, {:msum, e, p, l, r}) do
+    case whnf(k - 1, book, e) do
+      {:left, a} -> whnf(k - 1, book, Subst.inst(l, a))
+      {:right, b} -> whnf(k - 1, book, Subst.inst(r, b))
+      e1 -> {:msum, e1, p, l, r}
     end
   end
 
@@ -252,6 +262,7 @@ defmodule Muro.Check do
       {:pi, _, _, b} -> run_ty?(k, book, b)
       {:stream, a} -> run_ty?(k, book, a)
       {:prod, a, b} -> run_ty?(k, book, a) and run_ty?(k, book, b)
+      {:sum, a, b} -> run_ty?(k, book, a) and run_ty?(k, book, b)
       _ -> false
     end
   end
@@ -359,6 +370,20 @@ defmodule Muro.Check do
 
   defp conv_n(k, book, {:ucons, s}, {:ucons, s1}), do: conv(k, book, s, s1)
 
+  defp conv_n(k, book, {:sum, a, b}, {:sum, a1, b1}) do
+    with :ok <- conv(k, book, a, a1), do: conv(k, book, b, b1)
+  end
+
+  defp conv_n(k, book, {:left, t}, {:left, t1}), do: conv(k, book, t, t1)
+  defp conv_n(k, book, {:right, t}, {:right, t1}), do: conv(k, book, t, t1)
+
+  defp conv_n(k, book, {:msum, e, p, l, r}, {:msum, e1, p1, l1, r1}) do
+    with :ok <- conv(k, book, e, e1),
+         :ok <- conv(k, book, p, p1),
+         :ok <- conv(k, book, l, l1),
+         do: conv(k, book, r, r1)
+  end
+
   defp conv_n(_k, _book, u, v),
     do: {:error, "cannot convert #{inspect(u)} ≁ #{inspect(v)}"}
 
@@ -390,6 +415,13 @@ defmodule Muro.Check do
     end
   end
 
+  defp view_sum(k, book, t) do
+    case whnf(k, book, t) do
+      {:sum, a, b} -> {:ok, {a, b}}
+      t1 -> {:error, "expected Either, got #{inspect(t1)}"}
+    end
+  end
+
   # ⇒-unf productivity: self may not occur in the pair's head.
   defp has_self?(self, {:def, name}) when self == name, do: true
   defp has_self?(self, {:app, f, a}), do: has_self?(self, f) or has_self?(self, a)
@@ -403,6 +435,14 @@ defmodule Muro.Check do
   defp has_self?(self, {:pi, _, a, b}), do: has_self?(self, a) or has_self?(self, b)
   defp has_self?(self, {:prod, a, b}), do: has_self?(self, a) or has_self?(self, b)
   defp has_self?(self, {:stream, a}), do: has_self?(self, a)
+  defp has_self?(self, {:sum, a, b}), do: has_self?(self, a) or has_self?(self, b)
+  defp has_self?(self, {:left, t}), do: has_self?(self, t)
+  defp has_self?(self, {:right, t}), do: has_self?(self, t)
+
+  defp has_self?(self, {:msum, e, p, l, r}) do
+    has_self?(self, e) or has_self?(self, p) or has_self?(self, l) or has_self?(self, r)
+  end
+
   defp has_self?(_, _), do: false
 
   defp check_unfold(_k, _book, :spec, _rs, _f), do: :ok
@@ -657,6 +697,60 @@ defmodule Muro.Check do
           {:ok, {{:prod, a, {:stream, a}}, u}}
         end
 
+      # ⇒-sum
+      {m, {:sum, _, _}} when m in [:run, :evidence] ->
+        {:error, "no promotion: Either is an erased term"}
+
+      {:spec, {:sum, a, b}} ->
+        with :ok <- check_ty(k, book, rs, gamma, a),
+             :ok <- check_ty(k, book, rs, gamma, b),
+             do: {:ok, {:typ, u0s(n)}}
+
+      {_, {:left, _}} ->
+        {:error, "left requires an expected Either type"}
+
+      {_, {:right, _}} ->
+        {:error, "right requires an expected Either type"}
+
+      # ⇒-mSum
+      {m, {:msum, e, p, l, r}} ->
+        with {:ok, {et, eu}} <- infer(k, book, rs, gamma, m, e),
+             {:ok, {a, b}} <- view_sum(k, book, et),
+             :ok <-
+               check_ty(
+                 k,
+                 book,
+                 ext_rec(rs, false, false),
+                 ext(gamma, :affine, {:sum, a, b}),
+                 p
+               ),
+             ok? = scrut_ok(rs, e),
+             {:ok, [u_l | lus]} <-
+               check(
+                 k,
+                 book,
+                 ext_rec(rs, ok?, ok?),
+                 ext(gamma, :affine, a),
+                 m,
+                 l,
+                 Subst.mot_left(p)
+               ),
+             {:ok, [u_r | rus]} <-
+               check(
+                 k,
+                 book,
+                 ext_rec(rs, ok?, ok?),
+                 ext(gamma, :affine, b),
+                 m,
+                 r,
+                 Subst.mot_right(p)
+               ),
+             :ok <- check_bound(m, :affine, u_l),
+             :ok <- check_bound(m, :affine, u_r),
+             {:ok, uses} <- combine(m, eu, combine_alt(m, lus, rus)) do
+          {:ok, {Subst.inst(p, e), uses}}
+        end
+
       {_, t1} ->
         {:error, "cannot infer #{inspect(t1)}"}
     end
@@ -757,6 +851,16 @@ defmodule Muro.Check do
         with {:ok, {_a, x, y}} <- view_id(k, book, a),
              :ok <- conv(k, book, x, y),
              do: {:ok, u0s(nctx(gamma))}
+
+      # ⇐-left
+      {:left, t} ->
+        with {:ok, {a1, _}} <- view_sum(k, book, a),
+             do: check(k, book, rs, gamma, mode, t, a1)
+
+      # ⇐-right
+      {:right, t} ->
+        with {:ok, {_, b1}} <- view_sum(k, book, a),
+             do: check(k, book, rs, gamma, mode, t, b1)
 
       # ⇐-conv
       _ ->

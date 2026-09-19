@@ -1,0 +1,28 @@
+-- even_dec.muro — Dec P = P ⊎ (P → Empty). A decision, not LEM.
+data Either (A : Type) (B : Type) : Type where
+  left  : A → Either A B
+  right : B → Either A B
+
+def IsEven : spec Π (n : Nat) → Type :=
+  λ (n : Nat) →
+    match n motive (λ _ → Type)
+      | 0 => Unit
+      | suc n1 =>
+        match n1 motive (λ _ → Type)
+          | 0 => Empty
+          | suc p => IsEven p
+
+def Dec : spec Π (P : Type) → Type :=
+  λ (P : Type) → Either P (Π (_ : P) → Empty)
+
+def evenDec : evidence Π (n : Nat) → Dec (IsEven n) :=
+  λ (n : Nat) →
+    match n motive (λ (x : Nat) → Dec (IsEven x))
+      | 0 => left tt
+      | suc n1 =>
+        match n1 motive (λ (y : Nat) → Dec (IsEven suc(y)))
+          | 0 => right (λ (e : IsEven suc(0)) → matchEmpty e motive (λ _ → Empty))
+          | suc p =>
+            match evenDec p motive (λ (d : Dec (IsEven p)) → Dec (IsEven suc(suc(p))))
+              | left e  => left e
+              | right c => right c

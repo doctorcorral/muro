@@ -34,6 +34,12 @@ defmodule Muro.Parser do
           err -> err
         end
 
+      data_start?(s) ->
+        case parse_data(s) do
+          {:ok, rest} -> parse_book(rest, acc)
+          err -> err
+        end
+
       true ->
         case parse_def(s) do
           {:ok, d, rest} -> parse_book(rest, [d | acc])
@@ -60,6 +66,30 @@ defmodule Muro.Parser do
          {:ok, rest} <- tok(skip(rest), ":"),
          {:ok, _ctor_ty, rest} <- parse_term(skip(rest), 0) do
       _ = {a, ty}
+      {:ok, rest}
+    end
+  end
+
+  defp data_start?(s), do: word_kw?(s, "data")
+
+  # v1: only built-in Either. The block is shape-checked and dropped.
+  defp parse_data(s) do
+    with {:ok, rest} <- kw(s, "data"),
+         {:ok, name, rest} <- ident(skip(rest)),
+         :ok <- if(name == "Either", do: :ok, else: {:error, "v1 only supports data Either"}),
+         {:ok, _, rest} <- parse_binder(rest),
+         {:ok, _, rest} <- parse_binder(rest),
+         {:ok, rest} <- tok(skip(rest), ":"),
+         {:ok, _ty, rest} <- parse_term(skip(rest), 0),
+         {:ok, rest} <- kw(skip(rest), "where"),
+         {:ok, c1, rest} <- ident(skip(rest)),
+         :ok <- if(c1 == "left", do: :ok, else: {:error, "expected left"}),
+         {:ok, rest} <- tok(skip(rest), ":"),
+         {:ok, _, rest} <- parse_term(skip(rest), 0),
+         {:ok, c2, rest} <- ident(skip(rest)),
+         :ok <- if(c2 == "right", do: :ok, else: {:error, "expected right"}),
+         {:ok, rest} <- tok(skip(rest), ":"),
+         {:ok, _, rest} <- parse_term(skip(rest), 0) do
       {:ok, rest}
     end
   end
@@ -163,6 +193,12 @@ defmodule Muro.Parser do
           parse_infix(rest, {:prod, left, right}, min_bp)
         end
 
+      sum_tok?(s0) and min_bp <= 12 ->
+        with {:ok, rest} <- eat_sum(s0),
+             {:ok, right, rest} <- parse_term(skip(rest), 13) do
+          parse_infix(rest, {:sum, left, right}, min_bp)
+        end
+
       starts_atom?(s0) and min_bp <= 20 ->
         with {:ok, arg, rest} <- parse_atom(s0) do
           parse_infix(rest, {:app, left, arg}, min_bp)
@@ -195,6 +231,12 @@ defmodule Muro.Parser do
     end
   end
 
+  defp sum_tok?(s), do: has_prefix?(s, "⊎")
+
+  defp eat_sum(s) do
+    if has_prefix?(s, "⊎"), do: {:ok, after_kw(s, "⊎")}, else: {:error, "expected ⊎"}
+  end
+
   defp starts_atom?(s) do
     s = skip(s)
 
@@ -209,6 +251,15 @@ defmodule Muro.Parser do
         false
 
       word_kw?(s, "where") ->
+        false
+
+      word_kw?(s, "data") ->
+        false
+
+      word_kw?(s, "left") ->
+        false
+
+      word_kw?(s, "right") ->
         false
 
       true ->
@@ -252,6 +303,15 @@ defmodule Muro.Parser do
       has_prefix?(s, "suc") ->
         parse_suc(s)
 
+      word_kw?(s, "Either") ->
+        parse_either(s)
+
+      word_kw?(s, "left") ->
+        parse_unary(s, "left", :left)
+
+      word_kw?(s, "right") ->
+        parse_unary(s, "right", :right)
+
       word_kw?(s, "Stream") ->
         parse_stream(s)
 
@@ -287,7 +347,7 @@ defmodule Muro.Parser do
         parse_memp(s)
 
       has_prefix?(s, "match") ->
-        parse_mnat(s)
+        parse_match(s)
 
       has_prefix?(s, "rewrite") ->
         parse_rwt(s)
@@ -416,18 +476,38 @@ defmodule Muro.Parser do
     end
   end
 
-  defp parse_mnat(s) do
+  defp parse_match(s) do
     with {:ok, rest} <- kw(s, "match"),
          {:ok, e, rest} <- parse_term(skip(rest), 0),
          {:ok, rest} <- kw(skip(rest), "motive"),
          {:ok, rest} <- tok(skip(rest), "("),
          {:ok, rest} <- eat_lam(skip(rest)),
-         {:ok, x, rest} <- ident(skip(rest)),
+         {:ok, x, rest} <- parse_motive_binder(skip(rest)),
          {:ok, rest} <- either_tok(skip(rest), ["→", "->"]),
          {:ok, p, rest} <- parse_term(skip(rest), 0),
          {:ok, rest} <- tok(skip(rest), ")"),
-         {:ok, rest} <- tok(skip(rest), "|"),
-         {:ok, rest} <- kw(skip(rest), "0"),
+         {:ok, rest} <- tok(skip(rest), "|") do
+      rest = skip(rest)
+
+      cond do
+        word_kw?(rest, "left") -> parse_msum_cases(e, x, p, rest)
+        true -> parse_mnat_cases(e, x, p, rest)
+      end
+    end
+  end
+
+  defp parse_motive_binder(s) do
+    s = skip(s)
+
+    if has_prefix?(s, "(") do
+      with {:ok, {_q, x, _a}, rest} <- parse_binder(s), do: {:ok, x, rest}
+    else
+      ident(s)
+    end
+  end
+
+  defp parse_mnat_cases(e, x, p, rest) do
+    with {:ok, rest} <- kw(rest, "0"),
          {:ok, rest} <- tok(skip(rest), "=>"),
          {:ok, z, rest} <- parse_term(skip(rest), 0),
          {:ok, rest} <- tok(skip(rest), "|"),
@@ -436,6 +516,28 @@ defmodule Muro.Parser do
          {:ok, rest} <- tok(skip(rest), "=>"),
          {:ok, sc, rest} <- parse_term(skip(rest), 0) do
       {:ok, {:mnat, e, x, p, z, y, sc}, rest}
+    end
+  end
+
+  defp parse_msum_cases(e, x, p, rest) do
+    with {:ok, rest} <- kw(rest, "left"),
+         {:ok, a, rest} <- ident(skip(rest)),
+         {:ok, rest} <- tok(skip(rest), "=>"),
+         {:ok, l, rest} <- parse_term(skip(rest), 0),
+         {:ok, rest} <- tok(skip(rest), "|"),
+         {:ok, rest} <- kw(skip(rest), "right"),
+         {:ok, b, rest} <- ident(skip(rest)),
+         {:ok, rest} <- tok(skip(rest), "=>"),
+         {:ok, r, rest} <- parse_term(skip(rest), 0) do
+      {:ok, {:msum, e, x, p, a, l, b, r}, rest}
+    end
+  end
+
+  defp parse_either(s) do
+    with {:ok, rest} <- kw(s, "Either"),
+         {:ok, a, rest} <- parse_atom(skip(rest)),
+         {:ok, b, rest} <- parse_atom(skip(rest)) do
+      {:ok, {:sum, a, b}, rest}
     end
   end
 
