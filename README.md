@@ -304,9 +304,9 @@ Evidence is an ordinary term: `match` + `refl` + `rewrite` with motives. `half` 
 
 ### ν
 
-μ descends (`match` on Nat). ν is a greatest fixed point `ν X. F(X)` with F strictly positive. Stream is the instance `ν X. A × X`. Always is a coinductive family: `Always P s = ν Y. P (head s) × Y` (head satisfies P; the tail is guarded). Only a run Stream becomes an Elixir `Stream`. Always and its inhabitants are evidence and are omitted. `+` is still only for Data (`Nat`, `Unit`, `Empty`). A non-productive run or evidence unfold is rejected.
+μ descends (`match` on Nat). ν is a greatest fixed point `ν X. F(X)` with F strictly positive. Stream is the instance `ν X. A × X`. Always is a coinductive family: `Always P s = ν Y. P (head s) × Y` (head satisfies P; the tail is guarded). `σ ~ τ` (ASCII `bisim`) is a coinductive family on two streams: heads equal, tails related (J.J.M.M. Rutten, Elements of Stream Calculus, ENTCS 45 (2001), Theorem 2.1). Only a run Stream becomes an Elixir `Stream`. Always, `~`, and their inhabitants are evidence and are omitted. `+` is still only for Data (`Nat`, `Unit`, `Empty`). A non-productive run or evidence unfold is rejected.
 
-See `examples/zeros.muro`, `examples/nats.muro`, and `examples/always.muro`. IEx:
+See `examples/zeros.muro`, `examples/nats.muro`, `examples/always.muro`, and `examples/bisim.muro`. IEx:
 
 ```
 {:ok, src} = Muro.emit_file("examples/nats.muro", Muro.Nats)
