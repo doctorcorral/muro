@@ -304,9 +304,9 @@ Evidence is an ordinary term: `match` + `refl` + `rewrite` with motives. `half` 
 
 ### ν
 
-μ descends (`match` on Nat). ν unfolds (`unfold` / `uncons` on `Stream`). Only a run Stream becomes an Elixir `Stream`. Spec and evidence stay erased. `+` is still only for Data (`Nat`, `Unit`, `Empty`), not Stream. A non-productive run unfold is rejected.
+μ descends (`match` on Nat). ν is a greatest fixed point `ν X. F(X)` with F strictly positive. Stream is the instance `ν X. A × X`. Always is a coinductive family: `Always P s = ν Y. P (head s) × Y` (head satisfies P; the tail is guarded). Only a run Stream becomes an Elixir `Stream`. Always and its inhabitants are evidence and are omitted. `+` is still only for Data (`Nat`, `Unit`, `Empty`). A non-productive run or evidence unfold is rejected.
 
-See `examples/zeros.muro` (kernel: `head zeros ≡ 0`) and `examples/nats.muro` (IEx):
+See `examples/zeros.muro`, `examples/nats.muro`, and `examples/always.muro`. IEx:
 
 ```
 {:ok, src} = Muro.emit_file("examples/nats.muro", Muro.Nats)
@@ -353,6 +353,7 @@ examples/half_ok.muro
 examples/internal_ok.muro
 examples/zeros.muro
 examples/nats.muro
+examples/always.muro
 examples/even_dec.muro
 examples/either_run.muro
 test/muro_check_test.exs
