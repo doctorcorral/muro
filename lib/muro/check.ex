@@ -415,6 +415,38 @@ defmodule Muro.Check do
     end
   end
 
+  # ⇒-bisim / ⇐-unf: σ ~ τ = ν R. {head σ ≡ head τ} × R
+  defp payload_ty(k, book, f) do
+    case view_prod(k, book, Subst.inst(f, :unit)) do
+      {:ok, {a, _}} -> {:ok, a}
+      err -> err
+    end
+  end
+
+  defp expand_bisim(k, book, rs, gamma, s, t) do
+    with {:ok, {ts, _}} <- infer(k, book, rs, gamma, :spec, s),
+         {:ok, f} <- view_nu(k, book, ts),
+         {:ok, a} <- payload_ty(k, book, f),
+         {:ok, {tt, _}} <- infer(k, book, rs, gamma, :spec, t),
+         :ok <- conv(k, book, ts, tt) do
+      id = {:idt, a, {:fst, {:ucons, s}}, {:fst, {:ucons, t}}}
+      {:ok, {:nu, {:prod, Subst.wk(id), {:var, 0}}}}
+    end
+  end
+
+  defp as_nu(k, book, rs, gamma, t) do
+    case whnf(k, book, t) do
+      {:nu, f} ->
+        {:ok, f}
+
+      {:bisim, s, u} ->
+        with {:ok, {:nu, f}} <- expand_bisim(k, book, rs, gamma, s, u), do: {:ok, f}
+
+      t1 ->
+        {:error, "expected ν, got #{inspect(t1)}"}
+    end
+  end
+
   defp view_sum(k, book, t) do
     case whnf(k, book, t) do
       {:sum, a, b} -> {:ok, {a, b}}
@@ -435,6 +467,7 @@ defmodule Muro.Check do
   defp has_self?(self, {:pi, _, a, b}), do: has_self?(self, a) or has_self?(self, b)
   defp has_self?(self, {:prod, a, b}), do: has_self?(self, a) or has_self?(self, b)
   defp has_self?(self, {:nu, f}), do: has_self?(self, f)
+  defp has_self?(self, {:bisim, s, t}), do: has_self?(self, s) or has_self?(self, t)
   defp has_self?(self, {:sum, a, b}), do: has_self?(self, a) or has_self?(self, b)
   defp has_self?(self, {:left, t}), do: has_self?(self, t)
   defp has_self?(self, {:right, t}), do: has_self?(self, t)
@@ -458,6 +491,7 @@ defmodule Muro.Check do
   defp occurs?(x, {:fst, t}), do: occurs?(x, t)
   defp occurs?(x, {:snd, t}), do: occurs?(x, t)
   defp occurs?(x, {:nu, f}), do: occurs?(x + 1, f)
+  defp occurs?(x, {:bisim, s, t}), do: occurs?(x, s) or occurs?(x, t)
   defp occurs?(x, {:unf, s, f}), do: occurs?(x, s) or occurs?(x, f)
   defp occurs?(x, {:ucons, s}), do: occurs?(x, s)
   defp occurs?(x, {:idt, a, b, c}), do: occurs?(x, a) or occurs?(x, b) or occurs?(x, c)
@@ -496,7 +530,9 @@ defmodule Muro.Check do
 
   defp go_nu({:pi, _, _, b}, {:lam, _, _, t}), do: go_nu(b, t)
   defp go_nu({:nu, _}, {:unf, _, _}), do: :ok
+  defp go_nu({:bisim, _, _}, {:unf, _, _}), do: :ok
   defp go_nu({:nu, _}, _), do: {:error, "ν value must be an unfold"}
+  defp go_nu({:bisim, _, _}, _), do: {:error, "ν value must be an unfold"}
   defp go_nu(_, _), do: :ok
 
   # -- infer / check ---------------------------------------------------------
@@ -686,6 +722,13 @@ defmodule Muro.Check do
                  do: :ok,
                  else: {:error, "ν body is not strictly positive"}
                ),
+             do: {:ok, {:typ, u0s(n)}}
+
+      {m, {:bisim, _, _}} when m in [:run, :evidence] ->
+        {:error, "no promotion: ~ is an erased term"}
+
+      {:spec, {:bisim, s, t}} ->
+        with {:ok, _} <- expand_bisim(k, book, rs, gamma, s, t),
              do: {:ok, {:typ, u0s(n)}}
 
       # ⇒-pair
@@ -904,7 +947,7 @@ defmodule Muro.Check do
 
       # ⇐-unf
       {:unf, seed, {:lam, q, a_ann, t}} ->
-        with {:ok, fu_ty} <- view_nu(k, book, a),
+        with {:ok, fu_ty} <- as_nu(k, book, rs, gamma, a),
              {:ok, {s_ty, seed_u}} <- infer(k, book, rs, gamma, mode, seed),
              :ok <- conv(k, book, a_ann, s_ty),
              {:ok, [u0 | us]} <-
@@ -922,7 +965,7 @@ defmodule Muro.Check do
              do: combine(mode, seed_u, us)
 
       {:unf, seed, f} ->
-        with {:ok, fu_ty} <- view_nu(k, book, a),
+        with {:ok, fu_ty} <- as_nu(k, book, rs, gamma, a),
              {:ok, {s_ty, seed_u}} <- infer(k, book, rs, gamma, mode, seed),
              {:ok, fu} <-
                check(

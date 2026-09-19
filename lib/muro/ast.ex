@@ -34,6 +34,7 @@ defmodule Muro.Ast do
           | {:snd, named}
           | {:stream, named}
           | {:always, named, named}
+          | {:bisim, named, named}
           | {:nu, name, named}
           | {:unf, named, named}
           | {:ucons, named}
@@ -68,6 +69,7 @@ defmodule Muro.Ast do
           | {:fst, db}
           | {:snd, db}
           | {:nu, db}
+          | {:bisim, db, db}
           | {:unf, db, db}
           | {:ucons, db}
           | {:sum, db, db}
@@ -193,6 +195,12 @@ defmodule Muro.Ast do
 
   def to_db({:nu, x, f}, env) do
     with {:ok, f1} <- to_db(f, [x | env]), do: {:ok, {:nu, f1}}
+  end
+
+  def to_db({:bisim, s, t}, env) do
+    with {:ok, s1} <- to_db(s, env),
+         {:ok, t1} <- to_db(t, env),
+         do: {:ok, {:bisim, s1, t1}}
   end
 
   def to_db({:ucons, s}, env), do: map1(s, env, &{:ucons, &1})

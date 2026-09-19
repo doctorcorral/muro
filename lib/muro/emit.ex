@@ -127,7 +127,11 @@ defmodule Muro.Emit do
   defp spine({:app, f, a}, acc), do: spine(f, [a | acc])
   defp spine(h, acc), do: {h, acc}
 
-  defp safe(name), do: String.replace(name, "-", "_")
+  defp safe(name) do
+    name
+    |> String.replace("-", "_")
+    |> String.replace("'", "_")
+  end
 
   defp indent(s, n) do
     pad = String.duplicate(" ", n)

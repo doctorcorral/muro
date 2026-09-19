@@ -199,6 +199,12 @@ defmodule Muro.Parser do
           parse_infix(rest, {:sum, left, right}, min_bp)
         end
 
+      bisim_tok?(s0) and min_bp <= 10 ->
+        with {:ok, rest} <- eat_bisim(s0),
+             {:ok, right, rest} <- parse_term(skip(rest), 11) do
+          parse_infix(rest, {:bisim, left, right}, min_bp)
+        end
+
       starts_atom?(s0) and min_bp <= 20 ->
         with {:ok, arg, rest} <- parse_atom(s0) do
           parse_infix(rest, {:app, left, arg}, min_bp)
@@ -235,6 +241,12 @@ defmodule Muro.Parser do
 
   defp eat_sum(s) do
     if has_prefix?(s, "⊎"), do: {:ok, after_kw(s, "⊎")}, else: {:error, "expected ⊎"}
+  end
+
+  defp bisim_tok?(s), do: has_prefix?(s, "~") and not ident_char?(after_kw(s, "~"))
+
+  defp eat_bisim(s) do
+    if bisim_tok?(s), do: {:ok, after_kw(s, "~")}, else: {:error, "expected ~"}
   end
 
   defp starts_atom?(s) do
@@ -317,6 +329,9 @@ defmodule Muro.Parser do
 
       word_kw?(s, "Always") ->
         parse_always(s)
+
+      word_kw?(s, "bisim") ->
+        parse_bisim(s)
 
       word_kw?(s, "unfold") ->
         parse_unf(s)
@@ -425,6 +440,14 @@ defmodule Muro.Parser do
          {:ok, p, rest} <- parse_atom(skip(rest)),
          {:ok, st, rest} <- parse_atom(skip(rest)) do
       {:ok, {:always, p, st}, rest}
+    end
+  end
+
+  defp parse_bisim(s) do
+    with {:ok, rest} <- kw(s, "bisim"),
+         {:ok, a, rest} <- parse_atom(skip(rest)),
+         {:ok, b, rest} <- parse_atom(skip(rest)) do
+      {:ok, {:bisim, a, b}, rest}
     end
   end
 
@@ -664,14 +687,17 @@ defmodule Muro.Parser do
   end
 
   defp take_ident(<<c, r::binary>>, acc)
-       when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_ or c == ?- do
+       when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_ or c == ?- or c == ?' do
     take_ident(r, acc <> <<c>>)
   end
 
   defp take_ident(s, acc), do: {acc, s}
 
   defp ident_char?(nil), do: false
-  defp ident_char?(<<c>>), do: c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_ or c == ?-
+
+  defp ident_char?(<<c>>),
+    do: c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_ or c == ?- or c == ?'
+
   defp ident_char?(s) when is_binary(s), do: ident_char?(String.first(s))
 
   defp first_char(<<c, _::binary>>), do: c

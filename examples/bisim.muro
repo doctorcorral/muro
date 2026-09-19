@@ -1,0 +1,22 @@
+-- bisim.muro — σ ~ τ = ν R. {head σ ≡ head τ} × R
+-- J.J.M.M. Rutten, Elements of Stream Calculus (An Extensive Exercise
+-- in Coinduction), ENTCS 45 (2001), Theorem 2.1.
+ν Stream (A : Type) : Type where
+  uncons : Stream A → A × Stream A
+
+def zeros : run Stream Nat :=
+  unfold 0 (λ (_ : Nat) → (0, 0))
+
+def zeros' : run Stream Nat :=
+  unfold 0 (λ (_ : Nat) → (0, 0))
+
+def zeros-bisim : evidence zeros ~ zeros' :=
+  unfold tt (λ (_ : Unit) → (refl, tt))
+
+def natsFrom : run Π (n : Nat) → Stream Nat :=
+  λ (n : Nat) →
+    unfold n (λ (+ k : Nat) → (k, suc k))
+
+def nats-tail-bisim : evidence Π (n : Nat) → tail (natsFrom n) ~ natsFrom (suc n) :=
+  λ (n : Nat) →
+    unfold tt (λ (_ : Unit) → (refl, tt))

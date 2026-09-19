@@ -261,4 +261,32 @@ defmodule Muro.CheckTest do
     assert {:error, msg} = Check.check_sig(book ++ [bad])
     assert msg =~ "unfold" or msg =~ "ν" or msg =~ "unguarded"
   end
+
+  test "bisim.muro checks; evidence is not emitted" do
+    src = File.read!("examples/bisim.muro")
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+
+    out = Emit.emit_module(Muro.BisimEx, book)
+    assert out =~ ~r/\bdef zeros\b/
+    assert out =~ ~r/\bdef zeros_\b/
+    assert out =~ ~r/\bdef natsFrom\b/
+    refute out =~ "zeros-bisim"
+    refute out =~ "nats_tail_bisim"
+  end
+
+  test "unguarded ~ evidence fails" do
+    src = File.read!("examples/bisim.muro")
+    assert {:ok, book} = Parser.parse(src)
+
+    bad = %{
+      name: "bad",
+      mode: :evidence,
+      type: {:bisim, {:var, "zeros"}, {:app, {:var, "natsFrom"}, :ze}},
+      body: {:var, "bad"}
+    }
+
+    assert {:error, msg} = Check.check_sig(book ++ [bad])
+    assert msg =~ "unfold" or msg =~ "ν" or msg =~ "unguarded" or msg =~ "convert"
+  end
 end
