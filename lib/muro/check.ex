@@ -11,11 +11,38 @@ defmodule Muro.Check do
   # -- lookup ----------------------------------------------------------------
 
   defp lookup_def(book, name) do
-    case Enum.find(book, &(&1.name == name)) do
+    case Enum.find(book, &(Map.get(&1, :kind, :def) != :data and &1.name == name)) do
       nil -> {:error, "unknown definition #{name}"}
       d -> {:ok, d}
     end
   end
+
+  defp lookup_data(book, name) do
+    case Enum.find(book, &(Map.get(&1, :kind) == :data and &1.name == name)) do
+      nil -> {:error, "unknown data type #{name}"}
+      d -> {:ok, d}
+    end
+  end
+
+  defp lookup_ctor(book, name) do
+    Enum.find_value(book, fn
+      %{kind: :data, name: dname, ctors: cs} = d ->
+        case Enum.find_index(cs, &(&1.name == name)) do
+          nil -> nil
+          i -> {d, dname, i, Enum.at(cs, i)}
+        end
+
+      _ ->
+        nil
+    end)
+    |> case do
+      nil -> {:error, "unknown constructor #{name}"}
+      found -> {:ok, found}
+    end
+  end
+
+  defp data_name?(book, name), do: match?({:ok, _}, lookup_data(book, name))
+  defp ctor_name?(book, name), do: match?({:ok, _}, lookup_ctor(book, name))
 
   # -- context: newest at index 0 -------------------------------------------
 
@@ -136,14 +163,15 @@ defmodule Muro.Check do
   defp apps({:app, f, a}, acc), do: apps(f, [a | acc])
   defp apps(f, acc), do: {f, acc}
 
-  defp ctor_head?(:ze), do: true
-  defp ctor_head?({:su, _}), do: true
-  defp ctor_head?(:one), do: true
-  defp ctor_head?({:left, _}), do: true
-  defp ctor_head?({:right, _}), do: true
-  defp ctor_head?(:lnil), do: true
-  defp ctor_head?({:cons, _, _}), do: true
-  defp ctor_head?(_), do: false
+  defp ctor_head_book?(book, t) do
+    case elem(apps(t), 0) do
+      :ze -> true
+      {:su, _} -> true
+      :one -> true
+      {:def, n} -> ctor_name?(book, n)
+      _ -> false
+    end
+  end
 
   defp nth_qty({:pi, q, _, _}, 0), do: {:ok, q}
   defp nth_qty({:pi, _, _, b}, i), do: nth_qty(b, i - 1)
@@ -210,19 +238,18 @@ defmodule Muro.Check do
     end
   end
 
-  defp whnf(k, book, {:msum, e, p, l, r}) do
-    case whnf(k - 1, book, e) do
-      {:left, a} -> whnf(k - 1, book, Subst.inst(l, a))
-      {:right, b} -> whnf(k - 1, book, Subst.inst(r, b))
-      e1 -> {:msum, e1, p, l, r}
-    end
-  end
+  defp whnf(k, book, {:mdata, e, p, bs}) do
+    e1 = whnf(k - 1, book, e)
 
-  defp whnf(k, book, {:mlst, e, p, n, c}) do
-    case whnf(k - 1, book, e) do
-      :lnil -> whnf(k - 1, book, n)
-      {:cons, a, as} -> whnf(k - 1, book, Subst.inst_cons(c, a, as))
-      e1 -> {:mlst, e1, p, n, c}
+    case ctor_spine(book, e1) do
+      {:ok, {_dname, ci, args}} ->
+        case Enum.at(bs, ci) do
+          {_n, _ar, b} -> whnf(k - 1, book, Subst.inst_n(b, args))
+          nil -> {:mdata, e1, p, bs}
+        end
+
+      :error ->
+        {:mdata, e1, p, bs}
     end
   end
 
@@ -274,25 +301,28 @@ defmodule Muro.Check do
   defp whnf(_, _, t), do: t
 
   defp is_data?(k, book, t) do
-    case whnf(k, book, t) do
-      :nat -> true
-      :unit -> true
-      :empty -> true
-      {:lst, a} -> is_data?(k, book, a)
+    {h, as} = apps(whnf(k, book, t))
+
+    case h do
+      :nat -> as == []
+      :unit -> as == []
+      :empty -> as == []
+      {:def, n} -> data_name?(book, n) and Enum.all?(as, &is_data?(k, book, &1))
       _ -> false
     end
   end
 
   defp run_ty?(k, book, t) do
     case whnf(k, book, t) do
+      {:var, _} -> true
       :nat -> true
       :unit -> true
       :empty -> true
       {:pi, _, _, b} -> run_ty?(k, book, b)
       {:nu, f} -> run_ty?(k, book, Subst.inst(f, :unit))
       {:prod, a, b} -> run_ty?(k, book, a) and run_ty?(k, book, b)
-      {:sum, a, b} -> run_ty?(k, book, a) and run_ty?(k, book, b)
-      {:lst, _} -> true
+      {:app, f, _} -> run_ty?(k, book, f)
+      {:def, n} -> data_name?(book, n)
       _ -> false
     end
   end
@@ -314,7 +344,7 @@ defmodule Muro.Check do
   defp stuck_cong(k, book, u, v) do
     case {apps(u), apps(v)} do
       {{{:def, i}, [a | as]}, {{:def, j}, [b | bs]}} ->
-        if i == j and not ctor_head?(a) and not ctor_head?(b) do
+        if i == j and not ctor_head_book?(book, a) and not ctor_head_book?(book, b) do
           with :ok <- conv(k - 1, book, a, b), do: conv_args(k - 1, book, as, bs)
         else
           conv_n(k - 1, book, whnf(k - 1, book, u), whnf(k - 1, book, v))
@@ -400,36 +430,23 @@ defmodule Muro.Check do
 
   defp conv_n(k, book, {:ucons, s}, {:ucons, s1}), do: conv(k, book, s, s1)
 
-  defp conv_n(k, book, {:sum, a, b}, {:sum, a1, b1}) do
-    with :ok <- conv(k, book, a, a1), do: conv(k, book, b, b1)
-  end
-
-  defp conv_n(k, book, {:left, t}, {:left, t1}), do: conv(k, book, t, t1)
-  defp conv_n(k, book, {:right, t}, {:right, t1}), do: conv(k, book, t, t1)
-
-  defp conv_n(k, book, {:msum, e, p, l, r}, {:msum, e1, p1, l1, r1}) do
+  defp conv_n(k, book, {:mdata, e, p, bs}, {:mdata, e1, p1, bs1}) do
     with :ok <- conv(k, book, e, e1),
-         :ok <- conv(k, book, p, p1),
-         :ok <- conv(k, book, l, l1),
-         do: conv(k, book, r, r1)
-  end
-
-  defp conv_n(k, book, {:lst, a}, {:lst, a1}), do: conv(k, book, a, a1)
-  defp conv_n(_k, _book, :lnil, :lnil), do: :ok
-
-  defp conv_n(k, book, {:cons, a, as}, {:cons, a1, as1}) do
-    with :ok <- conv(k, book, a, a1), do: conv(k, book, as, as1)
-  end
-
-  defp conv_n(k, book, {:mlst, e, p, n, c}, {:mlst, e1, p1, n1, c1}) do
-    with :ok <- conv(k, book, e, e1),
-         :ok <- conv(k, book, p, p1),
-         :ok <- conv(k, book, n, n1),
-         do: conv(k, book, c, c1)
+         :ok <- conv(k, book, p, p1) do
+      conv_mdata_bs(k, book, bs, bs1)
+    end
   end
 
   defp conv_n(_k, _book, u, v),
     do: {:error, "cannot convert #{inspect(u)} ≁ #{inspect(v)}"}
+
+  defp conv_mdata_bs(_k, _book, [], []), do: :ok
+
+  defp conv_mdata_bs(k, book, [{n, ar, b} | bs], [{n, ar, b1} | bs1]) do
+    with :ok <- conv(k, book, b, b1), do: conv_mdata_bs(k, book, bs, bs1)
+  end
+
+  defp conv_mdata_bs(_, _, _, _), do: {:error, "match branches do not convert"}
 
   defp view_pi(k, book, t) do
     case whnf(k, book, t) do
@@ -491,17 +508,40 @@ defmodule Muro.Check do
     end
   end
 
-  defp view_lst(k, book, t) do
-    case whnf(k, book, t) do
-      {:lst, a} -> {:ok, a}
-      t1 -> {:error, "expected List, got #{inspect(t1)}"}
+  defp view_data(k, book, t) do
+    {h, params} = apps(whnf(k, book, t))
+
+    case h do
+      {:def, n} ->
+        case lookup_data(book, n) do
+          {:ok, d} -> {:ok, {d, n, params}}
+          _ -> {:error, "expected data type, got #{inspect(h)}"}
+        end
+
+      _ ->
+        {:error, "expected data type, got #{inspect(h)}"}
     end
   end
 
-  defp view_sum(k, book, t) do
-    case whnf(k, book, t) do
-      {:sum, a, b} -> {:ok, {a, b}}
-      t1 -> {:error, "expected Either, got #{inspect(t1)}"}
+  defp ctor_spine(book, t) do
+    {h, args} = apps(t)
+
+    case h do
+      {:def, n} ->
+        case lookup_ctor(book, n) do
+          {:ok, {_d, dname, ci, _c}} -> {:ok, {dname, ci, args}}
+          _ -> :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp is_d_type?(book, dname, t) do
+    case elem(apps(t), 0) do
+      {:def, n} -> n == dname and data_name?(book, n)
+      _ -> false
     end
   end
 
@@ -519,19 +559,10 @@ defmodule Muro.Check do
   defp has_self?(self, {:prod, a, b}), do: has_self?(self, a) or has_self?(self, b)
   defp has_self?(self, {:nu, f}), do: has_self?(self, f)
   defp has_self?(self, {:bisim, s, t}), do: has_self?(self, s) or has_self?(self, t)
-  defp has_self?(self, {:sum, a, b}), do: has_self?(self, a) or has_self?(self, b)
-  defp has_self?(self, {:left, t}), do: has_self?(self, t)
-  defp has_self?(self, {:right, t}), do: has_self?(self, t)
 
-  defp has_self?(self, {:msum, e, p, l, r}) do
-    has_self?(self, e) or has_self?(self, p) or has_self?(self, l) or has_self?(self, r)
-  end
-
-  defp has_self?(self, {:lst, a}), do: has_self?(self, a)
-  defp has_self?(self, {:cons, a, as}), do: has_self?(self, a) or has_self?(self, as)
-
-  defp has_self?(self, {:mlst, e, p, n, c}) do
-    has_self?(self, e) or has_self?(self, p) or has_self?(self, n) or has_self?(self, c)
+  defp has_self?(self, {:mdata, e, p, bs}) do
+    has_self?(self, e) or has_self?(self, p) or
+      Enum.any?(bs, fn {_, _, b} -> has_self?(self, b) end)
   end
 
   defp has_self?(_, _), do: false
@@ -541,20 +572,16 @@ defmodule Muro.Check do
   defp occurs?(x, {:lam, _, a, t}), do: occurs?(x, a) or occurs?(x + 1, t)
   defp occurs?(x, {:app, f, a}), do: occurs?(x, f) or occurs?(x, a)
   defp occurs?(x, {:su, t}), do: occurs?(x, t)
-  defp occurs?(x, {:sum, a, b}), do: occurs?(x, a) or occurs?(x, b)
-  defp occurs?(x, {:left, t}), do: occurs?(x, t)
-  defp occurs?(x, {:right, t}), do: occurs?(x, t)
   defp occurs?(x, {:prod, a, b}), do: occurs?(x, a) or occurs?(x, b)
   defp occurs?(x, {:pair, a, b}), do: occurs?(x, a) or occurs?(x, b)
   defp occurs?(x, {:fst, t}), do: occurs?(x, t)
   defp occurs?(x, {:snd, t}), do: occurs?(x, t)
   defp occurs?(x, {:nu, f}), do: occurs?(x + 1, f)
   defp occurs?(x, {:bisim, s, t}), do: occurs?(x, s) or occurs?(x, t)
-  defp occurs?(x, {:lst, a}), do: occurs?(x, a)
-  defp occurs?(x, {:cons, a, as}), do: occurs?(x, a) or occurs?(x, as)
 
-  defp occurs?(x, {:mlst, e, p, n, c}) do
-    occurs?(x, e) or occurs?(x + 1, p) or occurs?(x, n) or occurs?(x + 2, c)
+  defp occurs?(x, {:mdata, e, p, bs}) do
+    occurs?(x, e) or occurs?(x + 1, p) or
+      Enum.any?(bs, fn {_, ar, b} -> occurs?(x + ar, b) end)
   end
 
   defp occurs?(x, {:unf, s, f}), do: occurs?(x, s) or occurs?(x, f)
@@ -564,8 +591,6 @@ defmodule Muro.Check do
 
   defp spos?(_x, {:var, _}), do: true
   defp spos?(x, {:prod, a, b}), do: spos?(x, a) and spos?(x, b)
-  defp spos?(x, {:sum, a, b}), do: spos?(x, a) and spos?(x, b)
-  defp spos?(x, {:lst, a}), do: spos?(x, a)
   defp spos?(x, {:pi, _, a, b}), do: not occurs?(x, a) and spos?(x + 1, b)
   defp spos?(x, {:nu, f}), do: not occurs?(x + 1, f)
   defp spos?(x, t), do: not occurs?(x, t)
@@ -639,9 +664,6 @@ defmodule Muro.Check do
       {m, :empty} when m in [:run, :evidence] ->
         {:error, "no promotion: Empty is an erased term"}
 
-      {m, {:lst, _}} when m in [:run, :evidence] ->
-        {:error, "no promotion: List is an erased term"}
-
       {m, :typ} when m in [:run, :evidence] ->
         {:error, "no promotion: Type is an erased term"}
 
@@ -655,49 +677,17 @@ defmodule Muro.Check do
       {:spec, :empty} ->
         {:ok, {:typ, u0s(n)}}
 
-      {:spec, {:lst, a}} ->
-        with :ok <- check_ty(k, book, rs, gamma, a),
-             do: {:ok, {:typ, u0s(n)}}
-
-      {_, :lnil} ->
-        {:error, "nil requires an expected List type"}
-
-      # ⇒-cons
-      {m, {:cons, a, as}} ->
-        with {:ok, {ta, au}} <- infer(k, book, rs, gamma, m, a),
-             {:ok, asu} <- check(k, book, rs, gamma, m, as, {:lst, ta}),
-             {:ok, uses} <- combine(m, au, asu) do
-          {:ok, {{:lst, ta}, uses}}
-        end
-
-      # ⇒-mLst
-      {m, {:mlst, e, p, n, c}} ->
+      # ⇒-mData
+      {m, {:mdata, e, p, bs}} ->
         with {:ok, {et, eu}} <- infer(k, book, rs, gamma, m, e),
-             {:ok, a} <- view_lst(k, book, et),
+             {:ok, {d, dname, params}} <- view_data(k, book, et),
+             :ok <- match_arity(bs, d.ctors),
+             dty = Subst.apps_from({:def, dname}, params),
              :ok <-
-               check_ty(
-                 k,
-                 book,
-                 ext_rec(rs, false, false),
-                 ext(gamma, :affine, {:lst, a}),
-                 p
-               ),
-             {:ok, nu} <- check(k, book, rs, gamma, m, n, Subst.inst(p, :lnil)),
-             ok? = scrut_ok(rs, e),
-             rs_as = ext_rec(ext_rec(rs, false, false), ok?, ok?),
-             {:ok, [u_as, u_a | rest]} <-
-               check(
-                 k,
-                 book,
-                 rs_as,
-                 ext(ext(gamma, :affine, a), :affine, {:lst, Subst.wk(a)}),
-                 m,
-                 c,
-                 Subst.mot_cons(p)
-               ),
-             :ok <- check_bound(m, :affine, u_as),
-             :ok <- check_bound(m, :affine, u_a),
-             {:ok, uses} <- combine(m, eu, combine_alt(m, nu, rest)) do
+               check_ty(k, book, ext_rec(rs, false, false), ext(gamma, :affine, dty), p),
+             {:ok, bu} <-
+               check_branches(k, book, rs, gamma, m, dname, params, p, d.ctors, bs),
+             {:ok, uses} <- combine(m, eu, bu) do
           {:ok, {Subst.inst(p, e), uses}}
         end
 
@@ -795,19 +785,38 @@ defmodule Muro.Check do
           {:ok, {Subst.inst(p, e), uses}}
         end
 
-      # ⇒-def
+      # ⇒-def / ⇒-dty
       {m, {:def, name}} ->
-        with {:ok, d} <- lookup_def(book, name) do
-          cond do
-            not allowed_def?(d.mode, m) ->
-              {:error, "no promotion: #{d.mode} definition #{name} in #{m} mode"}
+        case lookup_def(book, name) do
+          {:ok, d} ->
+            cond do
+              not allowed_def?(d.mode, m) ->
+                {:error, "no promotion: #{d.mode} definition #{name} in #{m} mode"}
 
-            m == :run and not run_ty?(k, book, d.type) ->
-              {:error, "no promotion: definition #{name} has a spec type"}
+              m == :run and not run_ty?(k, book, d.type) ->
+                {:error, "no promotion: definition #{name} has a spec type"}
 
-            true ->
-              {:ok, {d.type, u0s(n)}}
-          end
+              true ->
+                {:ok, {d.type, u0s(n)}}
+            end
+
+          {:error, _} ->
+            case lookup_data(book, name) do
+              {:ok, d} when m == :spec ->
+                {:ok, {dty_type(d.params), u0s(n)}}
+
+              {:ok, _} ->
+                {:error, "no promotion: a data former is an erased term"}
+
+              {:error, _} ->
+                case lookup_ctor(book, name) do
+                  {:ok, _} ->
+                    {:error, "constructor requires an expected data type"}
+
+                  err ->
+                    err
+                end
+            end
         end
 
       # ⇒-ann
@@ -886,60 +895,6 @@ defmodule Muro.Check do
         with {:ok, {tt, u}} <- infer(k, book, rs, gamma, m, s),
              {:ok, f} <- view_nu(k, book, tt) do
           {:ok, {Subst.inst(f, tt), u}}
-        end
-
-      # ⇒-sum
-      {m, {:sum, _, _}} when m in [:run, :evidence] ->
-        {:error, "no promotion: Either is an erased term"}
-
-      {:spec, {:sum, a, b}} ->
-        with :ok <- check_ty(k, book, rs, gamma, a),
-             :ok <- check_ty(k, book, rs, gamma, b),
-             do: {:ok, {:typ, u0s(n)}}
-
-      {_, {:left, _}} ->
-        {:error, "left requires an expected Either type"}
-
-      {_, {:right, _}} ->
-        {:error, "right requires an expected Either type"}
-
-      # ⇒-mSum
-      {m, {:msum, e, p, l, r}} ->
-        with {:ok, {et, eu}} <- infer(k, book, rs, gamma, m, e),
-             {:ok, {a, b}} <- view_sum(k, book, et),
-             :ok <-
-               check_ty(
-                 k,
-                 book,
-                 ext_rec(rs, false, false),
-                 ext(gamma, :affine, {:sum, a, b}),
-                 p
-               ),
-             ok? = scrut_ok(rs, e),
-             {:ok, [u_l | lus]} <-
-               check(
-                 k,
-                 book,
-                 ext_rec(rs, ok?, ok?),
-                 ext(gamma, :affine, a),
-                 m,
-                 l,
-                 Subst.mot_left(p)
-               ),
-             {:ok, [u_r | rus]} <-
-               check(
-                 k,
-                 book,
-                 ext_rec(rs, ok?, ok?),
-                 ext(gamma, :affine, b),
-                 m,
-                 r,
-                 Subst.mot_right(p)
-               ),
-             :ok <- check_bound(m, :affine, u_l),
-             :ok <- check_bound(m, :affine, u_r),
-             {:ok, uses} <- combine(m, eu, combine_alt(m, lus, rus)) do
-          {:ok, {Subst.inst(p, e), uses}}
         end
 
       {_, t1} ->
@@ -1043,28 +998,6 @@ defmodule Muro.Check do
              :ok <- conv(k, book, x, y),
              do: {:ok, u0s(nctx(gamma))}
 
-      # ⇐-nil
-      :lnil ->
-        with {:ok, _} <- view_lst(k, book, a),
-             do: {:ok, u0s(nctx(gamma))}
-
-      # ⇐-cons
-      {:cons, hd, tl} ->
-        with {:ok, a1} <- view_lst(k, book, a),
-             {:ok, au} <- check(k, book, rs, gamma, mode, hd, a1),
-             {:ok, tu} <- check(k, book, rs, gamma, mode, tl, {:lst, a1}),
-             do: combine(mode, au, tu)
-
-      # ⇐-left
-      {:left, t} ->
-        with {:ok, {a1, _}} <- view_sum(k, book, a),
-             do: check(k, book, rs, gamma, mode, t, a1)
-
-      # ⇐-right
-      {:right, t} ->
-        with {:ok, {_, b1}} <- view_sum(k, book, a),
-             do: check(k, book, rs, gamma, mode, t, b1)
-
       # ⇐-pair
       {:pair, x, y} ->
         with {:ok, {a1, b1}} <- view_prod(k, book, a),
@@ -1107,11 +1040,17 @@ defmodule Muro.Check do
              :ok <- check_unfold(k, book, mode, rs, f),
              do: combine(mode, seed_u, fu)
 
-      # ⇐-conv
+      # ⇐-ctor / ⇐-conv
       _ ->
-        with {:ok, {b, u}} <- infer(k, book, rs, gamma, mode, e),
-             :ok <- conv(k, book, b, a),
-             do: {:ok, u}
+        case {view_data(k, book, a), ctor_spine(book, e)} do
+          {{:ok, {_d, dname, params}}, {:ok, {dname2, _ci, args}}} when dname == dname2 ->
+            check_ctor_app(k, book, rs, gamma, mode, dname, e, params, args)
+
+          _ ->
+            with {:ok, {b, u}} <- infer(k, book, rs, gamma, mode, e),
+                 :ok <- conv(k, book, b, a),
+                 do: {:ok, u}
+        end
     end
   end
 
@@ -1123,6 +1062,8 @@ defmodule Muro.Check do
       other -> other
     end
   end
+
+  def check_def(book, %{kind: :data} = d), do: check_data(book, d)
 
   def check_def(book, %{name: name, mode: mode, type: ty, body: body}) do
     k = @fuel
@@ -1144,5 +1085,190 @@ defmodule Muro.Check do
         end
       end)
     end
+  end
+
+  defp match_arity(bs, ctors) do
+    if length(bs) == length(ctors) do
+      :ok
+    else
+      {:error, "match branch count does not match constructors"}
+    end
+  end
+
+  defp dty_type(params) do
+    Enum.reduce(Enum.reverse(params), :typ, fn {q, _x, _a}, acc ->
+      {:pi, q, :typ, acc}
+    end)
+  end
+
+  defp inst_params(_k, _book, t, []), do: {:ok, t}
+
+  defp inst_params(k, book, t, [p | ps]) do
+    case whnf(k, book, t) do
+      {:pi, _, _, b} -> inst_params(k, book, Subst.inst(b, p), ps)
+      _ -> {:error, "constructor type has too few parameter binders"}
+    end
+  end
+
+  defp check_ctor_app(k, book, rs, gamma, m, _dname, e, params, args) do
+    {h, _} = apps(e)
+
+    with {:def, cname} <- h,
+         {:ok, {_d, _dn, _ci, c}} <- lookup_ctor(book, cname),
+         {:ok, rest} <- inst_params(k, book, c.type, params) do
+      check_ctor_args(k, book, rs, gamma, m, rest, args)
+    else
+      _ -> {:error, "ill-formed constructor application"}
+    end
+  end
+
+  defp check_ctor_args(k, book, _rs, gamma, _m, ty, []) do
+    case whnf(k, book, ty) do
+      {:pi, _, _, _} -> {:error, "too few constructor arguments"}
+      _ -> {:ok, u0s(nctx(gamma))}
+    end
+  end
+
+  defp check_ctor_args(k, book, rs, gamma, m, ty, [a | as]) do
+    case whnf(k, book, ty) do
+      {:pi, q, a_ty, b} ->
+        am = if q == :erased, do: :spec, else: m
+
+        with {:ok, au} <- check(k, book, rs, gamma, am, a, a_ty),
+             {:ok, asu} <- check_ctor_args(k, book, rs, gamma, m, Subst.inst(b, a), as) do
+          if q == :erased do
+            if m == :spec, do: {:ok, u0s(nctx(gamma))}, else: {:ok, asu}
+          else
+            combine(m, au, asu)
+          end
+        end
+
+      _ ->
+        {:error, "too many constructor arguments"}
+    end
+  end
+
+  defp check_branches(_k, _book, _rs, gamma, m, _dname, _params, _mot, [], []) do
+    {:ok, u0s(nctx(gamma)) |> then(fn us -> if m == :spec, do: us, else: us end)}
+  end
+
+  defp check_branches(k, book, rs, gamma, m, dname, params, mot, [c | cs], [
+         {bname, arity, body} | bs
+       ]) do
+    if c.name != bname do
+      {:error, "expected constructor #{c.name}, got #{bname}"}
+    else
+      with {:ok, rest} <- inst_params(k, book, c.type, params),
+           dty = Subst.apps_from({:def, dname}, params),
+           mot_fun = {:lam, :affine, dty, mot},
+           {:ok, u} <-
+             check_br(k, book, rs, gamma, m, dname, c.name, rest, arity, body, mot_fun, []),
+           {:ok, v} <- check_branches(k, book, rs, gamma, m, dname, params, mot, cs, bs) do
+        {:ok, combine_alt(m, u, v)}
+      end
+    end
+  end
+
+  defp check_branches(_, _, _, _, _, _, _, _, _, _),
+    do: {:error, "match branch count does not match constructors"}
+
+  defp check_br(k, book, rs, gamma, m, dname, cname, ty, arity, body, mot_fun, args) do
+    case whnf(k, book, ty) do
+      {:pi, q, a, b} ->
+        rec? = is_d_type?(book, dname, a)
+        rs1 = ext_rec(rs, rec?, rec?)
+        rs2 = if q == :erased, do: keep_next(rs, rs1), else: rs1
+        args1 = Enum.map(args, &Subst.wk/1) ++ [{:var, 0}]
+
+        with {:ok, uses} <-
+               check_br(
+                 k,
+                 book,
+                 rs2,
+                 ext(gamma, q, a),
+                 m,
+                 dname,
+                 cname,
+                 b,
+                 arity,
+                 body,
+                 Subst.wk(mot_fun),
+                 args1
+               ),
+             [u0 | us] <- uses,
+             :ok <- check_bound(m, q, u0) do
+          {:ok, us}
+        else
+          [] -> {:error, "match branch binder mismatch"}
+          err -> err
+        end
+
+      _ ->
+        ctor_tm = Subst.apps_from({:def, cname}, args)
+        check(k, book, rs, gamma, m, body, {:app, mot_fun, ctor_tm})
+    end
+  end
+
+  defp occurs_d?(i, {:def, n}), do: n == i
+  defp occurs_d?(i, {:app, f, a}), do: occurs_d?(i, f) or occurs_d?(i, a)
+  defp occurs_d?(i, {:pi, _, a, b}), do: occurs_d?(i, a) or occurs_d?(i, b)
+  defp occurs_d?(i, {:lam, _, a, t}), do: occurs_d?(i, a) or occurs_d?(i, t)
+  defp occurs_d?(i, {:prod, a, b}), do: occurs_d?(i, a) or occurs_d?(i, b)
+  defp occurs_d?(i, {:pair, a, b}), do: occurs_d?(i, a) or occurs_d?(i, b)
+  defp occurs_d?(i, {:idt, a, b, c}), do: occurs_d?(i, a) or occurs_d?(i, b) or occurs_d?(i, c)
+  defp occurs_d?(i, {:su, t}), do: occurs_d?(i, t)
+  defp occurs_d?(i, {:fst, t}), do: occurs_d?(i, t)
+  defp occurs_d?(i, {:snd, t}), do: occurs_d?(i, t)
+  defp occurs_d?(i, {:nu, f}), do: occurs_d?(i, f)
+  defp occurs_d?(i, {:unf, s, f}), do: occurs_d?(i, s) or occurs_d?(i, f)
+  defp occurs_d?(i, {:ucons, s}), do: occurs_d?(i, s)
+  defp occurs_d?(i, {:ann, e, a}), do: occurs_d?(i, e) or occurs_d?(i, a)
+
+  defp occurs_d?(i, {:mdata, e, p, bs}),
+    do: occurs_d?(i, e) or occurs_d?(i, p) or Enum.any?(bs, fn {_, _, b} -> occurs_d?(i, b) end)
+
+  defp occurs_d?(_, _), do: false
+
+  defp pos_arg?(book, dname, a), do: is_d_type?(book, dname, a) or not occurs_d?(dname, a)
+
+  defp check_tel_pos(book, dname, {:pi, _, a, b}) do
+    if pos_arg?(book, dname, a) do
+      check_tel_pos(book, dname, b)
+    else
+      {:error, "constructor is not strictly positive"}
+    end
+  end
+
+  defp check_tel_pos(book, dname, t) do
+    if is_d_type?(book, dname, t) do
+      :ok
+    else
+      {:error, "constructor does not target the data type"}
+    end
+  end
+
+  defp check_ctor_rest(book, dname, np, {:pi, _, _, b}) when np > 0,
+    do: check_ctor_rest(book, dname, np - 1, b)
+
+  defp check_ctor_rest(_book, _dname, np, _) when np > 0,
+    do: {:error, "constructor type has too few parameter binders"}
+
+  defp check_ctor_rest(book, dname, 0, t), do: check_tel_pos(book, dname, t)
+
+  defp check_data(book, %{name: name, params: params, ctors: ctors}) do
+    np = length(params)
+    k = @fuel
+
+    Enum.reduce_while(ctors, :ok, fn c, :ok ->
+      result =
+        with :ok <- tag("#{c.name} type", check_ty(k, book, empty_rec(), [], c.type)) do
+          check_ctor_rest(book, name, np, c.type)
+        end
+
+      case tag(name, result) do
+        :ok -> {:cont, :ok}
+        err -> {:halt, err}
+      end
+    end)
   end
 end

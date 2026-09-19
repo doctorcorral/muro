@@ -10,6 +10,12 @@ defmodule Muro.Subst do
     end
   end
 
+  defp lift_n(rho, 0), do: rho
+  defp lift_n(rho, n) when n > 0, do: lift_n(lift(rho), n - 1)
+
+  defp lifts_n(sigma, 0), do: sigma
+  defp lifts_n(sigma, n) when n > 0, do: lifts_n(lifts(sigma), n - 1)
+
   def ren(rho, t) do
     case t do
       {:var, i} ->
@@ -45,17 +51,9 @@ defmodule Muro.Subst do
       :empty ->
         :empty
 
-      {:lst, a} ->
-        {:lst, ren(rho, a)}
-
-      :lnil ->
-        :lnil
-
-      {:cons, a, as} ->
-        {:cons, ren(rho, a), ren(rho, as)}
-
-      {:mlst, e, p, n, c} ->
-        {:mlst, ren(rho, e), ren(lift(rho), p), ren(rho, n), ren(lift(lift(rho)), c)}
+      {:mdata, e, p, bs} ->
+        {:mdata, ren(rho, e), ren(lift(rho), p),
+         Enum.map(bs, fn {n, ar, b} -> {n, ar, ren(lift_n(rho, ar), b)} end)}
 
       {:mnat, e, p, z, s} ->
         {:mnat, ren(rho, e), ren(lift(rho), p), ren(rho, z), ren(lift(rho), s)}
@@ -104,18 +102,6 @@ defmodule Muro.Subst do
 
       {:ucons, s} ->
         {:ucons, ren(rho, s)}
-
-      {:sum, a, b} ->
-        {:sum, ren(rho, a), ren(rho, b)}
-
-      {:left, t} ->
-        {:left, ren(rho, t)}
-
-      {:right, t} ->
-        {:right, ren(rho, t)}
-
-      {:msum, e, p, l, r} ->
-        {:msum, ren(rho, e), ren(lift(rho), p), ren(lift(rho), l), ren(lift(rho), r)}
     end
   end
 
@@ -165,17 +151,9 @@ defmodule Muro.Subst do
       :empty ->
         :empty
 
-      {:lst, a} ->
-        {:lst, sub(sigma, a)}
-
-      :lnil ->
-        :lnil
-
-      {:cons, a, as} ->
-        {:cons, sub(sigma, a), sub(sigma, as)}
-
-      {:mlst, e, p, n, c} ->
-        {:mlst, sub(sigma, e), sub(lifts(sigma), p), sub(sigma, n), sub(lifts(lifts(sigma)), c)}
+      {:mdata, e, p, bs} ->
+        {:mdata, sub(sigma, e), sub(lifts(sigma), p),
+         Enum.map(bs, fn {n, ar, b} -> {n, ar, sub(lifts_n(sigma, ar), b)} end)}
 
       {:mnat, e, p, z, s} ->
         {:mnat, sub(sigma, e), sub(lifts(sigma), p), sub(sigma, z), sub(lifts(sigma), s)}
@@ -224,18 +202,6 @@ defmodule Muro.Subst do
 
       {:ucons, s} ->
         {:ucons, sub(sigma, s)}
-
-      {:sum, a, b} ->
-        {:sum, sub(sigma, a), sub(sigma, b)}
-
-      {:left, t} ->
-        {:left, sub(sigma, t)}
-
-      {:right, t} ->
-        {:right, sub(sigma, t)}
-
-      {:msum, e, p, l, r} ->
-        {:msum, sub(sigma, e), sub(lifts(sigma), p), sub(lifts(sigma), l), sub(lifts(sigma), r)}
     end
   end
 
@@ -249,51 +215,16 @@ defmodule Muro.Subst do
     )
   end
 
-  def inst_cons(t, a, as) do
-    sub(
-      fn
-        0 -> as
-        1 -> a
-        i -> {:var, i - 2}
-      end,
-      t
-    )
+  def inst_n(t, args) do
+    Enum.reduce(Enum.reverse(args), t, fn a, acc -> inst(acc, a) end)
   end
 
-  def mot_cons(p) do
-    sub(
-      fn
-        0 -> {:cons, {:var, 1}, {:var, 0}}
-        i -> {:var, i + 1}
-      end,
-      p
-    )
-  end
+  def apps_from(f, args), do: Enum.reduce(args, f, fn a, acc -> {:app, acc, a} end)
 
   def mot_suc(p) do
     sub(
       fn
         0 -> {:su, {:var, 0}}
-        i -> {:var, i}
-      end,
-      p
-    )
-  end
-
-  def mot_left(p) do
-    sub(
-      fn
-        0 -> {:left, {:var, 0}}
-        i -> {:var, i}
-      end,
-      p
-    )
-  end
-
-  def mot_right(p) do
-    sub(
-      fn
-        0 -> {:right, {:var, 0}}
         i -> {:var, i}
       end,
       p

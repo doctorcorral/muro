@@ -11,7 +11,7 @@ defmodule Muro.Emit do
   alias Muro.Ast
 
   def emit_module(module, book) when is_atom(module) do
-    runs = Enum.filter(book, &(&1.mode == :run))
+    runs = Enum.filter(book, &(Map.get(&1, :kind, :def) != :data and &1.mode == :run))
     funs = runs |> Enum.map(&emit_def(&1, book)) |> Enum.join("\n\n")
 
     except =
@@ -63,7 +63,6 @@ defmodule Muro.Emit do
   defp emit_db(:ze, _, _book), do: "0"
   defp emit_db(:one, _, _book), do: ":tt"
   defp emit_db({:su, u}, d, book), do: "{:suc, #{emit_db(u, d, book)}}"
-  defp emit_db({:def, n}, _, _book), do: safe(n)
   defp emit_db({:ann, e, _}, d, book), do: emit_db(e, d, book)
   defp emit_db(:rfl, _, _book), do: ":refl"
   defp emit_db({:rwt, _, _, t}, d, book), do: emit_db(t, d, book)
@@ -74,27 +73,17 @@ defmodule Muro.Emit do
     "fn x#{d} -> #{emit_db(t, d + 1, book)} end"
   end
 
-  defp emit_db({:left, t}, d, book), do: "{:left, #{emit_db(t, d, book)}}"
-  defp emit_db({:right, t}, d, book), do: "{:right, #{emit_db(t, d, book)}}"
+  defp emit_db({:mdata, e, _p, bs}, d, book) do
+    clauses =
+      Enum.map(bs, fn {name, ar, b} ->
+        pat = emit_ctor_pat(name, ar, d)
+        "      #{pat} -> #{emit_db(b, d + ar, book)}"
+      end)
+      |> Enum.join("\n")
 
-  defp emit_db({:msum, e, _p, l, r}, d, book) do
     """
     case #{emit_db(e, d, book)} do
-      {:left, x#{d}} -> #{emit_db(l, d + 1, book)}
-      {:right, x#{d}} -> #{emit_db(r, d + 1, book)}
-    end
-    """
-    |> String.trim()
-  end
-
-  defp emit_db(:lnil, _, _book), do: "[]"
-  defp emit_db({:cons, a, as}, d, book), do: "[#{emit_db(a, d, book)} | #{emit_db(as, d, book)}]"
-
-  defp emit_db({:mlst, e, _p, n, c}, d, book) do
-    """
-    case #{emit_db(e, d, book)} do
-      [] -> #{emit_db(n, d, book)}
-      [x#{d} | x#{d + 1}] -> #{emit_db(c, d + 2, book)}
+    #{clauses}
     end
     """
     |> String.trim()
@@ -133,8 +122,12 @@ defmodule Muro.Emit do
 
     case h do
       {:def, n} ->
-        live = live_args(book, n, args, d)
-        "#{safe(n)}(#{Enum.join(live, ", ")})"
+        if ctor_name?(book, n) do
+          emit_ctor(n, args, d, book)
+        else
+          live = live_args(book, n, args, d)
+          "#{safe(n)}(#{Enum.join(live, ", ")})"
+        end
 
       _ ->
         Enum.reduce(args, emit_db(h, d, book), fn a, acc ->
@@ -143,10 +136,41 @@ defmodule Muro.Emit do
     end
   end
 
+  defp emit_db({:def, n}, d, book) do
+    if ctor_name?(book, n) do
+      emit_ctor(n, [], d, book)
+    else
+      safe(n)
+    end
+  end
+
   defp emit_db(_, _, _book), do: "raise \"erased term\""
 
+  defp emit_ctor(name, args, d, book) do
+    xs = Enum.map(args, &emit_db(&1, d, book))
+
+    case xs do
+      [] -> ":#{safe(name)}"
+      _ -> "{:#{safe(name)}, #{Enum.join(xs, ", ")}}"
+    end
+  end
+
+  defp emit_ctor_pat(name, 0, _d), do: ":#{safe(name)}"
+
+  defp emit_ctor_pat(name, ar, d) do
+    vars = Enum.map(0..(ar - 1), fn i -> "x#{d + i}" end)
+    "{:#{safe(name)}, #{Enum.join(vars, ", ")}}"
+  end
+
+  defp ctor_name?(book, name) do
+    Enum.any?(book, fn
+      %{kind: :data, ctors: cs} -> Enum.any?(cs, &(&1.name == name))
+      _ -> false
+    end)
+  end
+
   defp live_args(book, name, args, d) do
-    case Enum.find(book, &(&1.name == name)) do
+    case Enum.find(book, &(Map.get(&1, :kind, :def) != :data and &1.name == name)) do
       nil ->
         Enum.map(args, &emit_db(&1, d, book))
 

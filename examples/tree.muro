@@ -1,0 +1,22 @@
+-- tree.muro — binary tree of Nat; size descends on both children.
+data Tree : Type where
+  leaf : Tree
+  node : Tree → Tree → Tree
+
+def plus : run Π (n : Nat) → Π (m : Nat) → Nat :=
+  λ (n : Nat) → λ (m : Nat) →
+    match n motive (λ _ → Nat)
+      | 0 => m
+      | suc n1 => suc (plus n1 m)
+
+def size : run Π (t : Tree) → Nat :=
+  λ (t : Tree) →
+    match t motive (λ _ → Nat)
+      | leaf => 0
+      | node l r => suc (plus (size l) (size r))
+
+def t2 : run Tree :=
+  node leaf (node leaf leaf)
+
+def size-t2 : evidence {size t2 ≡ suc (suc 0) : Nat} :=
+  refl

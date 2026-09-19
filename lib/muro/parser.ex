@@ -36,7 +36,7 @@ defmodule Muro.Parser do
 
       data_start?(s) ->
         case parse_data(s) do
-          {:ok, rest} -> parse_book(rest, acc)
+          {:ok, d, rest} -> parse_book(rest, [d | acc])
           err -> err
         end
 
@@ -72,50 +72,53 @@ defmodule Muro.Parser do
 
   defp data_start?(s), do: word_kw?(s, "data")
 
-  # v1: built-in Either and List. The block is shape-checked and dropped.
+  # Non-indexed data. Parameters before `: Type`; reject indices.
   defp parse_data(s) do
     with {:ok, rest} <- kw(s, "data"),
-         {:ok, name, rest} <- ident(skip(rest)) do
-      case name do
-        "Either" -> parse_data_either(rest)
-        "List" -> parse_data_list(rest)
-        _ -> {:error, "v1 only supports data Either or data List"}
+         {:ok, name, rest} <- ident(skip(rest)),
+         {:ok, params, rest} <- parse_param_binders(skip(rest)),
+         {:ok, rest} <- tok(skip(rest), ":"),
+         {:ok, sort, rest} <- parse_term(skip(rest), 0),
+         :ok <-
+           if(sort == :typ,
+             do: :ok,
+             else: {:error, "data sort must be Type (indices are not in this pass)"}
+           ),
+         {:ok, rest} <- kw(skip(rest), "where"),
+         {:ok, ctors, rest} <- parse_ctors(skip(rest), []) do
+      {:ok, %{kind: :data, name: name, params: params, ctors: ctors}, rest}
+    end
+  end
+
+  defp parse_param_binders(s) do
+    s = skip(s)
+
+    if has_prefix?(s, "(") do
+      with {:ok, b, rest} <- parse_binder(s),
+           {:ok, bs, rest} <- parse_param_binders(rest) do
+        {:ok, [b | bs], rest}
       end
+    else
+      {:ok, [], s}
     end
   end
 
-  defp parse_data_either(rest) do
-    with {:ok, _, rest} <- parse_binder(rest),
-         {:ok, _, rest} <- parse_binder(rest),
-         {:ok, rest} <- tok(skip(rest), ":"),
-         {:ok, _ty, rest} <- parse_term(skip(rest), 0),
-         {:ok, rest} <- kw(skip(rest), "where"),
-         {:ok, c1, rest} <- ident(skip(rest)),
-         :ok <- if(c1 == "left", do: :ok, else: {:error, "expected left"}),
-         {:ok, rest} <- tok(skip(rest), ":"),
-         {:ok, _, rest} <- parse_term(skip(rest), 0),
-         {:ok, c2, rest} <- ident(skip(rest)),
-         :ok <- if(c2 == "right", do: :ok, else: {:error, "expected right"}),
-         {:ok, rest} <- tok(skip(rest), ":"),
-         {:ok, _, rest} <- parse_term(skip(rest), 0) do
-      {:ok, rest}
-    end
-  end
+  defp parse_ctors(s, acc) do
+    s = skip(s)
 
-  defp parse_data_list(rest) do
-    with {:ok, _, rest} <- parse_binder(rest),
-         {:ok, rest} <- tok(skip(rest), ":"),
-         {:ok, _ty, rest} <- parse_term(skip(rest), 0),
-         {:ok, rest} <- kw(skip(rest), "where"),
-         {:ok, c1, rest} <- ident(skip(rest)),
-         :ok <- if(c1 == "nil", do: :ok, else: {:error, "expected nil"}),
-         {:ok, rest} <- tok(skip(rest), ":"),
-         {:ok, _, rest} <- parse_term(skip(rest), 0),
-         {:ok, c2, rest} <- ident(skip(rest)),
-         :ok <- if(c2 == "cons", do: :ok, else: {:error, "expected cons"}),
-         {:ok, rest} <- tok(skip(rest), ":"),
-         {:ok, _, rest} <- parse_term(skip(rest), 0) do
-      {:ok, rest}
+    cond do
+      s == "" ->
+        {:ok, Enum.reverse(acc), s}
+
+      word_kw?(s, "def") or word_kw?(s, "data") or nu_start?(s) ->
+        {:ok, Enum.reverse(acc), s}
+
+      true ->
+        with {:ok, cname, rest} <- ident(s),
+             {:ok, rest} <- tok(skip(rest), ":"),
+             {:ok, ty, rest} <- parse_term(skip(rest), 0) do
+          parse_ctors(rest, [%{name: cname, type: ty} | acc])
+        end
     end
   end
 
@@ -221,13 +224,13 @@ defmodule Muro.Parser do
       sum_tok?(s0) and min_bp <= 12 ->
         with {:ok, rest} <- eat_sum(s0),
              {:ok, right, rest} <- parse_term(skip(rest), 13) do
-          parse_infix(rest, {:sum, left, right}, min_bp)
+          parse_infix(rest, {:app, {:app, {:var, "Either"}, left}, right}, min_bp)
         end
 
       cons_tok?(s0) and min_bp <= 18 ->
         with {:ok, rest} <- eat_cons(s0),
              {:ok, right, rest} <- parse_term(skip(rest), 18) do
-          parse_infix(rest, {:cons, left, right}, min_bp)
+          parse_infix(rest, {:app, {:app, {:var, "cons"}, left}, right}, min_bp)
         end
 
       bisim_tok?(s0) and min_bp <= 10 ->
@@ -236,7 +239,7 @@ defmodule Muro.Parser do
           parse_infix(rest, {:bisim, left, right}, min_bp)
         end
 
-      starts_atom?(s0) and min_bp <= 20 ->
+      starts_atom?(s0) and min_bp <= 20 and not ctor_decl_start?(s0) ->
         with {:ok, arg, rest} <- parse_atom(s0) do
           parse_infix(rest, {:app, left, arg}, min_bp)
         end
@@ -286,6 +289,18 @@ defmodule Muro.Parser do
     if cons_tok?(s), do: {:ok, after_kw(s, "::")}, else: {:error, "expected ::"}
   end
 
+  # Next constructor in a data block: `name : type`, not `:=` or `::`.
+  defp ctor_decl_start?(s) do
+    case ident(skip(s)) do
+      {:ok, _, rest} ->
+        rest = skip(rest)
+        has_prefix?(rest, ":") and not has_prefix?(rest, ":=") and not has_prefix?(rest, "::")
+
+      _ ->
+        false
+    end
+  end
+
   defp starts_atom?(s) do
     s = skip(s)
 
@@ -303,18 +318,6 @@ defmodule Muro.Parser do
         false
 
       word_kw?(s, "data") ->
-        false
-
-      word_kw?(s, "left") ->
-        false
-
-      word_kw?(s, "right") ->
-        false
-
-      word_kw?(s, "nil") ->
-        false
-
-      word_kw?(s, "cons") ->
         false
 
       true ->
@@ -358,26 +361,8 @@ defmodule Muro.Parser do
       has_prefix?(s, "suc") ->
         parse_suc(s)
 
-      word_kw?(s, "List") ->
-        parse_lst(s)
-
-      word_kw?(s, "nil") ->
-        {:ok, :lnil, after_kw(s, "nil")}
-
-      word_kw?(s, "cons") ->
-        parse_cons(s)
-
       has_prefix?(s, "[]") ->
-        {:ok, :lnil, after_kw(s, "[]")}
-
-      word_kw?(s, "Either") ->
-        parse_either(s)
-
-      word_kw?(s, "left") ->
-        parse_unary(s, "left", :left)
-
-      word_kw?(s, "right") ->
-        parse_unary(s, "right", :right)
+        {:ok, {:var, "nil"}, after_kw(s, "[]")}
 
       word_kw?(s, "Stream") ->
         parse_stream(s)
@@ -580,9 +565,8 @@ defmodule Muro.Parser do
       rest = skip(rest)
 
       cond do
-        word_kw?(rest, "left") -> parse_msum_cases(e, x, p, rest)
-        word_kw?(rest, "nil") -> parse_mlst_cases(e, x, p, rest)
-        true -> parse_mnat_cases(e, x, p, rest)
+        word_kw?(rest, "0") -> parse_mnat_cases(e, x, p, rest)
+        true -> parse_mdata_cases(e, x, p, rest)
       end
     end
   end
@@ -610,54 +594,45 @@ defmodule Muro.Parser do
     end
   end
 
-  defp parse_msum_cases(e, x, p, rest) do
-    with {:ok, rest} <- kw(rest, "left"),
-         {:ok, a, rest} <- ident(skip(rest)),
-         {:ok, rest} <- tok(skip(rest), "=>"),
-         {:ok, l, rest} <- parse_term(skip(rest), 0),
-         {:ok, rest} <- tok(skip(rest), "|"),
-         {:ok, rest} <- kw(skip(rest), "right"),
-         {:ok, b, rest} <- ident(skip(rest)),
-         {:ok, rest} <- tok(skip(rest), "=>"),
-         {:ok, r, rest} <- parse_term(skip(rest), 0) do
-      {:ok, {:msum, e, x, p, a, l, b, r}, rest}
+  defp parse_mdata_cases(e, x, p, rest) do
+    with {:ok, branches, rest} <- parse_mdata_branches(rest, []) do
+      {:ok, {:mdata, e, x, p, branches}, rest}
     end
   end
 
-  defp parse_mlst_cases(e, x, p, rest) do
-    with {:ok, rest} <- kw(rest, "nil"),
+  defp parse_mdata_branches(s, acc) do
+    with {:ok, cname, rest} <- ident(skip(s)),
+         {:ok, binders, rest} <- parse_branch_binders(skip(rest)),
          {:ok, rest} <- tok(skip(rest), "=>"),
-         {:ok, n, rest} <- parse_term(skip(rest), 0),
-         {:ok, rest} <- tok(skip(rest), "|"),
-         {:ok, rest} <- kw(skip(rest), "cons"),
-         {:ok, a, rest} <- ident(skip(rest)),
-         {:ok, as, rest} <- ident(skip(rest)),
-         {:ok, rest} <- tok(skip(rest), "=>"),
-         {:ok, c, rest} <- parse_term(skip(rest), 0) do
-      {:ok, {:mlst, e, x, p, n, a, as, c}, rest}
+         {:ok, body, rest} <- parse_term(skip(rest), 0) do
+      acc = [{cname, binders, body} | acc]
+      rest = skip(rest)
+
+      if has_prefix?(rest, "|") do
+        with {:ok, rest} <- tok(rest, "|") do
+          parse_mdata_branches(skip(rest), acc)
+        end
+      else
+        {:ok, Enum.reverse(acc), rest}
+      end
     end
   end
 
-  defp parse_lst(s) do
-    with {:ok, rest} <- kw(s, "List"),
-         {:ok, a, rest} <- parse_atom(skip(rest)) do
-      {:ok, {:lst, a}, rest}
-    end
-  end
+  defp parse_branch_binders(s) do
+    s = skip(s)
 
-  defp parse_cons(s) do
-    with {:ok, rest} <- kw(s, "cons"),
-         {:ok, a, rest} <- parse_atom(skip(rest)),
-         {:ok, as, rest} <- parse_atom(skip(rest)) do
-      {:ok, {:cons, a, as}, rest}
-    end
-  end
+    if has_prefix?(s, "=>") do
+      {:ok, [], s}
+    else
+      case ident(s) do
+        {:ok, x, rest} ->
+          with {:ok, xs, rest} <- parse_branch_binders(rest) do
+            {:ok, [x | xs], rest}
+          end
 
-  defp parse_either(s) do
-    with {:ok, rest} <- kw(s, "Either"),
-         {:ok, a, rest} <- parse_atom(skip(rest)),
-         {:ok, b, rest} <- parse_atom(skip(rest)) do
-      {:ok, {:sum, a, b}, rest}
+        _ ->
+          {:ok, [], s}
+      end
     end
   end
 

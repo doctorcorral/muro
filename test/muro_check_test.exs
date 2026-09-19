@@ -210,7 +210,7 @@ defmodule Muro.CheckTest do
       name: "lem",
       mode: :evidence,
       type: {:pi, :affine, :typ, "P", {:app, {:var, "Dec"}, {:var, "P"}}},
-      body: {:lam, :affine, :typ, "P", {:left, :one}}
+      body: {:lam, :affine, :typ, "P", {:app, {:var, "left"}, :one}}
     }
 
     assert {:error, msg} = Check.check_sig([lem | book])
@@ -303,6 +303,91 @@ defmodule Muro.CheckTest do
     assert Muro.Lists.length(Muro.Lists.ones2()) == {:suc, {:suc, 0}}
   end
 
+  test "maybe.muro checks; fromMaybe runs" do
+    src = File.read!("examples/maybe.muro")
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+
+    out = Emit.emit_module(Muro.MaybeEx, book)
+    assert out =~ ~r/\bdef fromMaybe\b/
+    refute out =~ "fromJust1"
+    Code.eval_string(out)
+    assert Muro.MaybeEx.fromMaybe(0, {:just, {:suc, 0}}) == {:suc, 0}
+    assert Muro.MaybeEx.fromMaybe(0, :nothing) == 0
+  end
+
+  test "tree.muro checks; size descends on both children" do
+    src = File.read!("examples/tree.muro")
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+
+    out = Emit.emit_module(Muro.Trees, book)
+    assert out =~ ~r/\bdef size\b/
+    refute out =~ "size-t2"
+    Code.eval_string(out)
+    t2 = {:node, :leaf, {:node, :leaf, :leaf}}
+    assert Muro.Trees.size(t2) == {:suc, {:suc, 0}}
+  end
+
+  test "strict positivity rejects Bad" do
+    src = """
+    data Bad : Type where
+      mk : (Bad → Nat) → Bad
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "positive"
+  end
+
+  test "indices are rejected" do
+    src = """
+    data Vec (A : Type) : Nat → Type where
+      vnil : Vec A
+    """
+
+    assert {:error, msg} = Parser.parse(src)
+    assert msg =~ "indices" or msg =~ "Type"
+  end
+
+  test "non-descending Maybe recursion fails" do
+    src = File.read!("examples/maybe.muro")
+    assert {:ok, book} = Parser.parse(src)
+
+    bad = %{
+      name: "loop",
+      mode: :run,
+      export: true,
+      type:
+        {:pi, :erased, :typ, "A",
+         {:pi, :affine, {:app, {:var, "Maybe"}, {:var, "A"}}, "m",
+          {:app, {:var, "Maybe"}, {:var, "A"}}}},
+      body:
+        {:lam, :erased, :typ, "A",
+         {:lam, :affine, {:app, {:var, "Maybe"}, {:var, "A"}}, "m",
+          {:app, {:app, {:var, "loop"}, {:var, "A"}}, {:var, "m"}}}}
+    }
+
+    assert {:error, msg} = Check.check_sig([bad | book])
+    assert msg =~ "descend"
+  end
+
+  test "non-descending Tree recursion fails" do
+    src = File.read!("examples/tree.muro")
+    assert {:ok, book} = Parser.parse(src)
+
+    bad = %{
+      name: "loopT",
+      mode: :run,
+      export: true,
+      type: {:pi, :affine, {:var, "Tree"}, "t", {:var, "Tree"}},
+      body: {:lam, :affine, {:var, "Tree"}, "t", {:app, {:var, "loopT"}, {:var, "t"}}}
+    }
+
+    assert {:error, msg} = Check.check_sig([bad | book])
+    assert msg =~ "descend"
+  end
+
   test "non-descending list recursion fails" do
     src = File.read!("examples/list.muro")
     assert {:ok, book} = Parser.parse(src)
@@ -311,10 +396,11 @@ defmodule Muro.CheckTest do
       name: "badlen",
       mode: :run,
       export: true,
-      type: {:pi, :erased, :typ, "A", {:pi, :affine, {:lst, {:var, "A"}}, "xs", :nat}},
+      type:
+        {:pi, :erased, :typ, "A", {:pi, :affine, {:app, {:var, "List"}, {:var, "A"}}, "xs", :nat}},
       body:
         {:lam, :erased, :typ, "A",
-         {:lam, :affine, {:lst, {:var, "A"}}, "xs",
+         {:lam, :affine, {:app, {:var, "List"}, {:var, "A"}}, "xs",
           {:app, {:app, {:var, "badlen"}, {:var, "A"}}, {:var, "xs"}}}}
     }
 

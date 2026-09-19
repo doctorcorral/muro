@@ -20,10 +20,7 @@ defmodule Muro.Ast do
           | :unit
           | :one
           | :empty
-          | {:lst, named}
-          | :lnil
-          | {:cons, named, named}
-          | {:mlst, named, name, named, named, name, name, named}
+          | {:mdata, named, name, named, [{name, [name], named}]}
           | {:mnat, named, name, named, named, name, named}
           | {:memp, named, name, named}
           | {:munit, named, name, named, named}
@@ -42,10 +39,6 @@ defmodule Muro.Ast do
           | {:nu, name, named}
           | {:unf, named, named}
           | {:ucons, named}
-          | {:sum, named, named}
-          | {:left, named}
-          | {:right, named}
-          | {:msum, named, name, named, name, named, name, named}
 
   # de Bruijn. Indices count from the nearest binder (0).
   @type db ::
@@ -60,10 +53,7 @@ defmodule Muro.Ast do
           | :unit
           | :one
           | :empty
-          | {:lst, db}
-          | :lnil
-          | {:cons, db, db}
-          | {:mlst, db, db, db, db}
+          | {:mdata, db, db, [{name, non_neg_integer(), db}]}
           | {:mnat, db, db, db, db}
           | {:memp, db, db}
           | {:munit, db, db, db}
@@ -80,10 +70,6 @@ defmodule Muro.Ast do
           | {:bisim, db, db}
           | {:unf, db, db}
           | {:ucons, db}
-          | {:sum, db, db}
-          | {:left, db}
-          | {:right, db}
-          | {:msum, db, db, db, db}
 
   @type defn :: %{
           name: name,
@@ -109,24 +95,16 @@ defmodule Muro.Ast do
   def to_db(:unit, _), do: {:ok, :unit}
   def to_db(:one, _), do: {:ok, :one}
   def to_db(:empty, _), do: {:ok, :empty}
-  def to_db(:lnil, _), do: {:ok, :lnil}
   def to_db(:rfl, _), do: {:ok, :rfl}
   def to_db({:def, n}, _), do: {:ok, {:def, n}}
   def to_db({:su, t}, env), do: map1(t, env, &{:su, &1})
-  def to_db({:lst, a}, env), do: map1(a, env, &{:lst, &1})
 
-  def to_db({:cons, a, as}, env) do
-    with {:ok, a1} <- to_db(a, env),
-         {:ok, as1} <- to_db(as, env),
-         do: {:ok, {:cons, a1, as1}}
-  end
-
-  def to_db({:mlst, e, x, p, n, a, as, c}, env) do
+  def to_db({:mdata, e, x, p, branches}, env) do
     with {:ok, e1} <- to_db(e, env),
          {:ok, p1} <- to_db(p, [x | env]),
-         {:ok, n1} <- to_db(n, env),
-         {:ok, c1} <- to_db(c, [as, a | env]),
-         do: {:ok, {:mlst, e1, p1, n1, c1}}
+         {:ok, bs} <- to_db_branches(branches, env) do
+      {:ok, {:mdata, e1, p1, bs}}
+    end
   end
 
   def to_db({:pi, q, a, x, b}, env) do
@@ -235,27 +213,21 @@ defmodule Muro.Ast do
          do: {:ok, {:unf, s1, f1}}
   end
 
-  def to_db({:sum, a, b}, env) do
-    with {:ok, a1} <- to_db(a, env),
-         {:ok, b1} <- to_db(b, env),
-         do: {:ok, {:sum, a1, b1}}
-  end
-
-  def to_db({:left, t}, env), do: map1(t, env, &{:left, &1})
-  def to_db({:right, t}, env), do: map1(t, env, &{:right, &1})
-
-  def to_db({:msum, e, x, p, a, l, b, r}, env) do
-    with {:ok, e1} <- to_db(e, env),
-         {:ok, p1} <- to_db(p, [x | env]),
-         {:ok, l1} <- to_db(l, [a | env]),
-         {:ok, r1} <- to_db(r, [b | env]),
-         do: {:ok, {:msum, e1, p1, l1, r1}}
-  end
-
   def to_db(other, _), do: {:error, "bad named term #{inspect(other)}"}
 
   defp map1(t, env, f) do
     with {:ok, t1} <- to_db(t, env), do: {:ok, f.(t1)}
+  end
+
+  defp to_db_branches(branches, env) do
+    Enum.reduce_while(branches, {:ok, []}, fn {cname, binders, body}, {:ok, acc} ->
+      env1 = Enum.reverse(binders) ++ env
+
+      case to_db(body, env1) do
+        {:ok, b} -> {:cont, {:ok, acc ++ [{cname, length(binders), b}]}}
+        err -> {:halt, err}
+      end
+    end)
   end
 
   def def_to_db(%{name: n, mode: m, type: ty, body: bo} = d) do
@@ -272,9 +244,46 @@ defmodule Muro.Ast do
     end
   end
 
+  def data_to_db(%{name: n, params: params, ctors: ctors}) do
+    with {:ok, params1} <- params_to_db(params),
+         {:ok, ctors1} <- ctors_to_db(params, ctors) do
+      {:ok, %{kind: :data, name: n, params: params1, ctors: ctors1}}
+    end
+  end
+
+  defp params_to_db(params) do
+    Enum.reduce_while(params, {:ok, []}, fn {q, x, a}, {:ok, acc} ->
+      case to_db(a) do
+        {:ok, a1} -> {:cont, {:ok, acc ++ [{q, x, a1}]}}
+        err -> {:halt, err}
+      end
+    end)
+  end
+
+  defp ctors_to_db(params, ctors) do
+    Enum.reduce_while(ctors, {:ok, []}, fn %{name: cn, type: ty}, {:ok, acc} ->
+      wrapped =
+        Enum.reduce(Enum.reverse(params), ty, fn {q, x, a}, t ->
+          {:pi, q, a, x, t}
+        end)
+
+      case to_db(wrapped) do
+        {:ok, ty1} -> {:cont, {:ok, acc ++ [%{name: cn, type: ty1}]}}
+        err -> {:halt, err}
+      end
+    end)
+  end
+
   def book_to_db(book) do
     Enum.reduce_while(book, {:ok, []}, fn d, {:ok, acc} ->
-      case def_to_db(d) do
+      result =
+        if Map.get(d, :kind) == :data do
+          data_to_db(d)
+        else
+          def_to_db(d)
+        end
+
+      case result do
         {:ok, d1} -> {:cont, {:ok, acc ++ [d1]}}
         err -> {:halt, err}
       end
