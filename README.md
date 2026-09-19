@@ -57,10 +57,12 @@ term       ::= atom atom*                  -- juxtaposition is application
              | term "⊎" term               -- desugars to Either
              | term "::" term              -- desugars to cons
              | term ("→" | "->") term      -- non-dependent, = Π (_ : A) → B
-atom       ::= "Type" | "Nat" | "Unit" | "Empty" | "refl" | "tt" | "0"
+atom       ::= "Type" | "Nat" | "I64" | "F32" | "Unit" | "Empty" | "refl" | "tt" | "0"
              | suc | pi | lam | match | matchEmpty | rewrite | idt
              | stream | unfold | uncons | "fst" atom | "snd" atom
              | "head" atom | "tail" atom
+             | "Tensor" atom atom | "addi" atom atom | "muli" atom atom
+             | "addt" atom atom | "toI64" atom | "packI" atom atom
              | "[]"                        -- desugars to nil
              | "(" term ")" | "(" term "," term ")"
              | ident
@@ -100,7 +102,7 @@ Not in the surface (present in the kernel AST only): `matchUnit`, annotations `{
 
 ```
 Π (n : Nat) → …        affine (default): at most one run/evidence use
-Π (+ n : Nat) → …      reuse: only if the type WHNFs to Data (Nat, Unit, Empty, or a data type whose parameters are Data)
+Π (+ n : Nat) → …      reuse: only if the type WHNFs to Data (Nat, Unit, Empty, I64, F32, Tensor, or a data type whose parameters are Data)
 Π (- e : IsEven n) → … erased: compile-time; cannot be used computationally
 ```
 
@@ -365,6 +367,21 @@ Muro.Lists.length(Muro.Lists.ones2())
 
 `ones2()` is `{:cons, {:suc, 0}, {:cons, {:suc, 0}, :nil}}`.
 
+### I64 / F32 / Tensor (Nx)
+
+`I64`, `F32`, and `Tensor D S` are spec formers wrapping `%Nx.Tensor{}`. Computed values are run. Nat stays Peano (`0` / `{:suc, n}`). Machine integers are a different type; the only map is `toI64 : Nat → I64` (total on Peano; the example uses small values). Shape is one I64 dimension — not a Peano Nat and not a second index language.
+
+`Tensor D S` is Data, so `+` is allowed. Kernel identity `{e₁ ≡ e₂ : F32}` and `{e₁ ≡ e₂ : Tensor F32 S}` is refused. Emit is ordinary `def` plus `Nx.add` / `Nx.stack` / `Nx.tensor`, not `defn`. Mix depends on `{:nx, "~> 0.9"}` only.
+
+See `examples/nx_add.muro`. IEx:
+
+```
+{:ok, src} = Muro.emit_file("examples/nx_add.muro", Muro.NxAdd)
+Code.eval_string(src)
+Muro.NxAdd.doubled() |> Nx.to_flat_list()
+# [2, 4]
+```
+
 ---
 
 ## Layout
@@ -380,6 +397,7 @@ agda/Muro/ExampleStream.agda  zeros / head-zeros
 agda/Muro/ExampleEither.agda  IsEven / Dec / evenDec
 agda/Muro/ExampleList.agda  length / ones2
 agda/Muro/ExampleVec.agda   Fin / Vec / lookup
+agda/Muro/ExampleNx.agda    addI / addT / t1
 lib/muro/parser.ex      .muro → named FOAS
 lib/muro/ast.ex         named FOAS, to_db
 lib/muro/subst.ex       de Bruijn subst
@@ -398,6 +416,7 @@ examples/list.muro
 examples/maybe.muro
 examples/tree.muro
 examples/vec.muro
+examples/nx_add.muro
 test/muro_check_test.exs
 ```
 
@@ -418,6 +437,7 @@ Elixir 1.20.4 and OTP 29.1 via [mise](https://mise.jdx.dev/):
 
 ```
 mise install
+mix deps.get
 mix test
 mix muro.check
 mix muro.check examples/half_ok.muro
