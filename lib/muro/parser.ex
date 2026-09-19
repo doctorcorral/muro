@@ -315,6 +315,9 @@ defmodule Muro.Parser do
       word_kw?(s, "Stream") ->
         parse_stream(s)
 
+      word_kw?(s, "Always") ->
+        parse_always(s)
+
       word_kw?(s, "unfold") ->
         parse_unf(s)
 
@@ -413,6 +416,15 @@ defmodule Muro.Parser do
     with {:ok, rest} <- kw(s, "Stream"),
          {:ok, a, rest} <- parse_atom(skip(rest)) do
       {:ok, {:stream, a}, rest}
+    end
+  end
+
+  defp parse_always(s) do
+    with {:ok, rest} <- kw(s, "Always"),
+         {:ok, _a, rest} <- parse_atom(skip(rest)),
+         {:ok, p, rest} <- parse_atom(skip(rest)),
+         {:ok, st, rest} <- parse_atom(skip(rest)) do
+      {:ok, {:always, p, st}, rest}
     end
   end
 

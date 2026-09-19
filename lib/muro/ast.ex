@@ -33,6 +33,8 @@ defmodule Muro.Ast do
           | {:fst, named}
           | {:snd, named}
           | {:stream, named}
+          | {:always, named, named}
+          | {:nu, name, named}
           | {:unf, named, named}
           | {:ucons, named}
           | {:sum, named, named}
@@ -65,7 +67,7 @@ defmodule Muro.Ast do
           | {:pair, db, db}
           | {:fst, db}
           | {:snd, db}
-          | {:stream, db}
+          | {:nu, db}
           | {:unf, db, db}
           | {:ucons, db}
           | {:sum, db, db}
@@ -174,7 +176,25 @@ defmodule Muro.Ast do
 
   def to_db({:fst, t}, env), do: map1(t, env, &{:fst, &1})
   def to_db({:snd, t}, env), do: map1(t, env, &{:snd, &1})
-  def to_db({:stream, a}, env), do: map1(a, env, &{:stream, &1})
+
+  def to_db({:stream, a}, env) do
+    with {:ok, a1} <- to_db(a, env) do
+      {:ok, {:nu, {:prod, Muro.Subst.wk(a1), {:var, 0}}}}
+    end
+  end
+
+  def to_db({:always, p, s}, env) do
+    with {:ok, p1} <- to_db(p, env),
+         {:ok, s1} <- to_db(s, env) do
+      payload = {:app, p1, {:fst, {:ucons, s1}}}
+      {:ok, {:nu, {:prod, Muro.Subst.wk(payload), {:var, 0}}}}
+    end
+  end
+
+  def to_db({:nu, x, f}, env) do
+    with {:ok, f1} <- to_db(f, [x | env]), do: {:ok, {:nu, f1}}
+  end
+
   def to_db({:ucons, s}, env), do: map1(s, env, &{:ucons, &1})
 
   def to_db({:unf, s, f}, env) do

@@ -81,8 +81,8 @@ defmodule Muro.Subst do
       {:snd, t} ->
         {:snd, ren(rho, t)}
 
-      {:stream, a} ->
-        {:stream, ren(rho, a)}
+      {:nu, f} ->
+        {:nu, ren(lift(rho), f)}
 
       {:unf, s, f} ->
         {:unf, ren(rho, s), ren(rho, f)}
@@ -186,8 +186,8 @@ defmodule Muro.Subst do
       {:snd, t} ->
         {:snd, sub(sigma, t)}
 
-      {:stream, a} ->
-        {:stream, sub(sigma, a)}
+      {:nu, f} ->
+        {:nu, sub(lifts(sigma), f)}
 
       {:unf, s, f} ->
         {:unf, sub(sigma, s), sub(sigma, f)}

@@ -167,10 +167,14 @@ defmodule Muro.CheckTest do
     evid = %{name: "bad", mode: :evidence, type: {:stream, :nat}, body: {:unf, :ze, f}}
 
     assert {:error, r} = Check.check_sig([run])
-    assert r =~ "pair" or r =~ "unguarded" or r =~ "unfold" or r =~ "×" or r =~ "Stream"
+
+    assert r =~ "pair" or r =~ "unguarded" or r =~ "unfold" or r =~ "×" or r =~ "Stream" or
+             r =~ "ν" or r =~ "convert"
 
     assert {:error, e} = Check.check_sig([evid])
-    assert e =~ "pair" or e =~ "unguarded" or e =~ "unfold" or e =~ "×" or e =~ "Stream"
+
+    assert e =~ "pair" or e =~ "unguarded" or e =~ "unfold" or e =~ "×" or e =~ "Stream" or
+             e =~ "ν" or e =~ "convert"
   end
 
   test "even_dec.muro checks; Dec and evenDec are not emitted" do
@@ -229,5 +233,32 @@ defmodule Muro.CheckTest do
 
     assert {:error, msg} = Check.check_sig([dup | book])
     assert msg =~ "affine"
+  end
+
+  test "always.muro checks; Always evidence is not emitted" do
+    src = File.read!("examples/always.muro")
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+
+    out = Emit.emit_module(Muro.ZeroAlways, book)
+    assert out =~ ~r/\bdef zeros\b/
+    refute out =~ "always-zero"
+  end
+
+  test "unguarded Always evidence fails" do
+    src = File.read!("examples/always.muro")
+    assert {:ok, book} = Parser.parse(src)
+
+    p = {:lam, :affine, :nat, "_", {:idt, :nat, :ze, :ze}}
+
+    bad = %{
+      name: "bad",
+      mode: :evidence,
+      type: {:always, p, {:var, "zeros"}},
+      body: {:var, "bad"}
+    }
+
+    assert {:error, msg} = Check.check_sig(book ++ [bad])
+    assert msg =~ "unfold" or msg =~ "ν" or msg =~ "unguarded"
   end
 end

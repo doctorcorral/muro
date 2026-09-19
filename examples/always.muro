@@ -1,0 +1,9 @@
+-- always.muro — Always P s = ν Y. P (head s) × Y, same former as Stream.
+ν Stream (A : Type) : Type where
+  uncons : Stream A → A × Stream A
+
+def zeros : run Stream Nat :=
+  unfold 0 (λ (_ : Nat) → (0, 0))
+
+def zeros-always-zero : evidence Always Nat (λ (_ : Nat) → {0 ≡ 0 : Nat}) zeros :=
+  unfold tt (λ (_ : Unit) → (refl, tt))

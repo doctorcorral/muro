@@ -260,7 +260,7 @@ defmodule Muro.Check do
       :unit -> true
       :empty -> true
       {:pi, _, _, b} -> run_ty?(k, book, b)
-      {:stream, a} -> run_ty?(k, book, a)
+      {:nu, f} -> run_ty?(k, book, Subst.inst(f, :unit))
       {:prod, a, b} -> run_ty?(k, book, a) and run_ty?(k, book, b)
       {:sum, a, b} -> run_ty?(k, book, a) and run_ty?(k, book, b)
       _ -> false
@@ -362,7 +362,7 @@ defmodule Muro.Check do
 
   defp conv_n(k, book, {:fst, t}, {:fst, t1}), do: conv(k, book, t, t1)
   defp conv_n(k, book, {:snd, t}, {:snd, t1}), do: conv(k, book, t, t1)
-  defp conv_n(k, book, {:stream, a}, {:stream, a1}), do: conv(k, book, a, a1)
+  defp conv_n(k, book, {:nu, f}, {:nu, f1}), do: conv(k, book, f, f1)
 
   defp conv_n(k, book, {:unf, s, f}, {:unf, s1, f1}) do
     with :ok <- conv(k, book, s, s1), do: conv(k, book, f, f1)
@@ -408,10 +408,10 @@ defmodule Muro.Check do
     end
   end
 
-  defp view_stream(k, book, t) do
+  defp view_nu(k, book, t) do
     case whnf(k, book, t) do
-      {:stream, a} -> {:ok, a}
-      t1 -> {:error, "expected Stream, got #{inspect(t1)}"}
+      {:nu, f} -> {:ok, f}
+      t1 -> {:error, "expected ν, got #{inspect(t1)}"}
     end
   end
 
@@ -434,7 +434,7 @@ defmodule Muro.Check do
   defp has_self?(self, {:lam, _, a, t}), do: has_self?(self, a) or has_self?(self, t)
   defp has_self?(self, {:pi, _, a, b}), do: has_self?(self, a) or has_self?(self, b)
   defp has_self?(self, {:prod, a, b}), do: has_self?(self, a) or has_self?(self, b)
-  defp has_self?(self, {:stream, a}), do: has_self?(self, a)
+  defp has_self?(self, {:nu, f}), do: has_self?(self, f)
   defp has_self?(self, {:sum, a, b}), do: has_self?(self, a) or has_self?(self, b)
   defp has_self?(self, {:left, t}), do: has_self?(self, t)
   defp has_self?(self, {:right, t}), do: has_self?(self, t)
@@ -444,6 +444,33 @@ defmodule Muro.Check do
   end
 
   defp has_self?(_, _), do: false
+
+  defp occurs?(x, {:var, y}), do: x == y
+  defp occurs?(x, {:pi, _, a, b}), do: occurs?(x, a) or occurs?(x + 1, b)
+  defp occurs?(x, {:lam, _, a, t}), do: occurs?(x, a) or occurs?(x + 1, t)
+  defp occurs?(x, {:app, f, a}), do: occurs?(x, f) or occurs?(x, a)
+  defp occurs?(x, {:su, t}), do: occurs?(x, t)
+  defp occurs?(x, {:sum, a, b}), do: occurs?(x, a) or occurs?(x, b)
+  defp occurs?(x, {:left, t}), do: occurs?(x, t)
+  defp occurs?(x, {:right, t}), do: occurs?(x, t)
+  defp occurs?(x, {:prod, a, b}), do: occurs?(x, a) or occurs?(x, b)
+  defp occurs?(x, {:pair, a, b}), do: occurs?(x, a) or occurs?(x, b)
+  defp occurs?(x, {:fst, t}), do: occurs?(x, t)
+  defp occurs?(x, {:snd, t}), do: occurs?(x, t)
+  defp occurs?(x, {:nu, f}), do: occurs?(x + 1, f)
+  defp occurs?(x, {:unf, s, f}), do: occurs?(x, s) or occurs?(x, f)
+  defp occurs?(x, {:ucons, s}), do: occurs?(x, s)
+  defp occurs?(x, {:idt, a, b, c}), do: occurs?(x, a) or occurs?(x, b) or occurs?(x, c)
+  defp occurs?(_, _), do: false
+
+  defp spos?(_x, {:var, _}), do: true
+  defp spos?(x, {:prod, a, b}), do: spos?(x, a) and spos?(x, b)
+  defp spos?(x, {:sum, a, b}), do: spos?(x, a) and spos?(x, b)
+  defp spos?(x, {:pi, _, a, b}), do: not occurs?(x, a) and spos?(x + 1, b)
+  defp spos?(x, {:nu, f}), do: not occurs?(x + 1, f)
+  defp spos?(x, t), do: not occurs?(x, t)
+
+  defp strict_pos?(f), do: spos?(0, f)
 
   defp check_unfold(_k, _book, :spec, _rs, _f), do: :ok
 
@@ -468,8 +495,8 @@ defmodule Muro.Check do
   end
 
   defp go_nu({:pi, _, _, b}, {:lam, _, _, t}), do: go_nu(b, t)
-  defp go_nu({:stream, _}, {:unf, _, _}), do: :ok
-  defp go_nu({:stream, _}, _), do: {:error, "stream value must be an unfold"}
+  defp go_nu({:nu, _}, {:unf, _, _}), do: :ok
+  defp go_nu({:nu, _}, _), do: {:error, "ν value must be an unfold"}
   defp go_nu(_, _), do: :ok
 
   # -- infer / check ---------------------------------------------------------
@@ -647,12 +674,18 @@ defmodule Muro.Check do
              :ok <- check_ty(k, book, rs, gamma, b),
              do: {:ok, {:typ, u0s(n)}}
 
-      # ⇒-stream
-      {m, {:stream, _}} when m in [:run, :evidence] ->
-        {:error, "no promotion: Stream is an erased term"}
+      # ⇒-nu
+      {m, {:nu, _}} when m in [:run, :evidence] ->
+        {:error, "no promotion: ν is an erased term"}
 
-      {:spec, {:stream, a}} ->
-        with :ok <- check_ty(k, book, rs, gamma, a),
+      {:spec, {:nu, f}} ->
+        with :ok <-
+               check_ty(k, book, ext_rec(rs, false, false), ext(gamma, :affine, :typ), f),
+             :ok <-
+               if(strict_pos?(f),
+                 do: :ok,
+                 else: {:error, "ν body is not strictly positive"}
+               ),
              do: {:ok, {:typ, u0s(n)}}
 
       # ⇒-pair
@@ -687,14 +720,14 @@ defmodule Muro.Check do
              :ok <- conv(k, book, s2, s_ty),
              :ok <- check_unfold(k, book, m, rs, f),
              {:ok, uses} <- combine(m, seed_u, fu) do
-          {:ok, {{:stream, a}, uses}}
+          {:ok, {{:nu, {:prod, Subst.wk(a), {:var, 0}}}, uses}}
         end
 
       # ⇒-ucons
       {m, {:ucons, s}} ->
         with {:ok, {tt, u}} <- infer(k, book, rs, gamma, m, s),
-             {:ok, a} <- view_stream(k, book, tt) do
-          {:ok, {{:prod, a, {:stream, a}}, u}}
+             {:ok, f} <- view_nu(k, book, tt) do
+          {:ok, {Subst.inst(f, tt), u}}
         end
 
       # ⇒-sum
@@ -861,6 +894,48 @@ defmodule Muro.Check do
       {:right, t} ->
         with {:ok, {_, b1}} <- view_sum(k, book, a),
              do: check(k, book, rs, gamma, mode, t, b1)
+
+      # ⇐-pair
+      {:pair, x, y} ->
+        with {:ok, {a1, b1}} <- view_prod(k, book, a),
+             {:ok, au} <- check(k, book, rs, gamma, mode, x, a1),
+             {:ok, bu} <- check(k, book, rs, gamma, mode, y, b1),
+             do: combine(mode, au, bu)
+
+      # ⇐-unf
+      {:unf, seed, {:lam, q, a_ann, t}} ->
+        with {:ok, fu_ty} <- view_nu(k, book, a),
+             {:ok, {s_ty, seed_u}} <- infer(k, book, rs, gamma, mode, seed),
+             :ok <- conv(k, book, a_ann, s_ty),
+             {:ok, [u0 | us]} <-
+               check(
+                 k,
+                 book,
+                 ext_rec(rs, false, rs.next_ok),
+                 ext(gamma, q, s_ty),
+                 mode,
+                 t,
+                 Subst.wk(Subst.inst(fu_ty, s_ty))
+               ),
+             :ok <- check_bound(mode, q, u0),
+             :ok <- check_unfold(k, book, mode, rs, {:lam, q, a_ann, t}),
+             do: combine(mode, seed_u, us)
+
+      {:unf, seed, f} ->
+        with {:ok, fu_ty} <- view_nu(k, book, a),
+             {:ok, {s_ty, seed_u}} <- infer(k, book, rs, gamma, mode, seed),
+             {:ok, fu} <-
+               check(
+                 k,
+                 book,
+                 rs,
+                 gamma,
+                 mode,
+                 f,
+                 {:pi, :affine, s_ty, Subst.wk(Subst.inst(fu_ty, s_ty))}
+               ),
+             :ok <- check_unfold(k, book, mode, rs, f),
+             do: combine(mode, seed_u, fu)
 
       # ⇐-conv
       _ ->
