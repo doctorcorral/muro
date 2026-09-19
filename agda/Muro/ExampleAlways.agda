@@ -31,17 +31,17 @@ alwaysTm : Tm 0
 alwaysTm = unf one (lam affine unit (pair rfl one))
 
 alwaysBook : Sig
-alwaysBook =
+alwaysBook = fromDefs (
   mkDef "zeros"             run  zerosTy  zerosTm  ∷
   mkDef "zeros-always-zero" evid alwaysTy alwaysTm ∷
-  []
+  [])
 
 always-checks : checkSig! alwaysBook ≡ ok tt
 always-checks = refl
 
 -- Unguarded evidence: self-call is not an unfold.
 badAlways : Sig
-badAlways =
+badAlways = fromDefs (
   mkDef "zeros" run (stream nat) zerosTm ∷
   mkDef "bad" evid (always const0≡0 (def 0)) (def 1) ∷
-  []
+  [])

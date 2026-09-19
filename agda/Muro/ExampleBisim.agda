@@ -31,11 +31,11 @@ zerosBisimTm : Tm 0
 zerosBisimTm = unf one (lam affine unit (pair rfl one))
 
 zerosBook : Sig
-zerosBook =
+zerosBook = fromDefs (
   mkDef "zeros"       run  zerosTy      zerosTm      ∷
   mkDef "zeros'"      run  zerosTy      zerosTm      ∷
   mkDef "zeros-bisim" evid zerosBisimTy zerosBisimTm ∷
-  []
+  [])
 
 zeros-bisim-checks : checkSig! zerosBook ≡ ok tt
 zeros-bisim-checks = refl
@@ -60,10 +60,10 @@ natsTailTm =
   lam affine nat (unf one (lam affine unit (pair rfl one)))
 
 natsBook : Sig
-natsBook =
+natsBook = fromDefs (
   mkDef "natsFrom"        run  natsFromTy natsFromTm ∷
   mkDef "nats-tail-bisim" evid natsTailTy natsTailTm ∷
-  []
+  [])
 
 nats-tail-bisim-checks : checkSig! natsBook ≡ ok tt
 nats-tail-bisim-checks = refl

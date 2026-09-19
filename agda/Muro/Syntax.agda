@@ -12,10 +12,12 @@ module Muro.Syntax where
 
 open import Data.Bool.Base using (Bool; true; false; if_then_else_)
 open import Data.Fin.Base using (Fin; zero; suc; toℕ)
+open import Data.List.Base using (List; []; _∷_)
 open import Data.Nat.Base using (ℕ; zero; suc)
 open import Data.Nat.Show using (show)
 open import Data.String.Base using (String; _++_)
 open import Data.Unit.Base using (⊤)
+
 
 open import Muro.Base
 
@@ -35,18 +37,10 @@ data Tm (n : ℕ) : Set where
   unit  : Tm n
   one   : Tm n
   empty : Tm n
-  -- List A
-  lst   : Tm n → Tm n
-  nil   : Tm n
-  cons  : Tm n → Tm n → Tm n
-  mLst  : (scrut : Tm n) (mot : Tm (suc n))
-          (tn : Tm n) (tc : Tm (suc (suc n))) → Tm n
-  -- coproduct A ⊎ B (Either)
-  sum   : Tm n → Tm n → Tm n
-  left  : Tm n → Tm n
-  right : Tm n → Tm n
-  mSum  : (scrut : Tm n) (mot : Tm (suc n))
-          (tl tr : Tm (suc n)) → Tm n
+  -- Non-indexed data: D params, constructor D.j, generic match.
+  dty   : ℕ → Tm n
+  ctor  : (di ci : ℕ) → Tm n
+  mData : Tm n → Tm (suc n) → List (Tm n) → Tm n
   -- match with explicit motive
   mNat  : (scrut : Tm n) (mot : Tm (suc n))
           (tz : Tm n) (ts : Tm (suc n)) → Tm n
@@ -85,14 +79,9 @@ data PTm (V : Set) : Set where
   unit  : PTm V
   one   : PTm V
   empty : PTm V
-  lst   : PTm V → PTm V
-  nil   : PTm V
-  cons  : PTm V → PTm V → PTm V
-  mLst  : PTm V → (V → PTm V) → PTm V → (V → V → PTm V) → PTm V
-  sum   : PTm V → PTm V → PTm V
-  left  : PTm V → PTm V
-  right : PTm V → PTm V
-  mSum  : PTm V → (V → PTm V) → (V → PTm V) → (V → PTm V) → PTm V
+  dty   : ℕ → PTm V
+  ctor  : (di ci : ℕ) → PTm V
+  mData : PTm V → (V → PTm V) → List (PTm V) → PTm V
   mNat  : PTm V → (V → PTm V) → PTm V → (V → PTm V) → PTm V
   mEmp  : PTm V → (V → PTm V) → PTm V
   mUnit : PTm V → (V → PTm V) → PTm V → PTm V
@@ -148,18 +137,10 @@ showTm (su t)       = "suc(" ++ showTm t ++ ")"
 showTm unit         = "Unit"
 showTm one          = "tt"
 showTm empty        = "Empty"
-showTm (lst A)      = "List " ++ showTm A
-showTm nil          = "nil"
-showTm (cons a as)  = "cons(" ++ showTm a ++ ", " ++ showTm as ++ ")"
-showTm (mLst e P n c) =
-  "matchList " ++ showTm e ++ " motive " ++ showTm P ++
-  " | nil => " ++ showTm n ++ " | cons => " ++ showTm c
-showTm (sum A B)    = "(" ++ showTm A ++ " ⊎ " ++ showTm B ++ ")"
-showTm (left t)     = "left(" ++ showTm t ++ ")"
-showTm (right t)    = "right(" ++ showTm t ++ ")"
-showTm (mSum e P l r) =
-  "matchEither " ++ showTm e ++ " motive " ++ showTm P ++
-  " | left => " ++ showTm l ++ " | right => " ++ showTm r
+showTm (dty i)      = "D" ++ show i
+showTm (ctor i j)   = "c" ++ show i ++ "." ++ show j
+showTm (mData e P _) =
+  "match " ++ showTm e ++ " motive " ++ showTm P
 showTm (mNat e P z s) =
   "matchNat " ++ showTm e ++ " motive " ++ showTm P ++
   " | 0 => " ++ showTm z ++ " | suc => " ++ showTm s

@@ -169,13 +169,13 @@ halfOkTy-ok  = is-ok _
 halfOkTm-ok  = is-ok _
 
 book : Sig
-book =
+book = fromDefs (
   mkDef "plus"     run  (out plusTy-ok)    (out plusTm-ok)    ∷
   mkDef "IsEven"   spec (out isEvenTy-ok)  (out isEvenTm-ok)  ∷
   mkDef "half"     run  (out halfTy-ok)    (out halfTm-ok)    ∷
   mkDef "plus_suc" evid (out plusSucTy-ok) (out plusSucTm-ok) ∷
   mkDef "half_ok"  evid (out halfOkTy-ok)  (out halfOkTm-ok)  ∷
-  []
+  [])
 
 -- Closed computation: plus (half 2) (half 2) ≡ 2.
 t2 : Tm 0

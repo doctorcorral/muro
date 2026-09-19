@@ -14,7 +14,7 @@ open import Data.Bool.Base
   using (Bool; true; false; _∧_; _∨_; not; if_then_else_)
 open import Data.Empty using (⊥)
 open import Data.Fin.Base using (Fin; zero; suc)
-open import Data.List.Base using (List; []; _∷_)
+open import Data.List.Base as List using (List; []; _∷_; length)
 open import Data.Maybe.Base using (Maybe; just; nothing)
 open import Data.Nat.Base using (ℕ; zero; suc; _≡ᵇ_)
 open import Data.Nat.Show using (show)
@@ -30,7 +30,7 @@ open import Muro.Syntax
 open import Muro.Subst
 
 ------------------------------------------------------------------------
--- Signature of closed definitions.
+-- Signature: data declarations and closed definitions.
 ------------------------------------------------------------------------
 
 -- dmode is run or spec. Emit visibility (def vs defp) is an Elixir-only
@@ -43,13 +43,50 @@ record Def : Set where
     dtype : Tm 0
     dbody : Tm 0
 
-Sig : Set
-Sig = List Def
+-- Constructor type is closed: Π params → Π args → D params.
+record Ctor : Set where
+  constructor mkCtor
+  field
+    cname : String
+    ctype : Tm 0
+
+-- Non-indexed data. Parameters are binders before `: Type`.
+record DataDecl : Set where
+  constructor mkData
+  field
+    dname : String
+    pqtys : List Qty
+    ctors : List Ctor
+
+record Sig : Set where
+  constructor mkSig
+  field
+    datas : List DataDecl
+    defs  : List Def
+
+fromDefs : List Def → Sig
+fromDefs ds = mkSig [] ds
+
+lookupList : ∀ {A : Set} → List A → ℕ → Result A
+lookupList []       _       = fail "unknown index"
+lookupList (x ∷ _)  zero    = ok x
+lookupList (_ ∷ xs) (suc i) = lookupList xs i
 
 lookupDef : Sig → ℕ → Result Def
-lookupDef []       _       = fail "unknown definition"
-lookupDef (d ∷ _)  zero    = ok d
-lookupDef (_ ∷ ds) (suc i) = lookupDef ds i
+lookupDef σ i = lookupList (Sig.defs σ) i
+
+lookupData : Sig → ℕ → Result DataDecl
+lookupData σ i = lookupList (Sig.datas σ) i
+
+lookupCtor : DataDecl → ℕ → Result Ctor
+lookupCtor d i = lookupList (DataDecl.ctors d) i
+
+nparams : DataDecl → ℕ
+nparams d = length (DataDecl.pqtys d)
+
+dtyType : ∀ {n} → List Qty → Tm n
+dtyType []       = typ
+dtyType (q ∷ qs) = pi q typ (dtyType qs)
 
 ------------------------------------------------------------------------
 -- Contexts. Newest binder is index zero; every type is weakened to n.
@@ -212,14 +249,7 @@ mutual
   ... | one = whnf k σ u
   ... | e′  = mUnit e′ P u
   whnf (suc k) σ (mEmp e P) = mEmp (whnf k σ e) P
-  whnf (suc k) σ (mSum e P l r) with whnf k σ e
-  ... | left a  = whnf k σ (inst l a)
-  ... | right b = whnf k σ (inst r b)
-  ... | e′      = mSum e′ P l r
-  whnf (suc k) σ (mLst e P n c) with whnf k σ e
-  ... | nil        = whnf k σ n
-  ... | cons a as  = whnf k σ (instCons c a as)
-  ... | e′         = mLst e′ P n c
+  whnf (suc k) σ (mData e P bs) = dataWhnf k σ (whnf k σ e) P bs
   whnf (suc k) σ (def i) with lookupDef σ i
   ... | ok d    = whnf k σ (closed (Def.dbody d))
   ... | fail _  = def i
@@ -239,25 +269,53 @@ mutual
   ... | _        = ucons (unf s f)
   uconsWhnf _ _ e = ucons e
 
-{-# TERMINATING #-}
-isData : ∀ {n} → ℕ → Sig → Tm n → Bool
-isData k σ t with whnf k σ t
-... | nat   = true
-... | unit  = true
-... | empty = true
-... | lst A = isData k σ A
-... | _     = false
+  nthList : ∀ {A : Set} → List A → ℕ → Result A
+  nthList []       _       = fail "unknown index"
+  nthList (x ∷ _)  zero    = ok x
+  nthList (_ ∷ xs) (suc i) = nthList xs i
+
+  ctorSpine : ∀ {n} → Tm n → Maybe (ℕ × ℕ × List (Tm n))
+  ctorSpine t = go t []
+    where
+      go : ∀ {n} → Tm n → List (Tm n) → Maybe (ℕ × ℕ × List (Tm n))
+      go (app f a) acc = go f (a ∷ acc)
+      go (ctor i j) acc = just (i , j , acc)
+      go _ _ = nothing
+
+  dataWhnf : ∀ {n} → ℕ → Sig → Tm n → Tm (suc n) → List (Tm n) → Tm n
+  dataWhnf k σ e P bs with ctorSpine e
+  ... | just (_ , ci , args) =
+    case nthList bs ci of λ where
+      (ok b)  → whnf k σ (appsFrom b args)
+      (fail _) → mData e P bs
+  ... | nothing = mData e P bs
+
+mutual
+  {-# TERMINATING #-}
+  allData : ∀ {n} → ℕ → Sig → List (Tm n) → Bool
+  allData _ _ []       = true
+  allData k σ (a ∷ as) = isData k σ a ∧ allData k σ as
+
+  {-# TERMINATING #-}
+  isData : ∀ {n} → ℕ → Sig → Tm n → Bool
+  isData k σ t with apps (whnf k σ t)
+  ... | (nat , [])   = true
+  ... | (unit , [])  = true
+  ... | (empty , []) = true
+  ... | (dty _ , as) = allData k σ as
+  ... | _            = false
 
 {-# TERMINATING #-}
 runTy : ∀ {n} → Tm n → Bool
+runTy (var _)     = true
 runTy nat         = true
 runTy unit        = true
 runTy empty       = true
 runTy (pi _ _ B)  = runTy B
 runTy (nu F)      = runTy (inst F unit)
 runTy (prod A B)  = runTy A ∧ runTy B
-runTy (sum A B)   = runTy A ∧ runTy B
-runTy (lst _)     = true
+runTy (dty _)     = true
+runTy (app f _)   = runTy f
 runTy _           = false
 
 isRunType : ∀ {n} → ℕ → Sig → Tm n → Bool
@@ -269,55 +327,53 @@ isRunType k σ t = runTy (whnf k σ t)
 -- just to compare a call with itself (otherwise plus n m ≁ plus n m loops).
 ------------------------------------------------------------------------
 
-synEq : ∀ {n} → Tm n → Tm n → Bool
-synEq (var i)        (var j)        = eqFin i j
-synEq typ            typ            = true
-synEq (pi q A B)     (pi q′ A′ B′)  = eqQty q q′ ∧ synEq A A′ ∧ synEq B B′
-synEq (lam q A t)    (lam q′ A′ t′) = eqQty q q′ ∧ synEq A A′ ∧ synEq t t′
-synEq (app f a)      (app g b)      = synEq f g ∧ synEq a b
-synEq nat            nat            = true
-synEq ze             ze             = true
-synEq (su a)         (su b)         = synEq a b
-synEq unit           unit           = true
-synEq one            one            = true
-synEq empty          empty          = true
-synEq (lst A)        (lst A′)       = synEq A A′
-synEq nil            nil            = true
-synEq (cons a as)    (cons a′ as′)  = synEq a a′ ∧ synEq as as′
-synEq (mLst e P n c) (mLst e′ P′ n′ c′) =
-  synEq e e′ ∧ synEq P P′ ∧ synEq n n′ ∧ synEq c c′
-synEq (sum A B)      (sum A′ B′)    = synEq A A′ ∧ synEq B B′
-synEq (left t)       (left t′)      = synEq t t′
-synEq (right t)      (right t′)     = synEq t t′
-synEq (mSum e P l r) (mSum e′ P′ l′ r′) =
-  synEq e e′ ∧ synEq P P′ ∧ synEq l l′ ∧ synEq r r′
-synEq (mNat e P z s) (mNat e′ P′ z′ s′) =
-  synEq e e′ ∧ synEq P P′ ∧ synEq z z′ ∧ synEq s s′
-synEq (mEmp e P)     (mEmp e′ P′)   = synEq e e′ ∧ synEq P P′
-synEq (mUnit e P u)  (mUnit e′ P′ u′) = synEq e e′ ∧ synEq P P′ ∧ synEq u u′
-synEq (idt A a b)    (idt A′ a′ b′) = synEq A A′ ∧ synEq a a′ ∧ synEq b b′
-synEq rfl            rfl            = true
-synEq (rwt e P t)    (rwt e′ P′ t′) = synEq e e′ ∧ synEq P P′ ∧ synEq t t′
-synEq (def i)        (def j)        = i ≡ᵇ j
-synEq (ann e A)      (ann e′ A′)    = synEq e e′ ∧ synEq A A′
-synEq (prod A B)     (prod A′ B′)   = synEq A A′ ∧ synEq B B′
-synEq (pair a b)     (pair a′ b′)   = synEq a a′ ∧ synEq b b′
-synEq (fst t)        (fst t′)       = synEq t t′
-synEq (snd t)        (snd t′)       = synEq t t′
-synEq (nu F)         (nu F′)        = synEq F F′
-synEq (unf s f)      (unf s′ f′)    = synEq s s′ ∧ synEq f f′
-synEq (ucons s)      (ucons s′)     = synEq s s′
-synEq _              _              = false
+mutual
+  synEqList : ∀ {n} → List (Tm n) → List (Tm n) → Bool
+  synEqList []       []       = true
+  synEqList (x ∷ xs) (y ∷ ys) = synEq x y ∧ synEqList xs ys
+  synEqList _        _        = false
+
+  synEq : ∀ {n} → Tm n → Tm n → Bool
+  synEq (var i)        (var j)        = eqFin i j
+  synEq typ            typ            = true
+  synEq (pi q A B)     (pi q′ A′ B′)  = eqQty q q′ ∧ synEq A A′ ∧ synEq B B′
+  synEq (lam q A t)    (lam q′ A′ t′) = eqQty q q′ ∧ synEq A A′ ∧ synEq t t′
+  synEq (app f a)      (app g b)      = synEq f g ∧ synEq a b
+  synEq nat            nat            = true
+  synEq ze             ze             = true
+  synEq (su a)         (su b)         = synEq a b
+  synEq unit           unit           = true
+  synEq one            one            = true
+  synEq empty          empty          = true
+  synEq (dty i)        (dty j)        = i ≡ᵇ j
+  synEq (ctor i j)     (ctor i′ j′)   = (i ≡ᵇ i′) ∧ (j ≡ᵇ j′)
+  synEq (mData e P bs) (mData e′ P′ bs′) =
+    synEq e e′ ∧ synEq P P′ ∧ synEqList bs bs′
+  synEq (mNat e P z s) (mNat e′ P′ z′ s′) =
+    synEq e e′ ∧ synEq P P′ ∧ synEq z z′ ∧ synEq s s′
+  synEq (mEmp e P)     (mEmp e′ P′)   = synEq e e′ ∧ synEq P P′
+  synEq (mUnit e P u)  (mUnit e′ P′ u′) = synEq e e′ ∧ synEq P P′ ∧ synEq u u′
+  synEq (idt A a b)    (idt A′ a′ b′) = synEq A A′ ∧ synEq a a′ ∧ synEq b b′
+  synEq rfl            rfl            = true
+  synEq (rwt e P t)    (rwt e′ P′ t′) = synEq e e′ ∧ synEq P P′ ∧ synEq t t′
+  synEq (def i)        (def j)        = i ≡ᵇ j
+  synEq (ann e A)      (ann e′ A′)    = synEq e e′ ∧ synEq A A′
+  synEq (prod A B)     (prod A′ B′)   = synEq A A′ ∧ synEq B B′
+  synEq (pair a b)     (pair a′ b′)   = synEq a a′ ∧ synEq b b′
+  synEq (fst t)        (fst t′)       = synEq t t′
+  synEq (snd t)        (snd t′)       = synEq t t′
+  synEq (nu F)         (nu F′)        = synEq F F′
+  synEq (unf s f)      (unf s′ f′)    = synEq s s′ ∧ synEq f f′
+  synEq (ucons s)      (ucons s′)     = synEq s s′
+  synEq _              _              = false
 
 ctorHead : ∀ {n} → Tm n → Bool
-ctorHead ze        = true
-ctorHead (su _)    = true
-ctorHead one       = true
-ctorHead (left _)  = true
-ctorHead (right _) = true
-ctorHead nil       = true
-ctorHead (cons _ _) = true
-ctorHead _         = false
+ctorHead t with proj₁ (apps t)
+... | ze       = true
+... | su _     = true
+... | one      = true
+... | ctor _ _ = true
+... | _        = false
 
 mutual
   {-# TERMINATING #-}
@@ -347,16 +403,11 @@ mutual
   convN k σ nat           nat           = ok tt
   convN k σ unit          unit          = ok tt
   convN k σ empty         empty         = ok tt
-  convN k σ (lst A)       (lst A′)      = conv k σ A A′
-  convN k σ nil           nil           = ok tt
-  convN k σ (cons a as)   (cons a′ as′) = conv k σ a a′ >> conv k σ as as′
-  convN k σ (mLst e P n c) (mLst e′ P′ n′ c′) =
-    conv k σ e e′ >> conv k σ P P′ >> conv k σ n n′ >> conv k σ c c′
-  convN k σ (sum A B)     (sum A′ B′)   = conv k σ A A′ >> conv k σ B B′
-  convN k σ (left t)      (left t′)     = conv k σ t t′
-  convN k σ (right t)     (right t′)    = conv k σ t t′
-  convN k σ (mSum e P l r) (mSum e′ P′ l′ r′) =
-    conv k σ e e′ >> conv k σ P P′ >> conv k σ l l′ >> conv k σ r r′
+  convN k σ (dty i)       (dty j)       = guard "data index mismatch" (i ≡ᵇ j)
+  convN k σ (ctor i j)    (ctor i′ j′)  =
+    guard "constructor mismatch" ((i ≡ᵇ i′) ∧ (j ≡ᵇ j′))
+  convN k σ (mData e P bs) (mData e′ P′ bs′) =
+    conv k σ e e′ >> conv k σ P P′ >> convArgs k σ bs bs′
   convN k σ ze            ze            = ok tt
   convN k σ one           one           = ok tt
   convN k σ rfl           rfl           = ok tt
@@ -411,10 +462,9 @@ data _≈[_]_ {n} : Tm n → Sig → Tm n → Set where
   ≈-ιuncons : ∀ {σ s f h t} →
               app f s ≈[ σ ] pair h t →
               ucons (unf s f) ≈[ σ ] pair h (unf t f)
-  ≈-ιleft  : ∀ {σ a P l r} → mSum (left a) P l r ≈[ σ ] inst l a
-  ≈-ιnil   : ∀ {σ P n c} → mLst nil P n c ≈[ σ ] n
-  ≈-ιcons  : ∀ {σ a as P n c} → mLst (cons a as) P n c ≈[ σ ] instCons c a as
-  ≈-ιright : ∀ {σ b P l r} → mSum (right b) P l r ≈[ σ ] inst r b
+  ≈-ιdata  : ∀ {σ di ci args P bs b} →
+             lookupList bs ci ≡ ok b →
+             mData (appsFrom (ctor di ci) args) P bs ≈[ σ ] appsFrom b args
 
 ------------------------------------------------------------------------
 -- Spec: bidirectional judgments.
@@ -488,23 +538,15 @@ data _,_⊢[_]_⇒_ σ Γ where
     → σ , Γ ⊢[ m ] t ⇐ inst P r
     → σ , Γ ⊢[ m ] rwt eq P t ⇒ inst P l
 
-  ⇒-lst : ∀ {A}
-    → σ , Γ ⊢ A wf
-    → σ , Γ ⊢[ spec ] lst A ⇒ typ
+  ⇒-dty : ∀ {i d}
+    → lookupData σ i ≡ ok d
+    → σ , Γ ⊢[ spec ] dty i ⇒ dtyType (DataDecl.pqtys d)
 
-  ⇒-cons : ∀ {m A a as}
-    → σ , Γ ⊢[ m ] a ⇐ A
-    → σ , Γ ⊢[ m ] as ⇐ lst A
-    → σ , Γ ⊢[ m ] cons a as ⇒ lst A
-
-  ⇒-mLst : ∀ {m A e P n c}
-    → σ , Γ ⊢[ m ] e ⇐ lst A
-    → σ , ext Γ affine (lst A) ⊢ P wf
-    → σ , Γ ⊢[ m ] n ⇐ inst P nil
-    → σ , ext (ext Γ affine A) affine (lst (wk A)) ⊢[ m ] c ⇐
-        sub (λ { zero → cons (var (suc zero)) (var zero)
-               ; (suc i) → var (suc (suc i)) }) P
-    → σ , Γ ⊢[ m ] mLst e P n c ⇒ inst P e
+  ⇒-mData : ∀ {m di params e P bs d}
+    → lookupData σ di ≡ ok d
+    → σ , Γ ⊢[ m ] e ⇐ appsFrom (dty di) params
+    → σ , ext Γ affine (appsFrom (dty di) params) ⊢ P wf
+    → σ , Γ ⊢[ m ] mData e P bs ⇒ inst P e
 
   ⇒-mNat : ∀ {m e P z s}
     → σ , Γ ⊢[ m ] e ⇐ nat
@@ -564,18 +606,6 @@ data _,_⊢[_]_⇒_ σ Γ where
     → σ , Γ ⊢[ m ] s ⇐ nu F
     → σ , Γ ⊢[ m ] ucons s ⇒ inst F (nu F)
 
-  ⇒-sum : ∀ {A B}
-    → σ , Γ ⊢ A wf
-    → σ , Γ ⊢ B wf
-    → σ , Γ ⊢[ spec ] sum A B ⇒ typ
-
-  ⇒-mSum : ∀ {m A B e P l r}
-    → σ , Γ ⊢[ m ] e ⇐ sum A B
-    → σ , ext Γ affine (sum A B) ⊢ P wf
-    → σ , ext Γ affine A ⊢[ m ] l ⇐ sub (λ { zero → left (var zero) ; (suc i) → var (suc i) }) P
-    → σ , ext Γ affine B ⊢[ m ] r ⇐ sub (λ { zero → right (var zero) ; (suc i) → var (suc i) }) P
-    → σ , Γ ⊢[ m ] mSum e P l r ⇒ inst P e
-
 data _,_⊢[_]_⇐_ σ Γ where
   ⇐-conv : ∀ {m e A B}
     → σ , Γ ⊢[ m ] e ⇒ B
@@ -592,21 +622,9 @@ data _,_⊢[_]_⇐_ σ Γ where
     → a ≈[ σ ] b
     → σ , Γ ⊢[ m ] rfl ⇐ idt A a b
 
-  ⇐-nil : ∀ {m A}
-    → σ , Γ ⊢[ m ] nil ⇐ lst A
-
-  ⇐-cons : ∀ {m A a as}
-    → σ , Γ ⊢[ m ] a ⇐ A
-    → σ , Γ ⊢[ m ] as ⇐ lst A
-    → σ , Γ ⊢[ m ] cons a as ⇐ lst A
-
-  ⇐-left : ∀ {m A B a}
-    → σ , Γ ⊢[ m ] a ⇐ A
-    → σ , Γ ⊢[ m ] left a ⇐ sum A B
-
-  ⇐-right : ∀ {m A B b}
-    → σ , Γ ⊢[ m ] b ⇐ B
-    → σ , Γ ⊢[ m ] right b ⇐ sum A B
+  ⇐-ctor : ∀ {m di ci params args d}
+    → lookupData σ di ≡ ok d
+    → σ , Γ ⊢[ m ] appsFrom (ctor di ci) args ⇐ appsFrom (dty di) params
 
   ⇐-pair : ∀ {m A B a b}
     → σ , Γ ⊢[ m ] a ⇐ A
@@ -644,38 +662,44 @@ viewNu k σ t with whnf k σ t
 ... | nu F = ok F
 ... | t′   = fail ("expected ν, got " ++ showTm t′)
 
-viewSum : ∀ {n} → ℕ → Sig → Tm n → Result (Tm n × Tm n)
-viewSum k σ t with whnf k σ t
-... | sum A B = ok (A , B)
-... | t′      = fail ("expected Either, got " ++ showTm t′)
+viewData : ∀ {n} → ℕ → Sig → Tm n → Result (ℕ × List (Tm n))
+viewData k σ t with apps (whnf k σ t)
+... | (dty i , params) = ok (i , params)
+... | t′               = fail ("expected data type, got " ++ showTm (proj₁ t′))
 
-hasSelf : ∀ {n} → Maybe ℕ → Tm n → Bool
-hasSelf (just j) (def i) = i ≡ᵇ j
-hasSelf s (app f a)      = hasSelf s f ∨ hasSelf s a
-hasSelf s (su t)         = hasSelf s t
-hasSelf s (pair a b)     = hasSelf s a ∨ hasSelf s b
-hasSelf s (fst t)        = hasSelf s t
-hasSelf s (snd t)        = hasSelf s t
-hasSelf s (unf u f)      = hasSelf s u ∨ hasSelf s f
-hasSelf s (ucons u)      = hasSelf s u
-hasSelf s (lam _ A t)    = hasSelf s A ∨ hasSelf s t
-hasSelf s (pi _ A B)     = hasSelf s A ∨ hasSelf s B
-hasSelf s (prod A B)     = hasSelf s A ∨ hasSelf s B
-hasSelf s (nu F)         = hasSelf s F
-hasSelf s (sum A B)      = hasSelf s A ∨ hasSelf s B
-hasSelf s (left t)       = hasSelf s t
-hasSelf s (right t)      = hasSelf s t
-hasSelf s (mSum e P l r) = hasSelf s e ∨ hasSelf s P ∨ hasSelf s l ∨ hasSelf s r
-hasSelf s (lst A)        = hasSelf s A
-hasSelf s (cons a as)    = hasSelf s a ∨ hasSelf s as
-hasSelf s (mLst e P n c) = hasSelf s e ∨ hasSelf s P ∨ hasSelf s n ∨ hasSelf s c
-hasSelf s (mNat e P z u) = hasSelf s e ∨ hasSelf s P ∨ hasSelf s z ∨ hasSelf s u
-hasSelf s (mEmp e P)     = hasSelf s e ∨ hasSelf s P
-hasSelf s (mUnit e P u)  = hasSelf s e ∨ hasSelf s P ∨ hasSelf s u
-hasSelf s (idt A a b)    = hasSelf s A ∨ hasSelf s a ∨ hasSelf s b
-hasSelf s (rwt e P t)    = hasSelf s e ∨ hasSelf s P ∨ hasSelf s t
-hasSelf s (ann e A)      = hasSelf s e ∨ hasSelf s A
-hasSelf _ _              = false
+isDType : ∀ {n} → ℕ → Tm n → Bool
+isDType i t with proj₁ (apps t)
+... | dty j = i ≡ᵇ j
+... | _     = false
+
+mutual
+  hasSelf : ∀ {n} → Maybe ℕ → Tm n → Bool
+  hasSelf (just j) (def i) = i ≡ᵇ j
+  hasSelf s (app f a)      = hasSelf s f ∨ hasSelf s a
+  hasSelf s (su t)         = hasSelf s t
+  hasSelf s (pair a b)     = hasSelf s a ∨ hasSelf s b
+  hasSelf s (fst t)        = hasSelf s t
+  hasSelf s (snd t)        = hasSelf s t
+  hasSelf s (unf u f)      = hasSelf s u ∨ hasSelf s f
+  hasSelf s (ucons u)      = hasSelf s u
+  hasSelf s (lam _ A t)    = hasSelf s A ∨ hasSelf s t
+  hasSelf s (pi _ A B)     = hasSelf s A ∨ hasSelf s B
+  hasSelf s (prod A B)     = hasSelf s A ∨ hasSelf s B
+  hasSelf s (nu F)         = hasSelf s F
+  hasSelf s (dty _)        = false
+  hasSelf s (ctor _ _)     = false
+  hasSelf s (mData e P bs) = hasSelf s e ∨ hasSelf s P ∨ hasSelfList s bs
+  hasSelf s (mNat e P z u) = hasSelf s e ∨ hasSelf s P ∨ hasSelf s z ∨ hasSelf s u
+  hasSelf s (mEmp e P)     = hasSelf s e ∨ hasSelf s P
+  hasSelf s (mUnit e P u)  = hasSelf s e ∨ hasSelf s P ∨ hasSelf s u
+  hasSelf s (idt A a b)    = hasSelf s A ∨ hasSelf s a ∨ hasSelf s b
+  hasSelf s (rwt e P t)    = hasSelf s e ∨ hasSelf s P ∨ hasSelf s t
+  hasSelf s (ann e A)      = hasSelf s e ∨ hasSelf s A
+  hasSelf _ _              = false
+
+  hasSelfList : ∀ {n} → Maybe ℕ → List (Tm n) → Bool
+  hasSelfList _ []       = false
+  hasSelfList s (t ∷ ts) = hasSelf s t ∨ hasSelfList s ts
 
 -- On run/evid, unfold's λ-body must be a pair and the head must not
 -- contain a self-call. spec skips the test.
@@ -701,39 +725,39 @@ checkNu _    T t = go T t
     go (nu _)     _           = fail "ν value must be an unfold"
     go _          _           = ok tt
 
-occurs : ∀ {n} → Fin n → Tm n → Bool
-occurs x (var y)        = eqFin x y
-occurs x (pi _ A B)     = occurs x A ∨ occurs (suc x) B
-occurs x (lam _ A t)    = occurs x A ∨ occurs (suc x) t
-occurs x (app f a)      = occurs x f ∨ occurs x a
-occurs x (su t)         = occurs x t
-occurs x (sum A B)      = occurs x A ∨ occurs x B
-occurs x (left t)       = occurs x t
-occurs x (right t)      = occurs x t
-occurs x (mSum e P l r) = occurs x e ∨ occurs (suc x) P ∨ occurs (suc x) l ∨ occurs (suc x) r
-occurs x (lst A)        = occurs x A
-occurs x (cons a as)    = occurs x a ∨ occurs x as
-occurs x (mLst e P n c) = occurs x e ∨ occurs (suc x) P ∨ occurs x n ∨ occurs (suc (suc x)) c
-occurs x (mNat e P z s) = occurs x e ∨ occurs (suc x) P ∨ occurs x z ∨ occurs (suc x) s
-occurs x (mEmp e P)     = occurs x e ∨ occurs (suc x) P
-occurs x (mUnit e P u)  = occurs x e ∨ occurs (suc x) P ∨ occurs x u
-occurs x (idt A a b)    = occurs x A ∨ occurs x a ∨ occurs x b
-occurs x (rwt e P t)    = occurs x e ∨ occurs (suc x) P ∨ occurs x t
-occurs x (ann e A)      = occurs x e ∨ occurs x A
-occurs x (prod A B)     = occurs x A ∨ occurs x B
-occurs x (pair a b)     = occurs x a ∨ occurs x b
-occurs x (fst t)        = occurs x t
-occurs x (snd t)        = occurs x t
-occurs x (nu F)         = occurs (suc x) F
-occurs x (unf s f)      = occurs x s ∨ occurs x f
-occurs x (ucons s)      = occurs x s
-occurs _ _              = false
+mutual
+  occurs : ∀ {n} → Fin n → Tm n → Bool
+  occurs x (var y)        = eqFin x y
+  occurs x (pi _ A B)     = occurs x A ∨ occurs (suc x) B
+  occurs x (lam _ A t)    = occurs x A ∨ occurs (suc x) t
+  occurs x (app f a)      = occurs x f ∨ occurs x a
+  occurs x (su t)         = occurs x t
+  occurs x (dty _)        = false
+  occurs x (ctor _ _)     = false
+  occurs x (mData e P bs) = occurs x e ∨ occurs (suc x) P ∨ occursList x bs
+  occurs x (mNat e P z s) = occurs x e ∨ occurs (suc x) P ∨ occurs x z ∨ occurs (suc x) s
+  occurs x (mEmp e P)     = occurs x e ∨ occurs (suc x) P
+  occurs x (mUnit e P u)  = occurs x e ∨ occurs (suc x) P ∨ occurs x u
+  occurs x (idt A a b)    = occurs x A ∨ occurs x a ∨ occurs x b
+  occurs x (rwt e P t)    = occurs x e ∨ occurs (suc x) P ∨ occurs x t
+  occurs x (ann e A)      = occurs x e ∨ occurs x A
+  occurs x (prod A B)     = occurs x A ∨ occurs x B
+  occurs x (pair a b)     = occurs x a ∨ occurs x b
+  occurs x (fst t)        = occurs x t
+  occurs x (snd t)        = occurs x t
+  occurs x (nu F)         = occurs (suc x) F
+  occurs x (unf s f)      = occurs x s ∨ occurs x f
+  occurs x (ucons s)      = occurs x s
+  occurs _ _              = false
+
+  occursList : ∀ {n} → Fin n → List (Tm n) → Bool
+  occursList _ []       = false
+  occursList x (t ∷ ts) = occurs x t ∨ occursList x ts
 
 -- X is strictly positive: product/sum ok; not in a Π-domain; not under app.
 spos : ∀ {n} → Fin n → Tm n → Bool
 spos x (var _)     = true
 spos x (prod A B)  = spos x A ∧ spos x B
-spos x (sum A B)   = spos x A ∧ spos x B
 spos x (pi _ A B)  = not (occurs x A) ∧ spos (suc x) B
 spos x (nu F)      = not (occurs (suc x) F)
 spos x t           = not (occurs x t)
@@ -748,31 +772,54 @@ motSucσ (suc i) = var (suc i)
 motSuc : ∀ {n} → Tm (suc n) → Tm (suc n)
 motSuc P = sub motSucσ P
 
-motConsσ : ∀ {n} → Fin (suc n) → Tm (suc (suc n))
-motConsσ zero    = cons (var (suc zero)) (var zero)
-motConsσ (suc i) = var (suc (suc i))
+mutual
+  occursD : ∀ {n} → ℕ → Tm n → Bool
+  occursD i (dty j)        = i ≡ᵇ j
+  occursD i (app f a)      = occursD i f ∨ occursD i a
+  occursD i (pi _ A B)     = occursD i A ∨ occursD i B
+  occursD i (lam _ A t)    = occursD i A ∨ occursD i t
+  occursD i (prod A B)     = occursD i A ∨ occursD i B
+  occursD i (pair a b)     = occursD i a ∨ occursD i b
+  occursD i (idt A a b)    = occursD i A ∨ occursD i a ∨ occursD i b
+  occursD i (mNat e P z s) = occursD i e ∨ occursD i P ∨ occursD i z ∨ occursD i s
+  occursD i (mData e P bs) = occursD i e ∨ occursD i P ∨ occursDList i bs
+  occursD i (mEmp e P)     = occursD i e ∨ occursD i P
+  occursD i (mUnit e P u)  = occursD i e ∨ occursD i P ∨ occursD i u
+  occursD i (rwt e P t)    = occursD i e ∨ occursD i P ∨ occursD i t
+  occursD i (ann e A)      = occursD i e ∨ occursD i A
+  occursD i (nu F)         = occursD i F
+  occursD i (unf s f)      = occursD i s ∨ occursD i f
+  occursD i (ucons s)      = occursD i s
+  occursD i (su t)         = occursD i t
+  occursD i (fst t)        = occursD i t
+  occursD i (snd t)        = occursD i t
+  occursD _ _              = false
 
-motCons : ∀ {n} → Tm (suc n) → Tm (suc (suc n))
-motCons P = sub motConsσ P
+  occursDList : ∀ {n} → ℕ → List (Tm n) → Bool
+  occursDList _ []       = false
+  occursDList i (t ∷ ts) = occursD i t ∨ occursDList i ts
 
-viewLst : ∀ {n} → ℕ → Sig → Tm n → Result (Tm n)
-viewLst k σ t with whnf k σ t
-... | lst A = ok A
-... | t′    = fail ("expected List, got " ++ showTm t′)
+posArg : ∀ {n} → ℕ → Tm n → Bool
+posArg i A = isDType i A ∨ not (occursD i A)
 
-motLeftσ : ∀ {n} → Fin (suc n) → Tm (suc n)
-motLeftσ zero    = left (var zero)
-motLeftσ (suc i) = var (suc i)
+instParams : ∀ {n} → ℕ → Sig → Tm n → List (Tm n) → Result (Tm n)
+instParams k σ t [] = ok t
+instParams k σ t (p ∷ ps) with whnf k σ t
+... | pi _ _ B = instParams k σ (inst B p) ps
+... | _        = fail "constructor type has too few parameter binders"
 
-motLeft : ∀ {n} → Tm (suc n) → Tm (suc n)
-motLeft P = sub motLeftσ P
+checkTelPos : ∀ {n} → ℕ → Tm n → Result ⊤
+checkTelPos i (pi _ A B) =
+  guard "constructor is not strictly positive" (posArg i A) >>
+  checkTelPos i B
+checkTelPos i t =
+  guard "constructor does not target the data type" (isDType i t)
 
-motRightσ : ∀ {n} → Fin (suc n) → Tm (suc n)
-motRightσ zero    = right (var zero)
-motRightσ (suc i) = var (suc i)
-
-motRight : ∀ {n} → Tm (suc n) → Tm (suc n)
-motRight P = sub motRightσ P
+-- Skip nparams Π-binders, then check the remaining telescope.
+checkCtorRest : ∀ {n} → ℕ → ℕ → Tm n → Result ⊤
+checkCtorRest i (suc np) (pi _ _ B) = checkCtorRest i np B
+checkCtorRest _ (suc _)  _          = fail "constructor type has too few parameter binders"
+checkCtorRest i zero     t          = checkTelPos i t
 
 checkRec : ∀ {n} → ℕ → Sig → Mode → RecSt n → Tm n → Result ⊤
 checkRec _ _ spec _ _ = ok tt
@@ -819,6 +866,63 @@ mutual
   infer′ : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Result (Tm n × UseVec n)
   {-# TERMINATING #-}
   check′ : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Result (UseVec n)
+
+  headTailU : ∀ {n} → UseVec (suc n) → Use × UseVec n
+  headTailU (u ∷ us) = u , us
+
+  {-# TERMINATING #-}
+  checkCtorArgs : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → List (Tm n) → Result (UseVec n)
+  checkCtorArgs k σ rs Γ m ty [] with whnf k σ ty
+  ... | pi _ _ _ = fail "too few constructor arguments"
+  ... | _        = ok u0s
+  checkCtorArgs k σ rs Γ m ty (a ∷ as) with whnf k σ ty
+  ... | pi q A B =
+    let am = if eqQty q erased then spec else m
+    in check k σ rs Γ am a A >>= λ au →
+    checkCtorArgs k σ rs Γ m (inst B a) as >>= λ asu →
+    if eqQty q erased
+    then (if eqMode m spec then ok u0s else ok asu)
+    else combine m au asu
+  ... | _ = fail "too many constructor arguments"
+
+  {-# TERMINATING #-}
+  checkCtorApp : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → List (Tm n) → List (Tm n) → Result (UseVec n)
+  checkCtorApp k σ rs Γ m di ci params args =
+    lookupData σ di >>= λ d →
+    lookupCtor d ci >>= λ c →
+    instParams k σ (closed (Ctor.ctype c)) params >>= λ rest →
+    checkCtorArgs k σ rs Γ m rest args
+
+  {-# TERMINATING #-}
+  checkBr : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Tm n → Tm n → Tm n → List (Tm n) → Result (UseVec n)
+  checkBr k σ rs Γ m di ci ty br mot args with whnf k σ ty
+  ... | pi q A B =
+    case br of λ where
+      (lam q′ A′ t) →
+        guard "λ/Π quantity mismatch" (eqQty q q′) >>
+        checkTy k σ rs Γ A′ >>
+        conv k σ A′ A >>
+        (if eqQty q reuse then guard "+ requires a Data type" (isData k σ A) else ok tt) >>
+        let rec? = isDType di A
+            rs1  = extRec rs rec? rec?
+            rs′  = if eqQty q erased then keepNext rs rs1 else rs1
+            args′ = List._++_ (renList suc args) (var zero ∷ [])
+        in checkBr k σ rs′ (ext Γ q A) m di ci B t (wk mot) args′ >>= λ uses →
+        let (u₀ , us) = headTailU uses
+        in checkBound m q u₀ >> ok us
+      _ → fail "match branch expected a λ for a constructor argument"
+  ... | _ = check k σ rs Γ m br (app mot (appsFrom (ctor di ci) args))
+
+  {-# TERMINATING #-}
+  checkBranches : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → List (Tm n) → Tm (suc n) → ℕ → List Ctor → List (Tm n) → Result (UseVec n)
+  checkBranches _ _ _ _ _ _ _ _ _ [] [] = ok u0s
+  checkBranches k σ rs Γ m di params mot ci (c ∷ cs) (b ∷ bs) =
+    instParams k σ (closed (Ctor.ctype c)) params >>= λ rest →
+    let motFun = lam affine (appsFrom (dty di) params) mot
+    in checkBr k σ rs Γ m di ci rest b motFun [] >>= λ u →
+    checkBranches k σ rs Γ m di params mot (suc ci) cs bs >>= λ v →
+    ok (combineAlt m u v)
+  checkBranches _ _ _ _ _ _ _ _ _ _ _ = fail "match branch count does not match constructors"
 
   -- ⇒-var-run / ⇒-var-evid / ⇒-var-spec
   infer′ k σ rs Γ run (var x) with qtyOf Γ x
@@ -925,43 +1029,28 @@ mutual
     check k σ rs Γ m t (inst P r) >>= λ tu →
     ok (inst P l , tu)
 
-  -- ⇒-lst
-  infer′ k σ rs Γ run  (lst _) = fail "no promotion: List is an erased term"
-  infer′ k σ rs Γ evid (lst _) = fail "no promotion: List is an erased term"
-  infer′ k σ rs Γ spec (lst A) =
-    checkTy k σ rs Γ A >>
-    ok (typ , u0s)
+  -- ⇒-dty
+  infer′ k σ rs Γ run  (dty _) = fail "no promotion: a data former is an erased term"
+  infer′ k σ rs Γ evid (dty _) = fail "no promotion: a data former is an erased term"
+  infer′ k σ rs Γ spec (dty i) =
+    lookupData σ i >>= λ d →
+    ok (dtyType (DataDecl.pqtys d) , u0s)
 
-  -- nil is checked (⇐-nil)
-  infer′ k σ rs Γ m nil = fail "nil requires an expected List type"
+  -- constructors are checked (⇐-ctor)
+  infer′ k σ rs Γ m (ctor _ _) = fail "constructor requires an expected data type"
 
-  -- ⇒-cons
-  infer′ k σ rs Γ m (cons a as) =
-    infer k σ rs Γ m a >>= λ (A , au) →
-    check k σ rs Γ m as (lst A) >>= λ asu →
-    combine m au asu >>= λ uses →
-    ok (lst A , uses)
-
-  -- ⇒-mLst
-  infer′ k σ rs Γ m (mLst e P n c) =
+  -- ⇒-mData
+  infer′ k σ rs Γ m (mData e P bs) =
     infer k σ rs Γ m e >>= λ (et , eu) →
-    viewLst k σ et >>= λ A →
-    checkTy k σ (extRec rs false false) (ext Γ affine (lst A)) P >>
-    check k σ rs Γ m n (inst P nil) >>= λ nu →
-    let ok? = scrutOk rs e
-        rsA  = extRec rs false false
-        rsAs = extRec rsA ok? ok?
-        Γc   = ext (ext Γ affine A) affine (lst (wk A))
-    in check k σ rsAs Γc m c (motCons P) >>= λ cu-uses →
-    let (uAs , rest1) = headTail cu-uses
-        (uA  , rest0) = headTail rest1
-    in checkBound m affine uAs >>
-       checkBound m affine uA >>
-       let bu = combineAlt m nu rest0
-       in combine m eu bu >>= λ uses → ok (inst P e , uses)
-    where
-      headTail : ∀ {n} → UseVec (suc n) → Use × UseVec n
-      headTail (u ∷ us) = u , us
+    viewData k σ et >>= λ (di , params) →
+    lookupData σ di >>= λ d →
+    guard "match branch count does not match constructors"
+      (length bs ≡ᵇ length (DataDecl.ctors d)) >>
+    checkTy k σ (extRec rs false false)
+      (ext Γ affine (appsFrom (dty di) params)) P >>
+    checkBranches k σ rs Γ m di params P 0 (DataDecl.ctors d) bs >>= λ bu →
+    combine m eu bu >>= λ uses →
+    ok (inst P e , uses)
 
   -- ⇒-mNat
   infer′ k σ rs Γ m (mNat e P z s) =
@@ -1062,38 +1151,6 @@ mutual
     viewNu k σ T >>= λ F →
     ok (inst F T , u)
 
-  -- ⇒-sum
-  infer′ k σ rs Γ run  (sum _ _) = fail "no promotion: Either is an erased term"
-  infer′ k σ rs Γ evid (sum _ _) = fail "no promotion: Either is an erased term"
-  infer′ k σ rs Γ spec (sum A B) =
-    checkTy k σ rs Γ A >>
-    checkTy k σ rs Γ B >>
-    ok (typ , u0s)
-
-  -- left / right are checked (⇐-left / ⇐-right)
-  infer′ k σ rs Γ m (left _)  = fail "left requires an expected Either type"
-  infer′ k σ rs Γ m (right _) = fail "right requires an expected Either type"
-
-  -- ⇒-mSum
-  infer′ k σ rs Γ m (mSum e P l r) =
-    infer k σ rs Γ m e >>= λ (et , eu) →
-    viewSum k σ et >>= λ (A , B) →
-    checkTy k σ (extRec rs false false) (ext Γ affine (sum A B)) P >>
-    let ok? = scrutOk rs e
-        rsL = extRec rs ok? ok?
-        rsR = extRec rs ok? ok?
-    in check k σ rsL (ext Γ affine A) m l (motLeft P) >>= λ lu-uses →
-    check k σ rsR (ext Γ affine B) m r (motRight P) >>= λ ru-uses →
-    let (uL , lus) = headTail lu-uses
-        (uR , rus) = headTail ru-uses
-    in checkBound m affine uL >>
-       checkBound m affine uR >>
-       let bu = combineAlt m lus rus
-       in combine m eu bu >>= λ uses → ok (inst P e , uses)
-    where
-      headTail : ∀ {n} → UseVec (suc n) → Use × UseVec n
-      headTail (u ∷ us) = u , us
-
   -- ⇐-lam
   check′ k σ rs Γ m (lam q A t) T with viewPi k σ T
   ... | fail _ = infer k σ rs Γ m (lam q A t) >>= λ (B , u) → conv k σ B T >> ok u
@@ -1115,28 +1172,6 @@ mutual
   check′ k σ rs Γ m rfl T =
     viewId k σ T >>= λ (_ , a , b) →
     conv k σ a b >> ok u0s
-
-  -- ⇐-nil
-  check′ k σ rs Γ m nil T =
-    viewLst k σ T >>= λ _ →
-    ok u0s
-
-  -- ⇐-cons
-  check′ k σ rs Γ m (cons a as) T =
-    viewLst k σ T >>= λ A →
-    check k σ rs Γ m a A >>= λ au →
-    check k σ rs Γ m as (lst A) >>= λ asu →
-    combine m au asu
-
-  -- ⇐-left
-  check′ k σ rs Γ m (left a) T =
-    viewSum k σ T >>= λ (A , _) →
-    check k σ rs Γ m a A
-
-  -- ⇐-right
-  check′ k σ rs Γ m (right b) T =
-    viewSum k σ T >>= λ (_ , B) →
-    check k σ rs Γ m b B
 
   -- ⇐-pair
   check′ k σ rs Γ m (pair a b) T =
@@ -1166,8 +1201,13 @@ mutual
     checkUnfold k σ m rs f >>
     combine m seedU fu
 
-  -- ⇐-conv (default)
-  check′ k σ rs Γ m e A =
+  -- ⇐-ctor / ⇐-conv (default)
+  check′ k σ rs Γ m e A with viewData k σ A | ctorSpine e
+  ... | ok (di , params) | just (di′ , ci , args) =
+    if di ≡ᵇ di′
+    then checkCtorApp k σ rs Γ m di ci params args
+    else (infer k σ rs Γ m e >>= λ (B , u) → conv k σ B A >> ok u)
+  ... | _ | _ =
     infer k σ rs Γ m e >>= λ (B , u) → conv k σ B A >> ok u
 
 ------------------------------------------------------------------------
@@ -1180,6 +1220,29 @@ emptyRec = recst nothing [] [] false false
 defRec : ℕ → RecSt 0
 defRec i = recst (just i) [] [] true false
 
+checkCtorTy : ℕ → Sig → ℕ → ℕ → Tm 0 → Result ⊤
+checkCtorTy k σ di np ctype =
+  checkTy k σ emptyRec [] ctype >>
+  checkCtorRest di np ctype
+
+checkCtors : ℕ → Sig → ℕ → ℕ → List Ctor → Result ⊤
+checkCtors _ _ _  _  []       = ok tt
+checkCtors k σ di np (c ∷ cs) =
+  tag (Ctor.cname c) (checkCtorTy k σ di np (Ctor.ctype c)) >>
+  checkCtors k σ di np cs
+
+checkData : ℕ → Sig → ℕ → DataDecl → Result ⊤
+checkData k σ di d =
+  tag (DataDecl.dname d)
+    (checkCtors k σ di (nparams d) (DataDecl.ctors d))
+
+checkDatas : ℕ → Sig → Result ⊤
+checkDatas k σ = go 0 (Sig.datas σ)
+  where
+    go : ℕ → List DataDecl → Result ⊤
+    go _ []       = ok tt
+    go i (d ∷ ds) = checkData k σ i d >> go (suc i) ds
+
 checkDef : ℕ → Sig → ℕ → Result ⊤
 checkDef k σ i =
   lookupDef σ i >>= λ d →
@@ -1190,7 +1253,7 @@ checkDef k σ i =
   ok tt
 
 checkSig : ℕ → Sig → Result ⊤
-checkSig k σ = go 0 σ
+checkSig k σ = checkDatas k σ >> go 0 (Sig.defs σ)
   where
     go : ℕ → List Def → Result ⊤
     go _ []       = ok tt

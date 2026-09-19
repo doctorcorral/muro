@@ -32,13 +32,27 @@ isEvenTm =
           empty
           (λ p → app IsEven′ (var p))))
 
+leftTy : ∀ {V} → PTm V
+leftTy =
+  pi affine typ (λ A →
+  pi affine typ (λ B →
+  pi affine (var A) (λ _ →
+    app (app (dty 0) (var A)) (var B))))
+
+rightTy : ∀ {V} → PTm V
+rightTy =
+  pi affine typ (λ A →
+  pi affine typ (λ B →
+  pi affine (var B) (λ _ →
+    app (app (dty 0) (var A)) (var B))))
+
 decTy : ∀ {V} → PTm V
 decTy = pi affine typ (λ _ → typ)
 
 decTm : ∀ {V} → PTm V
 decTm =
   lam affine typ (λ P →
-    sum (var P) (pi affine (var P) (λ _ → empty)))
+    app (app (dty 0) (var P)) (pi affine (var P) (λ _ → empty)))
 
 evenDecTy : ∀ {V} → PTm V
 evenDecTy = pi affine nat (λ n → app Dec′ (app IsEven′ (var n)))
@@ -48,17 +62,19 @@ evenDecTm =
   lam affine nat (λ n →
     mNat (var n)
       (λ x → app Dec′ (app IsEven′ (var x)))
-      (left one)
+      (app (ctor 0 0) one)
       (λ n1 →
         mNat (var n1)
           (λ y → app Dec′ (app IsEven′ (su (var y))))
-          (right (lam affine (app IsEven′ (su ze)) (λ e →
+          (app (ctor 0 1) (lam affine (app IsEven′ (su ze)) (λ e →
             mEmp (var e) (λ _ → empty))))
           (λ p →
-            mSum (app evenDec′ (var p))
+            mData (app evenDec′ (var p))
               (λ _ → app Dec′ (app IsEven′ (su (su (var p)))))
-              (λ e → left (var e))
-              (λ c → right (var c)))))
+              ( lam affine (app IsEven′ (var p)) (λ e → app (ctor 0 0) (var e)) ∷
+                lam affine (pi affine (app IsEven′ (var p)) (λ _ → empty))
+                  (λ c → app (ctor 0 1) (var c)) ∷
+                [] ))))
 
 data IsOk {A : Set} : Result A → Set where
   is-ok : (x : A) → IsOk (ok x)
@@ -66,6 +82,8 @@ data IsOk {A : Set} : Result A → Set where
 out : ∀ {A} {r : Result A} → IsOk r → A
 out (is-ok x) = x
 
+leftTy-ok    : IsOk (unembed∀ leftTy)
+rightTy-ok   : IsOk (unembed∀ rightTy)
 isEvenTy-ok  : IsOk (unembed∀ isEvenTy)
 isEvenTm-ok  : IsOk (unembed∀ isEvenTm)
 decTy-ok     : IsOk (unembed∀ decTy)
@@ -73,6 +91,8 @@ decTm-ok     : IsOk (unembed∀ decTm)
 evenDecTy-ok : IsOk (unembed∀ evenDecTy)
 evenDecTm-ok : IsOk (unembed∀ evenDecTm)
 
+leftTy-ok    = is-ok _
+rightTy-ok   = is-ok _
 isEvenTy-ok  = is-ok _
 isEvenTm-ok  = is-ok _
 decTy-ok     = is-ok _
@@ -80,12 +100,20 @@ decTm-ok     = is-ok _
 evenDecTy-ok = is-ok _
 evenDecTm-ok = is-ok _
 
+eitherDecl : DataDecl
+eitherDecl =
+  mkData "Either" (affine ∷ affine ∷ [])
+    ( mkCtor "left"  (out leftTy-ok)  ∷
+      mkCtor "right" (out rightTy-ok) ∷
+      [] )
+
 evenDecBook : Sig
 evenDecBook =
-  mkDef "IsEven"  spec (out isEvenTy-ok)  (out isEvenTm-ok)  ∷
-  mkDef "Dec"     spec (out decTy-ok)     (out decTm-ok)     ∷
-  mkDef "evenDec" evid (out evenDecTy-ok) (out evenDecTm-ok) ∷
-  []
+  mkSig (eitherDecl ∷ [])
+    ( mkDef "IsEven"  spec (out isEvenTy-ok)  (out isEvenTm-ok)  ∷
+      mkDef "Dec"     spec (out decTy-ok)     (out decTm-ok)     ∷
+      mkDef "evenDec" evid (out evenDecTy-ok) (out evenDecTm-ok) ∷
+      [] )
 
 evenDec-checks : checkSig! evenDecBook ≡ ok tt
 evenDec-checks = refl

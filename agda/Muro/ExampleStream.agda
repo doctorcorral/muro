@@ -27,19 +27,19 @@ headZerosTm : Tm 0
 headZerosTm = rfl
 
 zerosBook : Sig
-zerosBook =
+zerosBook = fromDefs (
   mkDef "zeros"      run  zerosTy     zerosTm     ∷
   mkDef "head-zeros" evid headZerosTy headZerosTm ∷
-  []
+  [])
 
 zeros-checks : checkSig! zerosBook ≡ ok tt
 zeros-checks = refl
 
 -- Direct self-call is not an unfold.
 badLoop : Sig
-badLoop = mkDef "bad" run (stream nat) (def 0) ∷ []
+badLoop = fromDefs (mkDef "bad" run (stream nat) (def 0) ∷ [])
 
 -- unfold whose λ-body is not a pair.
 badUnfold : Sig
 badUnfold =
-  mkDef "bad" run (stream nat) (unf ze (lam affine nat (def 0))) ∷ []
+  fromDefs (mkDef "bad" run (stream nat) (unf ze (lam affine nat (def 0))) ∷ [])
