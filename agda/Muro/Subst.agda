@@ -40,6 +40,13 @@ ren ρ rfl           = rfl
 ren ρ (rwt e P t)   = rwt (ren ρ e) (ren (lift ρ) P) (ren ρ t)
 ren ρ (def i)       = def i
 ren ρ (ann e A)     = ann (ren ρ e) (ren ρ A)
+ren ρ (prod A B)    = prod (ren ρ A) (ren ρ B)
+ren ρ (pair a b)    = pair (ren ρ a) (ren ρ b)
+ren ρ (fst t)       = fst (ren ρ t)
+ren ρ (snd t)       = snd (ren ρ t)
+ren ρ (stream A)    = stream (ren ρ A)
+ren ρ (unf s f)     = unf (ren ρ s) (ren ρ f)
+ren ρ (ucons s)     = ucons (ren ρ s)
 
 wk : ∀ {n} → Tm n → Tm (suc n)
 wk = ren suc
@@ -74,6 +81,13 @@ sub σ rfl            = rfl
 sub σ (rwt e P t)    = rwt (sub σ e) (sub (lifts σ) P) (sub σ t)
 sub σ (def i)        = def i
 sub σ (ann e A)      = ann (sub σ e) (sub σ A)
+sub σ (prod A B)     = prod (sub σ A) (sub σ B)
+sub σ (pair a b)     = pair (sub σ a) (sub σ b)
+sub σ (fst t)        = fst (sub σ t)
+sub σ (snd t)        = snd (sub σ t)
+sub σ (stream A)     = stream (sub σ A)
+sub σ (unf s f)      = unf (sub σ s) (sub σ f)
+sub σ (ucons s)      = ucons (sub σ s)
 
 -- Open a binder: (x. t)[u].
 -- Named helper: pattern-lambdas do not compute when passed to `sub`.
@@ -116,6 +130,13 @@ toPHOAS ρ (rwt e P t)    = rwt (toPHOAS ρ e)
                                (toPHOAS ρ t)
 toPHOAS ρ (def i)        = def i
 toPHOAS ρ (ann e A)      = ann (toPHOAS ρ e) (toPHOAS ρ A)
+toPHOAS ρ (prod A B)     = prod (toPHOAS ρ A) (toPHOAS ρ B)
+toPHOAS ρ (pair a b)     = pair (toPHOAS ρ a) (toPHOAS ρ b)
+toPHOAS ρ (fst t)        = fst (toPHOAS ρ t)
+toPHOAS ρ (snd t)        = snd (toPHOAS ρ t)
+toPHOAS ρ (stream A)     = stream (toPHOAS ρ A)
+toPHOAS ρ (unf s f)      = unf (toPHOAS ρ s) (toPHOAS ρ f)
+toPHOAS ρ (ucons s)      = ucons (toPHOAS ρ s)
 
 toPHOAS0 : ∀ {V : Set} → Tm 0 → PTm V
 toPHOAS0 t = toPHOAS (λ ()) t
@@ -181,6 +202,16 @@ unembedN nxt env (rwt e P t)    =
 unembedN nxt env (def i)        = ok (def i)
 unembedN nxt env (ann e A)      =
   ann <$> unembedN nxt env e ⊛ unembedN nxt env A
+unembedN nxt env (prod A B)     =
+  prod <$> unembedN nxt env A ⊛ unembedN nxt env B
+unembedN nxt env (pair a b)     =
+  pair <$> unembedN nxt env a ⊛ unembedN nxt env b
+unembedN nxt env (fst t)        = fst <$> unembedN nxt env t
+unembedN nxt env (snd t)        = snd <$> unembedN nxt env t
+unembedN nxt env (stream A)     = stream <$> unembedN nxt env A
+unembedN nxt env (unf s f)      =
+  unf <$> unembedN nxt env s ⊛ unembedN nxt env f
+unembedN nxt env (ucons s)      = ucons <$> unembedN nxt env s
 
 unembed : PTm ℕ → Result (Tm 0)
 unembed t = unembedN 0 [] t

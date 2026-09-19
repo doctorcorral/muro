@@ -10,3 +10,4 @@ open import Muro.Syntax public
 open import Muro.Subst public
 open import Muro.Check public
 open import Muro.Example public
+open import Muro.ExampleStream public

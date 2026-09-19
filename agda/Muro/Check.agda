@@ -78,6 +78,8 @@ typOf Γ x = Bind.btyp (lookup Γ x)
 
 ------------------------------------------------------------------------
 -- Recursion state: run and evid structural descent (not spec).
+-- `guarded` is the ν dual of `smaller`: a self-call under the tail of
+-- an unfold pair is productive.
 ------------------------------------------------------------------------
 
 record RecSt (n : ℕ) : Set where
@@ -87,10 +89,11 @@ record RecSt (n : ℕ) : Set where
     smaller : Vec Bool n
     recOk   : Vec Bool n
     nextOk  : Bool
+    guarded : Bool
 
 extRec : ∀ {n} → RecSt n → Bool → Bool → RecSt (suc n)
-extRec (recst sl sm rok _) newSmall newOk =
-  recst sl (newSmall ∷ sm) (newOk ∷ rok) false
+extRec (recst sl sm rok _ g) newSmall newOk =
+  recst sl (newSmall ∷ sm) (newOk ∷ rok) false g
 
 scrutOk : ∀ {n} → RecSt n → Tm n → Bool
 scrutOk rs (var x) = lookup (RecSt.recOk rs) x ∨ lookup (RecSt.smaller rs) x
@@ -189,24 +192,38 @@ nthQty _          _       = fail "recursive-call spine longer than Π telescope"
 -- Weak-head normalisation (β, ι, δ, ann). Fuel is the clock.
 ------------------------------------------------------------------------
 
-whnf : ∀ {n} → ℕ → Sig → Tm n → Tm n
-whnf zero    _ t = t
-whnf (suc k) σ (app f a) with whnf k σ f
-... | lam _ _ t = whnf k σ (inst t a)
-... | f′        = app f′ a
-whnf (suc k) σ (mNat e P z s) with whnf k σ e
-... | ze   = whnf k σ z
-... | su u = whnf k σ (inst s u)
-... | e′   = mNat e′ P z s
-whnf (suc k) σ (mUnit e P u) with whnf k σ e
-... | one = whnf k σ u
-... | e′  = mUnit e′ P u
-whnf (suc k) σ (mEmp e P) = mEmp (whnf k σ e) P
-whnf (suc k) σ (def i) with lookupDef σ i
-... | ok d    = whnf k σ (closed (Def.dbody d))
-... | fail _  = def i
-whnf (suc k) σ (ann e _) = whnf k σ e
-whnf (suc _) _ t = t
+mutual
+  whnf : ∀ {n} → ℕ → Sig → Tm n → Tm n
+  whnf zero    _ t = t
+  whnf (suc k) σ (app f a) with whnf k σ f
+  ... | lam _ _ t = whnf k σ (inst t a)
+  ... | f′        = app f′ a
+  whnf (suc k) σ (mNat e P z s) with whnf k σ e
+  ... | ze   = whnf k σ z
+  ... | su u = whnf k σ (inst s u)
+  ... | e′   = mNat e′ P z s
+  whnf (suc k) σ (mUnit e P u) with whnf k σ e
+  ... | one = whnf k σ u
+  ... | e′  = mUnit e′ P u
+  whnf (suc k) σ (mEmp e P) = mEmp (whnf k σ e) P
+  whnf (suc k) σ (def i) with lookupDef σ i
+  ... | ok d    = whnf k σ (closed (Def.dbody d))
+  ... | fail _  = def i
+  whnf (suc k) σ (ann e _) = whnf k σ e
+  whnf (suc k) σ (fst e) with whnf k σ e
+  ... | pair a _ = whnf k σ a
+  ... | e′       = fst e′
+  whnf (suc k) σ (snd e) with whnf k σ e
+  ... | pair _ b = whnf k σ b
+  ... | e′       = snd e′
+  whnf (suc k) σ (ucons e) = uconsWhnf k σ (whnf k σ e)
+  whnf (suc _) _ t = t
+
+  uconsWhnf : ∀ {n} → ℕ → Sig → Tm n → Tm n
+  uconsWhnf k σ (unf s f) with whnf k σ (app f s)
+  ... | pair h t = pair h (unf t f)
+  ... | _        = ucons (unf s f)
+  uconsWhnf _ _ e = ucons e
 
 isData : ∀ {n} → ℕ → Sig → Tm n → Bool
 isData k σ t with whnf k σ t
@@ -219,11 +236,13 @@ isRunType : ∀ {n} → ℕ → Sig → Tm n → Bool
 isRunType k σ t = runTy (whnf k σ t)
   where
     runTy : ∀ {n} → Tm n → Bool
-    runTy nat        = true
-    runTy unit       = true
-    runTy empty      = true
-    runTy (pi _ _ B) = runTy B
-    runTy _          = false
+    runTy nat         = true
+    runTy unit        = true
+    runTy empty       = true
+    runTy (pi _ _ B)  = runTy B
+    runTy (stream A)  = runTy A
+    runTy (prod A B)  = runTy A ∧ runTy B
+    runTy _           = false
 
 ------------------------------------------------------------------------
 -- Conversion on weak-head normal forms.
@@ -252,6 +271,13 @@ synEq rfl            rfl            = true
 synEq (rwt e P t)    (rwt e′ P′ t′) = synEq e e′ ∧ synEq P P′ ∧ synEq t t′
 synEq (def i)        (def j)        = i ≡ᵇ j
 synEq (ann e A)      (ann e′ A′)    = synEq e e′ ∧ synEq A A′
+synEq (prod A B)     (prod A′ B′)   = synEq A A′ ∧ synEq B B′
+synEq (pair a b)     (pair a′ b′)   = synEq a a′ ∧ synEq b b′
+synEq (fst t)        (fst t′)       = synEq t t′
+synEq (snd t)        (snd t′)       = synEq t t′
+synEq (stream A)     (stream A′)    = synEq A A′
+synEq (unf s f)      (unf s′ f′)    = synEq s s′ ∧ synEq f f′
+synEq (ucons s)      (ucons s′)     = synEq s s′
 synEq _              _              = false
 
 ctorHead : ∀ {n} → Tm n → Bool
@@ -308,6 +334,13 @@ mutual
   convN k σ (rwt e P t)   (rwt e′ P′ t′) =
     conv k σ e e′ >> conv k σ P P′ >> conv k σ t t′
   convN k σ (ann e A)     (ann e′ A′)   = conv k σ e e′ >> conv k σ A A′
+  convN k σ (prod A B)    (prod A′ B′)  = conv k σ A A′ >> conv k σ B B′
+  convN k σ (pair a b)    (pair a′ b′)  = conv k σ a a′ >> conv k σ b b′
+  convN k σ (fst t)       (fst t′)      = conv k σ t t′
+  convN k σ (snd t)       (snd t′)      = conv k σ t t′
+  convN k σ (stream A)    (stream A′)   = conv k σ A A′
+  convN k σ (unf s f)     (unf s′ f′)   = conv k σ s s′ >> conv k σ f f′
+  convN k σ (ucons s)     (ucons s′)    = conv k σ s s′
   convN _ _ u             v             =
     fail ("cannot convert " ++ showTm u ++ " ≁ " ++ showTm v)
 
@@ -330,6 +363,11 @@ data _≈[_]_ {n} : Tm n → Sig → Tm n → Set where
   ≈-cong-pi  : ∀ {σ q A A′ B B′} → A ≈[ σ ] A′ → B ≈[ σ ] B′ → pi q A B ≈[ σ ] pi q A′ B′
   ≈-cong-idt : ∀ {σ A A′ a a′ b b′} → A ≈[ σ ] A′ → a ≈[ σ ] a′ → b ≈[ σ ] b′ →
                idt A a b ≈[ σ ] idt A′ a′ b′
+  ≈-ιfst : ∀ {σ a b} → fst (pair a b) ≈[ σ ] a
+  ≈-ιsnd : ∀ {σ a b} → snd (pair a b) ≈[ σ ] b
+  ≈-ιuncons : ∀ {σ s f h t} →
+              app f s ≈[ σ ] pair h t →
+              ucons (unf s f) ≈[ σ ] pair h (unf t f)
 
 ------------------------------------------------------------------------
 -- Spec: bidirectional judgments.
@@ -430,6 +468,37 @@ data _,_⊢[_]_⇒_ σ Γ where
     → σ , Γ ⊢[ m ] e ⇐ A
     → σ , Γ ⊢[ m ] ann e A ⇒ A
 
+  ⇒-prod : ∀ {A B}
+    → σ , Γ ⊢ A wf
+    → σ , Γ ⊢ B wf
+    → σ , Γ ⊢[ spec ] prod A B ⇒ typ
+
+  ⇒-pair : ∀ {m A B a b}
+    → σ , Γ ⊢[ m ] a ⇐ A
+    → σ , Γ ⊢[ m ] b ⇐ B
+    → σ , Γ ⊢[ m ] pair a b ⇒ prod A B
+
+  ⇒-fst : ∀ {m A B t}
+    → σ , Γ ⊢[ m ] t ⇒ prod A B
+    → σ , Γ ⊢[ m ] fst t ⇒ A
+
+  ⇒-snd : ∀ {m A B t}
+    → σ , Γ ⊢[ m ] t ⇒ prod A B
+    → σ , Γ ⊢[ m ] snd t ⇒ B
+
+  ⇒-stream : ∀ {A}
+    → σ , Γ ⊢ A wf
+    → σ , Γ ⊢[ spec ] stream A ⇒ typ
+
+  ⇒-unf : ∀ {m S A seed f}
+    → σ , Γ ⊢[ m ] seed ⇐ S
+    → σ , Γ ⊢[ m ] f ⇐ pi affine S (prod (wk A) (wk S))
+    → σ , Γ ⊢[ m ] unf seed f ⇒ stream A
+
+  ⇒-ucons : ∀ {m A s}
+    → σ , Γ ⊢[ m ] s ⇐ stream A
+    → σ , Γ ⊢[ m ] ucons s ⇒ prod A (stream A)
+
 data _,_⊢[_]_⇐_ σ Γ where
   ⇐-conv : ∀ {m e A B}
     → σ , Γ ⊢[ m ] e ⇒ B
@@ -462,6 +531,61 @@ viewId k σ t with whnf k σ t
 ... | idt A a b = ok (A , a , b)
 ... | t′        = fail ("expected Id, got " ++ showTm t′)
 
+viewProd : ∀ {n} → ℕ → Sig → Tm n → Result (Tm n × Tm n)
+viewProd k σ t with whnf k σ t
+... | prod A B = ok (A , B)
+... | t′       = fail ("expected ×, got " ++ showTm t′)
+
+viewStream : ∀ {n} → ℕ → Sig → Tm n → Result (Tm n)
+viewStream k σ t with whnf k σ t
+... | stream A = ok A
+... | t′       = fail ("expected Stream, got " ++ showTm t′)
+
+hasSelf : ∀ {n} → Maybe ℕ → Tm n → Bool
+hasSelf (just j) (def i) = i ≡ᵇ j
+hasSelf s (app f a)      = hasSelf s f ∨ hasSelf s a
+hasSelf s (su t)         = hasSelf s t
+hasSelf s (pair a b)     = hasSelf s a ∨ hasSelf s b
+hasSelf s (fst t)        = hasSelf s t
+hasSelf s (snd t)        = hasSelf s t
+hasSelf s (unf u f)      = hasSelf s u ∨ hasSelf s f
+hasSelf s (ucons u)      = hasSelf s u
+hasSelf s (lam _ A t)    = hasSelf s A ∨ hasSelf s t
+hasSelf s (pi _ A B)     = hasSelf s A ∨ hasSelf s B
+hasSelf s (prod A B)     = hasSelf s A ∨ hasSelf s B
+hasSelf s (stream A)     = hasSelf s A
+hasSelf s (mNat e P z u) = hasSelf s e ∨ hasSelf s P ∨ hasSelf s z ∨ hasSelf s u
+hasSelf s (mEmp e P)     = hasSelf s e ∨ hasSelf s P
+hasSelf s (mUnit e P u)  = hasSelf s e ∨ hasSelf s P ∨ hasSelf s u
+hasSelf s (idt A a b)    = hasSelf s A ∨ hasSelf s a ∨ hasSelf s b
+hasSelf s (rwt e P t)    = hasSelf s e ∨ hasSelf s P ∨ hasSelf s t
+hasSelf s (ann e A)      = hasSelf s e ∨ hasSelf s A
+hasSelf _ _              = false
+
+-- On run/evid, unfold's λ-body must be a pair and the head must not
+-- contain a self-call. spec skips the test.
+checkUnfold : ∀ {n} → ℕ → Sig → Mode → RecSt n → Tm n → Result ⊤
+checkUnfold _ _ spec _ _ = ok tt
+checkUnfold k σ _ rs f = go (whnf k σ f)
+  where
+    go : ∀ {n} → Tm n → Result ⊤
+    go (lam _ _ t) = go t
+    go (pair h _)  =
+      if hasSelf (RecSt.self rs) h
+      then fail "unguarded recursive call"
+      else ok tt
+    go _ = fail "unfold body must be a pair"
+
+checkNu : ∀ {n} → Mode → Tm n → Tm n → Result ⊤
+checkNu spec _ _ = ok tt
+checkNu _    T t = go T t
+  where
+    go : ∀ {n} → Tm n → Tm n → Result ⊤
+    go (pi _ _ B) (lam _ _ u) = go B u
+    go (stream _) (unf _ _)   = ok tt
+    go (stream _) _           = fail "stream value must be an unfold"
+    go _          _           = ok tt
+
 motSucσ : ∀ {n} → Fin (suc n) → Tm (suc n)
 motSucσ zero    = su (var zero)
 motSucσ (suc i) = var (suc i)
@@ -488,7 +612,9 @@ checkRec {n} k σ m rs t = go (apps t)
     go (def i , args) =
       case RecSt.self rs of λ where
         nothing  → ok tt
-        (just j) → if i ≡ᵇ j then descend i 0 args else ok tt
+        (just j) → if i ≡ᵇ j
+          then (if RecSt.guarded rs then ok tt else descend i 0 args)
+          else ok tt
     go _ = ok tt
 
 mutual
@@ -660,6 +786,58 @@ mutual
     checkTy k σ rs Γ A >>
     check k σ rs Γ m e A >>= λ u → ok (A , u)
 
+  -- ⇒-prod
+  infer′ k σ rs Γ run  (prod _ _) = fail "no promotion: × is an erased term"
+  infer′ k σ rs Γ evid (prod _ _) = fail "no promotion: × is an erased term"
+  infer′ k σ rs Γ spec (prod A B) =
+    checkTy k σ rs Γ A >>
+    checkTy k σ rs Γ B >>
+    ok (typ , u0s)
+
+  -- ⇒-stream
+  infer′ k σ rs Γ run  (stream _) = fail "no promotion: Stream is an erased term"
+  infer′ k σ rs Γ evid (stream _) = fail "no promotion: Stream is an erased term"
+  infer′ k σ rs Γ spec (stream A) =
+    checkTy k σ rs Γ A >>
+    ok (typ , u0s)
+
+  -- ⇒-pair
+  infer′ k σ rs Γ m (pair a b) =
+    infer k σ rs Γ m a >>= λ (A , au) →
+    infer k σ rs Γ m b >>= λ (B , bu) →
+    combine m au bu >>= λ uses →
+    ok (prod A B , uses)
+
+  -- ⇒-fst
+  infer′ k σ rs Γ m (fst t) =
+    infer k σ rs Γ m t >>= λ (T , u) →
+    viewProd k σ T >>= λ (A , _) →
+    ok (A , u)
+
+  -- ⇒-snd
+  infer′ k σ rs Γ m (snd t) =
+    infer k σ rs Γ m t >>= λ (T , u) →
+    viewProd k σ T >>= λ (_ , B) →
+    ok (B , u)
+
+  -- ⇒-unf
+  infer′ k σ rs Γ m (unf seed f) =
+    infer k σ rs Γ m seed >>= λ (S , seedU) →
+    infer k σ rs Γ m f >>= λ (ft , fu) →
+    viewPi k σ ft >>= λ (_ , S′ , Body) →
+    conv k σ S′ S >>
+    viewProd k σ (inst Body seed) >>= λ (A , S2) →
+    conv k σ S2 S >>
+    checkUnfold k σ m rs f >>
+    combine m seedU fu >>= λ uses →
+    ok (stream A , uses)
+
+  -- ⇒-ucons
+  infer′ k σ rs Γ m (ucons s) =
+    infer k σ rs Γ m s >>= λ (T , u) →
+    viewStream k σ T >>= λ A →
+    ok (prod A (stream A) , u)
+
   -- ⇐-lam
   check′ k σ rs Γ m (lam q A t) T with viewPi k σ T
   ... | fail _ = infer k σ rs Γ m (lam q A t) >>= λ (B , u) → conv k σ B T >> ok u
@@ -689,16 +867,18 @@ mutual
 ------------------------------------------------------------------------
 
 emptyRec : RecSt 0
-emptyRec = recst nothing [] [] false
+emptyRec = recst nothing [] [] false false
 
 defRec : ℕ → RecSt 0
-defRec i = recst (just i) [] [] true
+defRec i = recst (just i) [] [] true false
 
 checkDef : ℕ → Sig → ℕ → Result ⊤
 checkDef k σ i =
   lookupDef σ i >>= λ d →
   tag (Def.dname d ++ " type") (checkTy k σ emptyRec [] (Def.dtype d)) >>
   tag (Def.dname d ++ " body") (check k σ (defRec i) [] (Def.dmode d) (Def.dbody d) (Def.dtype d)) >>
+  tag (Def.dname d ++ " productivity")
+      (checkNu (Def.dmode d) (Def.dtype d) (Def.dbody d)) >>
   ok tt
 
 checkSig : ℕ → Sig → Result ⊤

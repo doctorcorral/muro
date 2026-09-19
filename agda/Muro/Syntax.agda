@@ -47,6 +47,15 @@ data Tm (n : ℕ) : Set where
   rwt   : (eq : Tm n) (mot : Tm (suc n)) (body : Tm n) → Tm n
   def   : ℕ → Tm n                             -- global definition
   ann   : Tm n → Tm n → Tm n                   -- {e : A}
+  -- products, sufficient for uncons : Stream A → A × Stream A
+  prod  : Tm n → Tm n → Tm n
+  pair  : Tm n → Tm n → Tm n
+  fst   : Tm n → Tm n
+  snd   : Tm n → Tm n
+  -- ν : Stream A, unfold seed f, uncons s
+  stream : Tm n → Tm n
+  unf    : Tm n → Tm n → Tm n                  -- unfold seed (λ s → (head, next))
+  ucons  : Tm n → Tm n
 
 ------------------------------------------------------------------------
 -- PHOAS terms. Binders are V → PTm V, not Tm → Tm.
@@ -72,6 +81,13 @@ data PTm (V : Set) : Set where
   rwt   : PTm V → (V → PTm V) → PTm V → PTm V
   def   : ℕ → PTm V
   ann   : PTm V → PTm V → PTm V
+  prod  : PTm V → PTm V → PTm V
+  pair  : PTm V → PTm V → PTm V
+  fst   : PTm V → PTm V
+  snd   : PTm V → PTm V
+  stream : PTm V → PTm V
+  unf    : PTm V → PTm V → PTm V
+  ucons  : PTm V → PTm V
 
 ------------------------------------------------------------------------
 -- Global definition identifiers (closed book).
@@ -123,3 +139,10 @@ showTm rfl          = "refl"
 showTm (rwt e P t)  = "rewrite " ++ showTm e ++ " motive " ++ showTm P ++ " in " ++ showTm t
 showTm (def i)      = showDef i
 showTm (ann e A)    = "{" ++ showTm e ++ " : " ++ showTm A ++ "}"
+showTm (prod A B)   = "(" ++ showTm A ++ " × " ++ showTm B ++ ")"
+showTm (pair a b)   = "(" ++ showTm a ++ ", " ++ showTm b ++ ")"
+showTm (fst t)      = "fst(" ++ showTm t ++ ")"
+showTm (snd t)      = "snd(" ++ showTm t ++ ")"
+showTm (stream A)   = "Stream " ++ showTm A
+showTm (unf s f)    = "unfold " ++ showTm s ++ " " ++ showTm f
+showTm (ucons s)    = "uncons " ++ showTm s
