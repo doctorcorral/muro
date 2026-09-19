@@ -15,3 +15,4 @@ import Muro.ExampleEither
 import Muro.ExampleAlways
 import Muro.ExampleBisim
 import Muro.ExampleList
+import Muro.ExampleVec

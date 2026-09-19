@@ -67,7 +67,7 @@ lengthTm-ok = is-ok _
 
 listDecl : DataDecl
 listDecl =
-  mkData "List" (affine ∷ [])
+  mkData "List" (affine ∷ []) []
     ( mkCtor "nil"  (out nilTy-ok)  ∷
       mkCtor "cons" (out consTy-ok) ∷
       [] )

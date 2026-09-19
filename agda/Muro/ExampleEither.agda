@@ -102,7 +102,7 @@ evenDecTm-ok = is-ok _
 
 eitherDecl : DataDecl
 eitherDecl =
-  mkData "Either" (affine ∷ affine ∷ [])
+  mkData "Either" (affine ∷ affine ∷ []) []
     ( mkCtor "left"  (out leftTy-ok)  ∷
       mkCtor "right" (out rightTy-ok) ∷
       [] )

@@ -13,12 +13,13 @@ module Muro.Check where
 open import Data.Bool.Base
   using (Bool; true; false; _∧_; _∨_; not; if_then_else_)
 open import Data.Empty using (⊥)
-open import Data.Fin.Base using (Fin; zero; suc)
-open import Data.List.Base as List using (List; []; _∷_; length)
+open import Data.Fin.Base using (Fin; zero; suc; toℕ)
+open import Data.List.Base as List using (List; []; _∷_; length; take; drop)
 open import Data.Maybe.Base using (Maybe; just; nothing)
-open import Data.Nat.Base using (ℕ; zero; suc; _≡ᵇ_)
+open import Data.Nat.Base using (ℕ; zero; suc; _≡ᵇ_; _<ᵇ_; _+_; _∸_)
 open import Data.Nat.Show using (show)
 open import Data.Product.Base using (_×_; _,_; proj₁; proj₂)
+open import Agda.Builtin.String using (primStringEquality)
 open import Data.String.Base using (String; _++_)
 open import Data.Unit.Base using (⊤; tt)
 open import Data.Vec.Base as Vec using (Vec; []; _∷_; lookup; map)
@@ -43,19 +44,21 @@ record Def : Set where
     dtype : Tm 0
     dbody : Tm 0
 
--- Constructor type is closed: Π params → Π args → D params.
+-- Constructor type is closed: Π params → Π args → D params indices.
 record Ctor : Set where
   constructor mkCtor
   field
     cname : String
     ctype : Tm 0
 
--- Non-indexed data. Parameters are binders before `: Type`.
+-- Parameters are binders before `:`. Indices are the telescope after `:`
+-- before `Type`. Index types are closed (weakened under the parameter Πs).
 record DataDecl : Set where
   constructor mkData
   field
     dname : String
     pqtys : List Qty
+    idxs  : List (Qty × Tm 0)
     ctors : List Ctor
 
 record Sig : Set where
@@ -84,9 +87,13 @@ lookupCtor d i = lookupList (DataDecl.ctors d) i
 nparams : DataDecl → ℕ
 nparams d = length (DataDecl.pqtys d)
 
-dtyType : ∀ {n} → List Qty → Tm n
-dtyType []       = typ
-dtyType (q ∷ qs) = pi q typ (dtyType qs)
+nidxs : DataDecl → ℕ
+nidxs d = length (DataDecl.idxs d)
+
+dtyType : ∀ {n} → List Qty → List (Qty × Tm 0) → Tm n
+dtyType [] []              = typ
+dtyType (q ∷ qs) ixs       = pi q typ (dtyType qs ixs)
+dtyType [] ((q , T) ∷ ixs) = pi q (closed T) (dtyType [] ixs)
 
 ------------------------------------------------------------------------
 -- Contexts. Newest binder is index zero; every type is weakened to n.
@@ -302,8 +309,14 @@ mutual
   ... | (nat , [])   = true
   ... | (unit , [])  = true
   ... | (empty , []) = true
-  ... | (dty _ , as) = allData k σ as
+  ... | (dty i , as) = dataParamsData k σ i as
   ... | _            = false
+
+  {-# TERMINATING #-}
+  dataParamsData : ∀ {n} → ℕ → Sig → ℕ → List (Tm n) → Bool
+  dataParamsData k σ i as with lookupData σ i
+  ... | fail _ = false
+  ... | ok d   = allData k σ (take (nparams d) as)
 
 {-# TERMINATING #-}
 runTy : ∀ {n} → Tm n → Bool
@@ -540,12 +553,11 @@ data _,_⊢[_]_⇒_ σ Γ where
 
   ⇒-dty : ∀ {i d}
     → lookupData σ i ≡ ok d
-    → σ , Γ ⊢[ spec ] dty i ⇒ dtyType (DataDecl.pqtys d)
+    → σ , Γ ⊢[ spec ] dty i ⇒ dtyType (DataDecl.pqtys d) (DataDecl.idxs d)
 
-  ⇒-mData : ∀ {m di params e P bs d}
+  ⇒-mData : ∀ {m di params idxs e P bs d}
     → lookupData σ di ≡ ok d
-    → σ , Γ ⊢[ m ] e ⇐ appsFrom (dty di) params
-    → σ , ext Γ affine (appsFrom (dty di) params) ⊢ P wf
+    → σ , Γ ⊢[ m ] e ⇐ appsFrom (dty di) (List._++_ params idxs)
     → σ , Γ ⊢[ m ] mData e P bs ⇒ inst P e
 
   ⇒-mNat : ∀ {m e P z s}
@@ -662,10 +674,19 @@ viewNu k σ t with whnf k σ t
 ... | nu F = ok F
 ... | t′   = fail ("expected ν, got " ++ showTm t′)
 
-viewData : ∀ {n} → ℕ → Sig → Tm n → Result (ℕ × List (Tm n))
+splitData : ∀ {n} → Sig → ℕ → List (Tm n) → Result (ℕ × List (Tm n) × List (Tm n))
+splitData σ i args =
+  lookupData σ i >>= λ d →
+  let np = nparams d
+      ni = nidxs d
+  in guard "data applied to the wrong number of arguments"
+       (length args ≡ᵇ (np + ni)) >>
+  ok (i , take np args , drop np args)
+
+viewData : ∀ {n} → ℕ → Sig → Tm n → Result (ℕ × List (Tm n) × List (Tm n))
 viewData k σ t with apps (whnf k σ t)
-... | (dty i , params) = ok (i , params)
-... | t′               = fail ("expected data type, got " ++ showTm (proj₁ t′))
+... | (dty i , args) = splitData σ i args
+... | t′             = fail ("expected data type, got " ++ showTm (proj₁ t′))
 
 isDType : ∀ {n} → ℕ → Tm n → Bool
 isDType i t with proj₁ (apps t)
@@ -808,27 +829,36 @@ instParams k σ t (p ∷ ps) with whnf k σ t
 ... | pi _ _ B = instParams k σ (inst B p) ps
 ... | _        = fail "constructor type has too few parameter binders"
 
-checkTelPos : ∀ {n} → ℕ → Tm n → Result ⊤
-checkTelPos i (pi _ A B) =
+checkTelPos : ∀ {n} → ℕ → ℕ → ℕ → Tm n → Result ⊤
+checkTelPos i np ni (pi _ A B) =
   guard "constructor is not strictly positive" (posArg i A) >>
-  checkTelPos i B
-checkTelPos i t =
-  guard "constructor does not target the data type" (isDType i t)
+  checkTelPos i np ni B
+checkTelPos i np ni t =
+  guard "constructor does not target the data type" (isDType i t) >>
+  guard "constructor target has the wrong number of arguments"
+    (length (proj₂ (apps t)) ≡ᵇ (np + ni))
 
 -- Skip nparams Π-binders, then check the remaining telescope.
-checkCtorRest : ∀ {n} → ℕ → ℕ → Tm n → Result ⊤
-checkCtorRest i (suc np) (pi _ _ B) = checkCtorRest i np B
-checkCtorRest _ (suc _)  _          = fail "constructor type has too few parameter binders"
-checkCtorRest i zero     t          = checkTelPos i t
+checkCtorRest : ∀ {n} → ℕ → ℕ → ℕ → Tm n → Result ⊤
+checkCtorRest i np ni t = skip np t
+  where
+    skip : ∀ {n} → ℕ → Tm n → Result ⊤
+    skip (suc k) (pi _ _ B) = skip k B
+    skip (suc _) _          = fail "constructor type has too few parameter binders"
+    skip zero    u          = checkTelPos i np ni u
 
 checkRec : ∀ {n} → ℕ → Sig → Mode → RecSt n → Tm n → Result ⊤
 checkRec _ _ spec _ _ = ok tt
 checkRec {n} k σ m rs t = go (apps t)
   where
     descend : ℕ → ℕ → List (Tm n) → Bool → Result ⊤
-    descend _ _ [] seenComp =
-      if seenComp then fail "recursive call does not descend on a smaller argument"
-      else ok tt
+    descend i j [] seenComp =
+      lookupDef σ i >>= λ d →
+      case nthQty (Def.dtype d) j of λ where
+        (ok _)   → ok tt
+        (fail _) →
+          if seenComp then fail "recursive call does not descend on a smaller argument"
+          else ok tt
     descend i j (a ∷ as) seenComp =
       lookupDef σ i >>= λ d →
       nthQty (Def.dtype d) j >>= λ q →
@@ -846,6 +876,65 @@ checkRec {n} k σ m rs t = go (apps t)
           then (if RecSt.guarded rs then ok tt else descend i 0 args false)
           else ok tt
     go _ = ok tt
+
+-- Index clash / forcing. Expected indices live at n; the constructor
+-- target may mention ctor-argument variables (depth d). No metavars:
+-- suc is inverted, a rigid mismatch is impossible, a variable is free.
+{-# TERMINATING #-}
+matchIdx : ∀ {n m} → ℕ → Sig → ℕ → Tm n → Tm m → Result (List (ℕ × Tm n))
+matchIdx k σ d e t with whnf k σ e | whnf k σ t
+... | su e′ | su t′ = matchIdx k σ d e′ t′
+... | ze    | ze    = ok []
+... | su _  | ze    = fail "impossible constructor"
+... | ze    | su _  = fail "impossible constructor"
+... | e′    | var j =
+      if toℕ j <ᵇ d
+      then ok ((d ∸ suc (toℕ j) , e′) ∷ [])
+      else ok []
+... | _ | _ = ok []
+
+matchIdxs : ∀ {n m} → ℕ → Sig → ℕ → List (Tm n) → List (Tm m) → Result (List (ℕ × Tm n))
+matchIdxs _ _ _ []       []       = ok []
+matchIdxs k σ d (e ∷ es) (t ∷ ts) =
+  matchIdx k σ d e t >>= λ fs →
+  matchIdxs k σ d es ts >>= λ gs →
+  ok (List._++_ fs gs)
+matchIdxs _ _ _ _ _ = fail "index telescope length mismatch"
+
+countPis : ∀ {n} → Tm n → ℕ
+countPis (pi _ _ B) = suc (countPis B)
+countPis _          = 0
+
+lookupForce : ∀ {n} → List (ℕ × Tm n) → ℕ → Maybe (Tm n)
+lookupForce [] _ = nothing
+lookupForce ((j , u) ∷ rest) i with i ≡ᵇ j
+... | true  = just u
+... | false = lookupForce rest i
+
+forcesFor : ∀ {n} → ℕ → List (ℕ × Tm n) → List (Maybe (Tm n))
+forcesFor zero    _  = []
+forcesFor (suc k) fs = lookupForce fs 0 ∷ forcesFor k (shift fs)
+  where
+    shift : ∀ {n} → List (ℕ × Tm n) → List (ℕ × Tm n)
+    shift [] = []
+    shift ((zero  , _) ∷ rest) = shift rest
+    shift ((suc j , u) ∷ rest) = (j , u) ∷ shift rest
+
+analyzeForces : ∀ {n} → ℕ → Sig → ℕ → List (Tm n) → Tm n → Result (List (Maybe (Tm n)))
+analyzeForces {n} k σ np expected tel =
+  walk 0 tel >>= λ pairs → ok (forcesFor (countPis tel) pairs)
+  where
+    walk : ∀ {m} → ℕ → Tm m → Result (List (ℕ × Tm n))
+    walk d (pi _ _ B) = walk (suc d) B
+    walk d t          = matchIdxs k σ d expected (drop np (proj₂ (apps (whnf k σ t))))
+
+wkForce : ∀ {n} → Maybe (Tm n) → Maybe (Tm (suc n))
+wkForce (just t) = just (wk t)
+wkForce nothing  = nothing
+
+wkForces : ∀ {n} → List (Maybe (Tm n)) → List (Maybe (Tm (suc n)))
+wkForces []       = []
+wkForces (x ∷ xs) = wkForce x ∷ wkForces xs
 
 mutual
   {-# TERMINATING #-}
@@ -871,34 +960,40 @@ mutual
   headTailU (u ∷ us) = u , us
 
   {-# TERMINATING #-}
-  checkCtorArgs : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → List (Tm n) → Result (UseVec n)
-  checkCtorArgs k σ rs Γ m ty [] with whnf k σ ty
+  checkCtorArgs : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → List (Tm n) → Tm n → Result (UseVec n)
+  checkCtorArgs k σ rs Γ m ty [] expected with whnf k σ ty
   ... | pi _ _ _ = fail "too few constructor arguments"
-  ... | _        = ok u0s
-  checkCtorArgs k σ rs Γ m ty (a ∷ as) with whnf k σ ty
+  ... | ty′      = conv k σ ty′ expected >> ok u0s
+  checkCtorArgs k σ rs Γ m ty (a ∷ as) expected with whnf k σ ty
   ... | pi q A B =
     let am = if eqQty q erased then spec else m
     in check k σ rs Γ am a A >>= λ au →
-    checkCtorArgs k σ rs Γ m (inst B a) as >>= λ asu →
+    checkCtorArgs k σ rs Γ m (inst B a) as expected >>= λ asu →
     if eqQty q erased
     then (if eqMode m spec then ok u0s else ok asu)
     else combine m au asu
   ... | _ = fail "too many constructor arguments"
 
   {-# TERMINATING #-}
-  checkCtorApp : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → List (Tm n) → List (Tm n) → Result (UseVec n)
-  checkCtorApp k σ rs Γ m di ci params args =
+  checkCtorApp : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → List (Tm n) → List (Tm n) → Tm n → Result (UseVec n)
+  checkCtorApp k σ rs Γ m di ci params args expected =
     lookupData σ di >>= λ d →
     lookupCtor d ci >>= λ c →
     instParams k σ (closed (Ctor.ctype c)) params >>= λ rest →
-    checkCtorArgs k σ rs Γ m rest args
+    checkCtorArgs k σ rs Γ m rest args expected
 
   {-# TERMINATING #-}
-  checkBr : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Tm n → Tm n → Tm n → List (Tm n) → Result (UseVec n)
-  checkBr k σ rs Γ m di ci ty br mot args with whnf k σ ty
+  checkBr : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Tm n → Tm n → Tm n → List (Tm n) → List (Maybe (Tm n)) → Result (UseVec n)
+  checkBr k σ rs Γ m di ci ty br mot args forces with whnf k σ ty
   ... | pi q A B =
-    case br of λ where
-      (lam q′ A′ t) →
+    case (forces , br) of λ where
+      (just u ∷ fs , lam q′ A′ t) →
+        guard "λ/Π quantity mismatch" (eqQty q q′) >>
+        checkTy k σ rs Γ A′ >>
+        conv k σ A′ A >>
+        checkBr k σ rs Γ m di ci (inst B u) (inst t u) mot
+          (List._++_ args (u ∷ [])) fs
+      (nothing ∷ fs , lam q′ A′ t) →
         guard "λ/Π quantity mismatch" (eqQty q q′) >>
         checkTy k σ rs Γ A′ >>
         conv k σ A′ A >>
@@ -907,22 +1002,71 @@ mutual
             rs1  = extRec rs rec? rec?
             rs′  = if eqQty q erased then keepNext rs rs1 else rs1
             args′ = List._++_ (renList suc args) (var zero ∷ [])
-        in checkBr k σ rs′ (ext Γ q A) m di ci B t (wk mot) args′ >>= λ uses →
+        in checkBr k σ rs′ (ext Γ q A) m di ci B t (wk mot) args′ (wkForces fs) >>= λ uses →
         let (u₀ , us) = headTailU uses
         in checkBound m q u₀ >> ok us
-      _ → fail "match branch expected a λ for a constructor argument"
-  ... | _ = check k σ rs Γ m br (app mot (appsFrom (ctor di ci) args))
+      (_ ∷ _ , _) → fail "match branch expected a λ for a constructor argument"
+      ([] , _)    → fail "constructor telescope / force list mismatch"
+  ... | ty′ =
+    check k σ rs Γ m br
+      (appsFrom mot
+        (List._++_ (drop (nparamsOf σ di) (proj₂ (apps ty′)))
+          (appsFrom (ctor di ci) args ∷ [])))
+
+  nparamsOf : Sig → ℕ → ℕ
+  nparamsOf σ i with lookupData σ i
+  ... | ok d   = nparams d
+  ... | fail _ = 0
 
   {-# TERMINATING #-}
-  checkBranches : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → List (Tm n) → Tm (suc n) → ℕ → List Ctor → List (Tm n) → Result (UseVec n)
-  checkBranches _ _ _ _ _ _ _ _ _ [] [] = ok u0s
-  checkBranches k σ rs Γ m di params mot ci (c ∷ cs) (b ∷ bs) =
+  checkBranches : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → List (Tm n) → List (Tm n) → Tm n → ℕ → List Ctor → List (Tm n) → Result (UseVec n)
+  checkBranches _ _ _ _ _ _ _ _ _ _ [] [] = ok u0s
+  checkBranches k σ rs Γ m di params idxs mot ci (c ∷ cs) bs =
     instParams k σ (closed (Ctor.ctype c)) params >>= λ rest →
-    let motFun = lam affine (appsFrom (dty di) params) mot
-    in checkBr k σ rs Γ m di ci rest b motFun [] >>= λ u →
-    checkBranches k σ rs Γ m di params mot (suc ci) cs bs >>= λ v →
-    ok (combineAlt m u v)
-  checkBranches _ _ _ _ _ _ _ _ _ _ _ = fail "match branch count does not match constructors"
+    case analyzeForces k σ (nparamsOf σ di) idxs rest of λ where
+      (fail e) →
+        if clashMsg e
+        then (case bs of λ where
+          []        → fail ("missing branch for " ++ Ctor.cname c)
+          (_ ∷ bs′) →
+            checkBranches k σ rs Γ m di params idxs mot (suc ci) cs bs′)
+        else fail e
+      (ok forces) →
+        case bs of λ where
+          []        → fail ("missing branch for " ++ Ctor.cname c)
+          (b ∷ bs′) →
+            checkBr k σ rs Γ m di ci rest b mot [] forces >>= λ u →
+            checkBranches k σ rs Γ m di params idxs mot (suc ci) cs bs′ >>= λ v →
+            ok (combineAlt m u v)
+  checkBranches _ _ _ _ _ _ _ _ _ _ [] (_ ∷ _) =
+    fail "match branch count does not match constructors"
+
+  clashMsg : String → Bool
+  clashMsg e = primStringEquality e "impossible constructor"
+
+  firstMotLam : ∀ {n} → ℕ → DataDecl → List (Tm n) → Tm (suc n) → Tm n
+  firstMotLam di d params P with DataDecl.idxs d
+  ... | []          = lam affine (appsFrom (dty di) params) P
+  ... | (q , T) ∷ _ = lam q (closed T) P
+
+  motiveTail : ∀ {n} → ℕ → List (Tm n) → List (Qty × Tm 0) → Tm n
+  motiveTail di args []             = pi affine (appsFrom (dty di) args) typ
+  motiveTail di args ((q , T) ∷ is) =
+    pi q (closed T) (motiveTail di (List._++_ (renList suc args) (var zero ∷ [])) is)
+
+  {-# TERMINATING #-}
+  checkMotive : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → ℕ → List (Tm n) → List (Tm n) → Tm (suc n) → Result ⊤
+  checkMotive k σ rs Γ di params idxs P =
+    lookupData σ di >>= λ d →
+    case DataDecl.idxs d of λ where
+      [] →
+        checkTy k σ (extRec rs false false)
+          (ext Γ affine (appsFrom (dty di) params)) P
+      ((q , T) ∷ rest) →
+        let Γ1 = ext Γ q (closed T)
+            tail = motiveTail di (List._++_ (renList suc params) (var zero ∷ [])) rest
+        in check k σ (extRec rs false false) Γ1 spec P tail >>= λ _ → ok tt
+
 
   -- ⇒-var-run / ⇒-var-evid / ⇒-var-spec
   infer′ k σ rs Γ run (var x) with qtyOf Γ x
@@ -1034,7 +1178,7 @@ mutual
   infer′ k σ rs Γ evid (dty _) = fail "no promotion: a data former is an erased term"
   infer′ k σ rs Γ spec (dty i) =
     lookupData σ i >>= λ d →
-    ok (dtyType (DataDecl.pqtys d) , u0s)
+    ok (dtyType (DataDecl.pqtys d) (DataDecl.idxs d) , u0s)
 
   -- constructors are checked (⇐-ctor)
   infer′ k σ rs Γ m (ctor _ _) = fail "constructor requires an expected data type"
@@ -1042,15 +1186,13 @@ mutual
   -- ⇒-mData
   infer′ k σ rs Γ m (mData e P bs) =
     infer k σ rs Γ m e >>= λ (et , eu) →
-    viewData k σ et >>= λ (di , params) →
+    viewData k σ et >>= λ (di , params , idxs) →
     lookupData σ di >>= λ d →
-    guard "match branch count does not match constructors"
-      (length bs ≡ᵇ length (DataDecl.ctors d)) >>
-    checkTy k σ (extRec rs false false)
-      (ext Γ affine (appsFrom (dty di) params)) P >>
-    checkBranches k σ rs Γ m di params P 0 (DataDecl.ctors d) bs >>= λ bu →
+    checkMotive k σ rs Γ di params idxs P >>
+    let motFun = firstMotLam di d params P
+    in checkBranches k σ rs Γ m di params idxs motFun 0 (DataDecl.ctors d) bs >>= λ bu →
     combine m eu bu >>= λ uses →
-    ok (inst P e , uses)
+    ok (appsFrom motFun (List._++_ idxs (e ∷ [])) , uses)
 
   -- ⇒-mNat
   infer′ k σ rs Γ m (mNat e P z s) =
@@ -1203,9 +1345,10 @@ mutual
 
   -- ⇐-ctor / ⇐-conv (default)
   check′ k σ rs Γ m e A with viewData k σ A | ctorSpine e
-  ... | ok (di , params) | just (di′ , ci , args) =
+  ... | ok (di , params , idxs) | just (di′ , ci , args) =
     if di ≡ᵇ di′
     then checkCtorApp k σ rs Γ m di ci params args
+           (appsFrom (dty di) (List._++_ params idxs))
     else (infer k σ rs Γ m e >>= λ (B , u) → conv k σ B A >> ok u)
   ... | _ | _ =
     infer k σ rs Γ m e >>= λ (B , u) → conv k σ B A >> ok u
@@ -1220,21 +1363,21 @@ emptyRec = recst nothing [] [] false false
 defRec : ℕ → RecSt 0
 defRec i = recst (just i) [] [] true false
 
-checkCtorTy : ℕ → Sig → ℕ → ℕ → Tm 0 → Result ⊤
-checkCtorTy k σ di np ctype =
+checkCtorTy : ℕ → Sig → ℕ → ℕ → ℕ → Tm 0 → Result ⊤
+checkCtorTy k σ di np ni ctype =
   checkTy k σ emptyRec [] ctype >>
-  checkCtorRest di np ctype
+  checkCtorRest di np ni ctype
 
-checkCtors : ℕ → Sig → ℕ → ℕ → List Ctor → Result ⊤
-checkCtors _ _ _  _  []       = ok tt
-checkCtors k σ di np (c ∷ cs) =
-  tag (Ctor.cname c) (checkCtorTy k σ di np (Ctor.ctype c)) >>
-  checkCtors k σ di np cs
+checkCtors : ℕ → Sig → ℕ → ℕ → ℕ → List Ctor → Result ⊤
+checkCtors _ _ _  _  _  []       = ok tt
+checkCtors k σ di np ni (c ∷ cs) =
+  tag (Ctor.cname c) (checkCtorTy k σ di np ni (Ctor.ctype c)) >>
+  checkCtors k σ di np ni cs
 
 checkData : ℕ → Sig → ℕ → DataDecl → Result ⊤
 checkData k σ di d =
   tag (DataDecl.dname d)
-    (checkCtors k σ di (nparams d) (DataDecl.ctors d))
+    (checkCtors k σ di (nparams d) (nidxs d) (DataDecl.ctors d))
 
 checkDatas : ℕ → Sig → Result ⊤
 checkDatas k σ = go 0 (Sig.datas σ)
