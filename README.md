@@ -315,8 +315,6 @@ Muro.Nats.natsFrom(0) |> Stream.take(3) |> Enum.to_list()
 # [0, {:suc, 0}, {:suc, {:suc, 0}}]
 ```
 
-A coinductive `Safe` predicate on traces is next; it is not in this pass.
-
 ### ⊎ / Dec
 
 `A ⊎ B` (ASCII `Either A B`) is a built-in disjoint union. `left` / `right` are checked against an expected sum. Match has an explicit motive, same shape as Nat.
