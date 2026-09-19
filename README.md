@@ -327,6 +327,17 @@ Dec P  =  P ⊎ (P → Empty)
 
 See `examples/even_dec.muro`.
 
+### List
+
+`List A` with `nil` / `cons` (ASCII `[]` / `::`). Match has an explicit motive; recursion must descend on the tail. `List A` is Data iff `A` is Data, so `+xs : List Nat` may be reused and `List (Nat → Nat)` may not. See `examples/list.muro`.
+
+```
+{:ok, src} = Muro.emit_file("examples/list.muro", Muro.Lists)
+Code.eval_string(src)
+Muro.Lists.length(Muro.Lists.ones2())
+# {:suc, {:suc, 0}}
+```
+
 ---
 
 ## Layout
@@ -340,6 +351,7 @@ agda/Muro/Check.agda    ⊢ and the decision procedure
 agda/Muro/Example.agda  plus / IsEven / half / plus_suc / half_ok
 agda/Muro/ExampleStream.agda  zeros / head-zeros
 agda/Muro/ExampleEither.agda  IsEven / Dec / evenDec
+agda/Muro/ExampleList.agda  length / ones2
 lib/muro/parser.ex      .muro → named FOAS
 lib/muro/ast.ex         named FOAS, to_db
 lib/muro/subst.ex       de Bruijn subst
@@ -354,6 +366,7 @@ examples/nats.muro
 examples/always.muro
 examples/even_dec.muro
 examples/either_run.muro
+examples/list.muro
 test/muro_check_test.exs
 ```
 
