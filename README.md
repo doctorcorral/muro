@@ -47,20 +47,20 @@ This is the grammar `lib/muro/parser.ex` actually implements. ASCII aliases are 
 ```
 book       ::= (nu | data | def)*
 nu         ::= ("ν" | "nu") "Stream" binder ":" term "where" "uncons" ":" term
-data       ::= "data" "Either" binder binder ":" term "where"
-               "left" ":" term "right" ":" term
+data       ::= "data" ident binder* ":" "Type" "where" (ident ":" term)+
 def        ::= "def" ident ":" tag term ":=" term
 tag        ::= "run" "internal"? | "spec" | "evidence"
 
 term       ::= atom atom*                  -- juxtaposition is application
              | term ("×" | "*") term
-             | term "⊎" term
+             | term "⊎" term               -- desugars to Either
+             | term "::" term              -- desugars to cons
              | term ("→" | "->") term      -- non-dependent, = Π (_ : A) → B
 atom       ::= "Type" | "Nat" | "Unit" | "Empty" | "refl" | "tt" | "0"
              | suc | pi | lam | match | matchEmpty | rewrite | idt
              | stream | unfold | uncons | "fst" atom | "snd" atom
              | "head" atom | "tail" atom
-             | either | "left" atom | "right" atom
+             | "[]"                        -- desugars to nil
              | "(" term ")" | "(" term "," term ")"
              | ident
 
@@ -68,7 +68,6 @@ suc        ::= "suc" "(" term ")" | "suc" atom
 stream     ::= "Stream" atom
 unfold     ::= "unfold" atom atom         -- seed, λ s → (head, next_seed)
 uncons     ::= "uncons" atom
-either     ::= "Either" atom atom
 qty        ::= "+" | "-" | ε               -- ε = affine (default)
 binder     ::= "(" qty ident ":" term ")"
 pi         ::= ("Π" | "Pi") binder ("→" | "->") term
@@ -78,8 +77,7 @@ match      ::= "match" term "motive" mot
                "|" "0" "=>" term
                "|" "suc" ident "=>" term
              | "match" term "motive" mot
-               "|" "left" ident "=>" term
-               "|" "right" ident "=>" term
+               ("|" ident ident* "=>" term)+
 matchEmpty ::= "matchEmpty" term "motive" mot
 rewrite    ::= "rewrite" term "motive" mot "in" term
 mot        ::= "(" ("λ" | "lam")? (ident | binder) ("→" | "->") term ")"
@@ -100,7 +98,7 @@ Not in the surface (present in the kernel AST only): `matchUnit`, annotations `{
 
 ```
 Π (n : Nat) → …        affine (default): at most one run/evidence use
-Π (+ n : Nat) → …      reuse: only if the type WHNFs to Data (Nat, Unit, Empty)
+Π (+ n : Nat) → …      reuse: only if the type WHNFs to Data (Nat, Unit, Empty, or a data type whose parameters are Data)
 Π (- e : IsEven n) → … erased: compile-time; cannot be used computationally
 ```
 
@@ -114,6 +112,10 @@ The `+` / `-` sits immediately before the name, inside the parentheses.
 match n motive (λ x → P)
   | 0 => tz
   | suc p => ts                        Nat eliminator; motive is explicit
+
+match m motive (λ _ → A)
+  | nothing => d
+  | just a  => a                       data eliminator; one named branch per constructor
 
 matchEmpty e motive (λ _ → P)          Empty eliminator
 
@@ -257,7 +259,7 @@ IO.puts(src)
 
 8. If you want it in the test suite, parse/check/emit in `test/muro_check_test.exs`. The canonical book is also `Muro.Example.book/0` (must stay in sync with `examples/half_ok.muro` and `agda/Muro/Example.agda`).
 
-Emit of Nat: `0` stays `0`; `suc(n)` becomes `{:suc, n}`. Unit constructor `tt` becomes `:tt`. Erased Π-arguments are dropped from the generated arity.
+Emit of Nat: `0` stays `0`; `suc(n)` becomes `{:suc, n}`. Unit constructor `tt` becomes `:tt`. User data is one dialect: a 0-argument constructor is an atom (`:nil`, `:nothing`); otherwise `{:ctor, args…}` (`{:cons, a, as}`, `{:just, a}`). Erased Π-arguments are dropped from the generated arity.
 
 ---
 
@@ -315,9 +317,28 @@ Muro.Nats.natsFrom(0) |> Stream.take(3) |> Enum.to_list()
 # [0, {:suc, 0}, {:suc, {:suc, 0}}]
 ```
 
+### Data (non-indexed)
+
+A `data` declaration is a book entry the checker uses. Parameters are the binders before `: Type`. There are no indices in this pass (`data Vec (A : Type) : Nat → Type` is rejected). Nat, Unit, Empty, and ν stay primitive. Either and List are instances of this schema, not special Tm constructors. See `examples/maybe.muro`.
+
+```
+data Maybe (A : Type) : Type where
+  nothing : Maybe A
+  just    : A → Maybe A
+```
+
+The type former is spec. Constructors compute in run and may appear in evidence. Match has one named branch per constructor and an explicit motive. A self-call in run or evidence must use a constructor argument whose type is `D …`. Strict positivity: `D` must not occur left of Π in a constructor telescope (`mk : (Bad → Nat) → Bad` is rejected). `D as` is Data iff every parameter is Data (`Maybe Nat` is; `Maybe (Nat → Nat)` is not).
+
+```
+{:ok, src} = Muro.emit_file("examples/maybe.muro", Muro.MaybeEx)
+Code.eval_string(src)
+Muro.MaybeEx.fromMaybe(0, {:just, {:suc, 0}})
+# {:suc, 0}
+```
+
 ### ⊎ / Dec
 
-`A ⊎ B` (ASCII `Either A B`) is a built-in disjoint union. `left` / `right` are checked against an expected sum. Match has an explicit motive, same shape as Nat.
+`A ⊎ B` (ASCII `Either A B`) is `data Either`. `left` / `right` are checked against an expected Either. Match has an explicit motive, same shape as other data.
 
 ```
 Dec P  =  P ⊎ (P → Empty)
@@ -329,7 +350,7 @@ See `examples/even_dec.muro`.
 
 ### List
 
-`List A` with `nil` / `cons` (ASCII `[]` / `::`). Match has an explicit motive; recursion must descend on the tail. `List A` is Data iff `A` is Data, so `+xs : List Nat` may be reused and `List (Nat → Nat)` may not. See `examples/list.muro`.
+`List A` is `data List` with `nil` / `cons` (ASCII `[]` / `::`). Match has an explicit motive; recursion must descend on the tail. `List A` is Data iff `A` is Data, so `+xs : List Nat` may be reused and `List (Nat → Nat)` may not. See `examples/list.muro`.
 
 ```
 {:ok, src} = Muro.emit_file("examples/list.muro", Muro.Lists)
@@ -337,6 +358,8 @@ Code.eval_string(src)
 Muro.Lists.length(Muro.Lists.ones2())
 # {:suc, {:suc, 0}}
 ```
+
+`ones2()` is `{:cons, {:suc, 0}, {:cons, {:suc, 0}, :nil}}`.
 
 ---
 
@@ -367,6 +390,8 @@ examples/always.muro
 examples/even_dec.muro
 examples/either_run.muro
 examples/list.muro
+examples/maybe.muro
+examples/tree.muro
 test/muro_check_test.exs
 ```
 
@@ -408,4 +433,4 @@ mix muro.check examples/half_ok.muro
 
 ## Not in v1
 
-Type : Type, cubical, tactics, implicits, unification, metavariables, extra quantities, user-defined ν-predicates, general `data` beyond Either, `+` on Stream or Either, typing raw Elixir, emitting spec or evidence.
+Type : Type, cubical, tactics, implicits, unification, metavariables, extra quantities, user-defined ν-predicates, indexed data, `+` on Stream or Either, typing raw Elixir, emitting spec or evidence.
