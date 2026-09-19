@@ -236,18 +236,19 @@ isData k σ t with whnf k σ t
 ... | empty = true
 ... | _     = false
 
+{-# TERMINATING #-}
+runTy : ∀ {n} → Tm n → Bool
+runTy nat         = true
+runTy unit        = true
+runTy empty       = true
+runTy (pi _ _ B)  = runTy B
+runTy (nu F)      = runTy (inst F unit)
+runTy (prod A B)  = runTy A ∧ runTy B
+runTy (sum A B)   = runTy A ∧ runTy B
+runTy _           = false
+
 isRunType : ∀ {n} → ℕ → Sig → Tm n → Bool
 isRunType k σ t = runTy (whnf k σ t)
-  where
-    runTy : ∀ {n} → Tm n → Bool
-    runTy nat         = true
-    runTy unit        = true
-    runTy empty       = true
-    runTy (pi _ _ B)  = runTy B
-    runTy (stream A)  = runTy A
-    runTy (prod A B)  = runTy A ∧ runTy B
-    runTy (sum A B)   = runTy A ∧ runTy B
-    runTy _           = false
 
 ------------------------------------------------------------------------
 -- Conversion on weak-head normal forms.
@@ -285,7 +286,7 @@ synEq (prod A B)     (prod A′ B′)   = synEq A A′ ∧ synEq B B′
 synEq (pair a b)     (pair a′ b′)   = synEq a a′ ∧ synEq b b′
 synEq (fst t)        (fst t′)       = synEq t t′
 synEq (snd t)        (snd t′)       = synEq t t′
-synEq (stream A)     (stream A′)    = synEq A A′
+synEq (nu F)         (nu F′)        = synEq F F′
 synEq (unf s f)      (unf s′ f′)    = synEq s s′ ∧ synEq f f′
 synEq (ucons s)      (ucons s′)     = synEq s s′
 synEq _              _              = false
@@ -355,7 +356,7 @@ mutual
   convN k σ (pair a b)    (pair a′ b′)  = conv k σ a a′ >> conv k σ b b′
   convN k σ (fst t)       (fst t′)      = conv k σ t t′
   convN k σ (snd t)       (snd t′)      = conv k σ t t′
-  convN k σ (stream A)    (stream A′)   = conv k σ A A′
+  convN k σ (nu F)        (nu F′)       = conv k σ F F′
   convN k σ (unf s f)     (unf s′ f′)   = conv k σ s s′ >> conv k σ f f′
   convN k σ (ucons s)     (ucons s′)    = conv k σ s s′
   convN _ _ u             v             =
@@ -505,18 +506,18 @@ data _,_⊢[_]_⇒_ σ Γ where
     → σ , Γ ⊢[ m ] t ⇒ prod A B
     → σ , Γ ⊢[ m ] snd t ⇒ B
 
-  ⇒-stream : ∀ {A}
-    → σ , Γ ⊢ A wf
-    → σ , Γ ⊢[ spec ] stream A ⇒ typ
+  ⇒-nu : ∀ {F}
+    → σ , ext Γ affine typ ⊢ F wf
+    → σ , Γ ⊢[ spec ] nu F ⇒ typ
 
   ⇒-unf : ∀ {m S A seed f}
     → σ , Γ ⊢[ m ] seed ⇐ S
     → σ , Γ ⊢[ m ] f ⇐ pi affine S (prod (wk A) (wk S))
-    → σ , Γ ⊢[ m ] unf seed f ⇒ stream A
+    → σ , Γ ⊢[ m ] unf seed f ⇒ nu (prod (wk A) (var zero))
 
-  ⇒-ucons : ∀ {m A s}
-    → σ , Γ ⊢[ m ] s ⇐ stream A
-    → σ , Γ ⊢[ m ] ucons s ⇒ prod A (stream A)
+  ⇒-ucons : ∀ {m F s}
+    → σ , Γ ⊢[ m ] s ⇐ nu F
+    → σ , Γ ⊢[ m ] ucons s ⇒ inst F (nu F)
 
   ⇒-sum : ∀ {A B}
     → σ , Γ ⊢ A wf
@@ -554,6 +555,16 @@ data _,_⊢[_]_⇐_ σ Γ where
     → σ , Γ ⊢[ m ] b ⇐ B
     → σ , Γ ⊢[ m ] right b ⇐ sum A B
 
+  ⇐-pair : ∀ {m A B a b}
+    → σ , Γ ⊢[ m ] a ⇐ A
+    → σ , Γ ⊢[ m ] b ⇐ B
+    → σ , Γ ⊢[ m ] pair a b ⇐ prod A B
+
+  ⇐-unf : ∀ {m S F seed f}
+    → σ , Γ ⊢[ m ] seed ⇐ S
+    → σ , Γ ⊢[ m ] f ⇐ pi affine S (wk (inst F S))
+    → σ , Γ ⊢[ m ] unf seed f ⇐ nu F
+
 -- Intentionally absent: spec ⇒ evid, evid ⇒ run, spec ⇒ run.
 
 ------------------------------------------------------------------------
@@ -575,10 +586,10 @@ viewProd k σ t with whnf k σ t
 ... | prod A B = ok (A , B)
 ... | t′       = fail ("expected ×, got " ++ showTm t′)
 
-viewStream : ∀ {n} → ℕ → Sig → Tm n → Result (Tm n)
-viewStream k σ t with whnf k σ t
-... | stream A = ok A
-... | t′       = fail ("expected Stream, got " ++ showTm t′)
+viewNu : ∀ {n} → ℕ → Sig → Tm n → Result (Tm (suc n))
+viewNu k σ t with whnf k σ t
+... | nu F = ok F
+... | t′   = fail ("expected ν, got " ++ showTm t′)
 
 viewSum : ∀ {n} → ℕ → Sig → Tm n → Result (Tm n × Tm n)
 viewSum k σ t with whnf k σ t
@@ -597,7 +608,7 @@ hasSelf s (ucons u)      = hasSelf s u
 hasSelf s (lam _ A t)    = hasSelf s A ∨ hasSelf s t
 hasSelf s (pi _ A B)     = hasSelf s A ∨ hasSelf s B
 hasSelf s (prod A B)     = hasSelf s A ∨ hasSelf s B
-hasSelf s (stream A)     = hasSelf s A
+hasSelf s (nu F)         = hasSelf s F
 hasSelf s (sum A B)      = hasSelf s A ∨ hasSelf s B
 hasSelf s (left t)       = hasSelf s t
 hasSelf s (right t)      = hasSelf s t
@@ -630,9 +641,46 @@ checkNu _    T t = go T t
   where
     go : ∀ {n} → Tm n → Tm n → Result ⊤
     go (pi _ _ B) (lam _ _ u) = go B u
-    go (stream _) (unf _ _)   = ok tt
-    go (stream _) _           = fail "stream value must be an unfold"
+    go (nu _)     (unf _ _)   = ok tt
+    go (nu _)     _           = fail "ν value must be an unfold"
     go _          _           = ok tt
+
+occurs : ∀ {n} → Fin n → Tm n → Bool
+occurs x (var y)        = eqFin x y
+occurs x (pi _ A B)     = occurs x A ∨ occurs (suc x) B
+occurs x (lam _ A t)    = occurs x A ∨ occurs (suc x) t
+occurs x (app f a)      = occurs x f ∨ occurs x a
+occurs x (su t)         = occurs x t
+occurs x (sum A B)      = occurs x A ∨ occurs x B
+occurs x (left t)       = occurs x t
+occurs x (right t)      = occurs x t
+occurs x (mSum e P l r) = occurs x e ∨ occurs (suc x) P ∨ occurs (suc x) l ∨ occurs (suc x) r
+occurs x (mNat e P z s) = occurs x e ∨ occurs (suc x) P ∨ occurs x z ∨ occurs (suc x) s
+occurs x (mEmp e P)     = occurs x e ∨ occurs (suc x) P
+occurs x (mUnit e P u)  = occurs x e ∨ occurs (suc x) P ∨ occurs x u
+occurs x (idt A a b)    = occurs x A ∨ occurs x a ∨ occurs x b
+occurs x (rwt e P t)    = occurs x e ∨ occurs (suc x) P ∨ occurs x t
+occurs x (ann e A)      = occurs x e ∨ occurs x A
+occurs x (prod A B)     = occurs x A ∨ occurs x B
+occurs x (pair a b)     = occurs x a ∨ occurs x b
+occurs x (fst t)        = occurs x t
+occurs x (snd t)        = occurs x t
+occurs x (nu F)         = occurs (suc x) F
+occurs x (unf s f)      = occurs x s ∨ occurs x f
+occurs x (ucons s)      = occurs x s
+occurs _ _              = false
+
+-- X is strictly positive: product/sum ok; not in a Π-domain; not under app.
+spos : ∀ {n} → Fin n → Tm n → Bool
+spos x (var _)     = true
+spos x (prod A B)  = spos x A ∧ spos x B
+spos x (sum A B)   = spos x A ∧ spos x B
+spos x (pi _ A B)  = not (occurs x A) ∧ spos (suc x) B
+spos x (nu F)      = not (occurs (suc x) F)
+spos x t           = not (occurs x t)
+
+strictPos : ∀ {n} → Tm (suc n) → Bool
+strictPos F = spos zero F
 
 motSucσ : ∀ {n} → Fin (suc n) → Tm (suc n)
 motSucσ zero    = su (var zero)
@@ -856,11 +904,12 @@ mutual
     checkTy k σ rs Γ B >>
     ok (typ , u0s)
 
-  -- ⇒-stream
-  infer′ k σ rs Γ run  (stream _) = fail "no promotion: Stream is an erased term"
-  infer′ k σ rs Γ evid (stream _) = fail "no promotion: Stream is an erased term"
-  infer′ k σ rs Γ spec (stream A) =
-    checkTy k σ rs Γ A >>
+  -- ⇒-nu
+  infer′ k σ rs Γ run  (nu _) = fail "no promotion: ν is an erased term"
+  infer′ k σ rs Γ evid (nu _) = fail "no promotion: ν is an erased term"
+  infer′ k σ rs Γ spec (nu F) =
+    checkTy k σ (extRec rs false false) (ext Γ affine typ) F >>
+    guard "ν body is not strictly positive" (strictPos F) >>
     ok (typ , u0s)
 
   -- ⇒-pair
@@ -892,13 +941,13 @@ mutual
     conv k σ S2 S >>
     checkUnfold k σ m rs f >>
     combine m seedU fu >>= λ uses →
-    ok (stream A , uses)
+    ok (nu (prod (wk A) (var zero)) , uses)
 
   -- ⇒-ucons
   infer′ k σ rs Γ m (ucons s) =
     infer k σ rs Γ m s >>= λ (T , u) →
-    viewStream k σ T >>= λ A →
-    ok (prod A (stream A) , u)
+    viewNu k σ T >>= λ F →
+    ok (inst F T , u)
 
   -- ⇒-sum
   infer′ k σ rs Γ run  (sum _ _) = fail "no promotion: Either is an erased term"
@@ -961,6 +1010,21 @@ mutual
   check′ k σ rs Γ m (right b) T =
     viewSum k σ T >>= λ (_ , B) →
     check k σ rs Γ m b B
+
+  -- ⇐-pair
+  check′ k σ rs Γ m (pair a b) T =
+    viewProd k σ T >>= λ (A , B) →
+    check k σ rs Γ m a A >>= λ au →
+    check k σ rs Γ m b B >>= λ bu →
+    combine m au bu
+
+  -- ⇐-unf
+  check′ k σ rs Γ m (unf seed f) T =
+    viewNu k σ T >>= λ F →
+    infer k σ rs Γ m seed >>= λ (S , seedU) →
+    check k σ rs Γ m f (pi affine S (wk (inst F S))) >>= λ fu →
+    checkUnfold k σ m rs f >>
+    combine m seedU fu
 
   -- ⇐-conv (default)
   check′ k σ rs Γ m e A =

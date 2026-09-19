@@ -10,6 +10,7 @@ open import Relation.Binary.PropositionalEquality.Core using (_≡_; refl)
 
 open import Muro.Base
 open import Muro.Syntax
+open import Muro.Subst
 open import Muro.Check
 
 zerosTy : Tm 0

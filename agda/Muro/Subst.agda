@@ -48,12 +48,20 @@ ren ρ (prod A B)    = prod (ren ρ A) (ren ρ B)
 ren ρ (pair a b)    = pair (ren ρ a) (ren ρ b)
 ren ρ (fst t)       = fst (ren ρ t)
 ren ρ (snd t)       = snd (ren ρ t)
-ren ρ (stream A)    = stream (ren ρ A)
+ren ρ (nu F)        = nu (ren (lift ρ) F)
 ren ρ (unf s f)     = unf (ren ρ s) (ren ρ f)
 ren ρ (ucons s)     = ucons (ren ρ s)
 
 wk : ∀ {n} → Tm n → Tm (suc n)
 wk = ren suc
+
+-- Stream A = ν X. A × X
+stream : ∀ {n} → Tm n → Tm n
+stream A = nu (prod (wk A) (var zero))
+
+-- Always P s = ν Y. P (head s) × Y
+always : ∀ {n} → Tm n → Tm n → Tm n
+always P s = nu (prod (wk (app P (fst (ucons s)))) (var zero))
 
 fromZero : ∀ {n} → Fin 0 → Fin n
 fromZero ()
@@ -93,7 +101,7 @@ sub σ (prod A B)     = prod (sub σ A) (sub σ B)
 sub σ (pair a b)     = pair (sub σ a) (sub σ b)
 sub σ (fst t)        = fst (sub σ t)
 sub σ (snd t)        = snd (sub σ t)
-sub σ (stream A)     = stream (sub σ A)
+sub σ (nu F)         = nu (sub (lifts σ) F)
 sub σ (unf s f)      = unf (sub σ s) (sub σ f)
 sub σ (ucons s)      = ucons (sub σ s)
 
@@ -149,7 +157,7 @@ toPHOAS ρ (prod A B)     = prod (toPHOAS ρ A) (toPHOAS ρ B)
 toPHOAS ρ (pair a b)     = pair (toPHOAS ρ a) (toPHOAS ρ b)
 toPHOAS ρ (fst t)        = fst (toPHOAS ρ t)
 toPHOAS ρ (snd t)        = snd (toPHOAS ρ t)
-toPHOAS ρ (stream A)     = stream (toPHOAS ρ A)
+toPHOAS ρ (nu F)         = nu (λ v → toPHOAS (λ { zero → v ; (suc i) → ρ i }) F)
 toPHOAS ρ (unf s f)      = unf (toPHOAS ρ s) (toPHOAS ρ f)
 toPHOAS ρ (ucons s)      = ucons (toPHOAS ρ s)
 
@@ -232,7 +240,8 @@ unembedN nxt env (pair a b)     =
   pair <$> unembedN nxt env a ⊛ unembedN nxt env b
 unembedN nxt env (fst t)        = fst <$> unembedN nxt env t
 unembedN nxt env (snd t)        = snd <$> unembedN nxt env t
-unembedN nxt env (stream A)     = stream <$> unembedN nxt env A
+unembedN nxt env (nu F)         =
+  nu <$> unembedN (suc nxt) (nxt ∷ env) (F nxt)
 unembedN nxt env (unf s f)      =
   unf <$> unembedN nxt env s ⊛ unembedN nxt env f
 unembedN nxt env (ucons s)      = ucons <$> unembedN nxt env s

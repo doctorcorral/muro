@@ -12,3 +12,4 @@ open import Muro.Check public
 open import Muro.Example public
 open import Muro.ExampleStream public
 import Muro.ExampleEither
+import Muro.ExampleAlways
