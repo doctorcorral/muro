@@ -45,18 +45,22 @@ A definition is in the book the moment `Parser.parse/1` returns it. The checker 
 This is the grammar `lib/muro/parser.ex` actually implements. ASCII aliases are in parentheses.
 
 ```
-book       ::= (nu | def)*
+book       ::= (nu | data | def)*
 nu         ::= ("ν" | "nu") "Stream" binder ":" term "where" "uncons" ":" term
+data       ::= "data" "Either" binder binder ":" term "where"
+               "left" ":" term "right" ":" term
 def        ::= "def" ident ":" tag term ":=" term
 tag        ::= "run" "internal"? | "spec" | "evidence"
 
 term       ::= atom atom*                  -- juxtaposition is application
              | term ("×" | "*") term
+             | term "⊎" term
              | term ("→" | "->") term      -- non-dependent, = Π (_ : A) → B
 atom       ::= "Type" | "Nat" | "Unit" | "Empty" | "refl" | "tt" | "0"
              | suc | pi | lam | match | matchEmpty | rewrite | idt
              | stream | unfold | uncons | "fst" atom | "snd" atom
              | "head" atom | "tail" atom
+             | either | "left" atom | "right" atom
              | "(" term ")" | "(" term "," term ")"
              | ident
 
@@ -64,6 +68,7 @@ suc        ::= "suc" "(" term ")" | "suc" atom
 stream     ::= "Stream" atom
 unfold     ::= "unfold" atom atom         -- seed, λ s → (head, next_seed)
 uncons     ::= "uncons" atom
+either     ::= "Either" atom atom
 qty        ::= "+" | "-" | ε               -- ε = affine (default)
 binder     ::= "(" qty ident ":" term ")"
 pi         ::= ("Π" | "Pi") binder ("→" | "->") term
@@ -72,9 +77,12 @@ lam        ::= ("λ" | "lam") binder ("→" | "->") term
 match      ::= "match" term "motive" mot
                "|" "0" "=>" term
                "|" "suc" ident "=>" term
+             | "match" term "motive" mot
+               "|" "left" ident "=>" term
+               "|" "right" ident "=>" term
 matchEmpty ::= "matchEmpty" term "motive" mot
 rewrite    ::= "rewrite" term "motive" mot "in" term
-mot        ::= "(" ("λ" | "lam")? ident ("→" | "->") term ")"
+mot        ::= "(" ("λ" | "lam")? (ident | binder) ("→" | "->") term ")"
 idt        ::= "{" term ("≡" | "==") term ":" term "}"
 
 ident      ::= [A-Za-z_][A-Za-z0-9_-]*
@@ -209,6 +217,8 @@ Three, on purpose. Do not add a fourth, and do not use raw HOAS (`Tm → Tm`) as
 {:ann, e, a}                  -- kernel only; no parser production
 {:prod, a, b} | {:pair, a, b} | {:fst, t} | {:snd, t}
 {:stream, a} | {:unf, seed, f} | {:ucons, s}
+{:sum, a, b} | {:left, t} | {:right, t}
+{:msum, e, x, p, a, l, b, r}
 ```
 
 `qty` is `:affine | :reuse | :erased`. A book entry:
@@ -307,6 +317,18 @@ Muro.Nats.natsFrom(0) |> Stream.take(3) |> Enum.to_list()
 
 A coinductive `Safe` predicate on traces is next; it is not in this pass.
 
+### ⊎ / Dec
+
+`A ⊎ B` (ASCII `Either A B`) is a built-in disjoint union. `left` / `right` are checked against an expected sum. Match has an explicit motive, same shape as Nat.
+
+```
+Dec P  =  P ⊎ (P → Empty)
+```
+
+`Dec` is a spec: a decision for a particular `P`, not LEM. There is no inhabitant of `Π (P : Type) → Dec P`. Closures `P → Empty` are not Data; no `+` on the refutation. `evenDec` is evidence and is not emitted.
+
+See `examples/even_dec.muro`. Glyph `⊎` is source syntax only; do not add logo assets.
+
 ---
 
 ## Layout
@@ -319,6 +341,7 @@ agda/Muro/Subst.agda    wk, sub, toPHOAS, unembed
 agda/Muro/Check.agda    ⊢ and the decision procedure
 agda/Muro/Example.agda  plus / IsEven / half / plus_suc / half_ok
 agda/Muro/ExampleStream.agda  zeros / head-zeros
+agda/Muro/ExampleEither.agda  IsEven / Dec / evenDec
 lib/muro/parser.ex      .muro → named FOAS
 lib/muro/ast.ex         named FOAS, to_db
 lib/muro/subst.ex       de Bruijn subst
@@ -330,6 +353,8 @@ examples/half_ok.muro
 examples/internal_ok.muro
 examples/zeros.muro
 examples/nats.muro
+examples/even_dec.muro
+examples/either_run.muro
 test/muro_check_test.exs
 ```
 
@@ -371,4 +396,4 @@ mix muro.check examples/half_ok.muro
 
 ## Not in v1
 
-Type : Type, cubical, tactics, implicits, unification, metavariables, extra quantities, user-defined ν-predicates, `+` on Stream, typing raw Elixir, emitting spec or evidence.
+Type : Type, cubical, tactics, implicits, unification, metavariables, extra quantities, user-defined ν-predicates, general `data` beyond Either, `+` on Stream or Either, typing raw Elixir, emitting spec or evidence.
