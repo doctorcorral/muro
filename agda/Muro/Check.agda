@@ -3,7 +3,7 @@
 --
 -- Decide: fuel-based Result, each clause commented with a ⊢ constructor.
 -- The theorem-oriented inductive spec of the core fragment is
--- Muro.Judgement (conversion there is α-equality, not this WHNF).
+-- Muro.Judgement (conversion there is ≈, not this fuelled WHNF).
 --
 -- There is no promotion: spec ↛ evid, evid ↛ run, spec ↛ run.
 -- Emit visibility (def vs defp) is an Elixir-only flag on run.
@@ -30,96 +30,7 @@ open import Relation.Binary.PropositionalEquality.Core using (_≡_; refl)
 open import Muro.Base
 open import Muro.Syntax
 open import Muro.Subst
-
-------------------------------------------------------------------------
--- Signature: data declarations and closed definitions.
-------------------------------------------------------------------------
-
--- dmode is run or spec. Emit visibility (def vs defp) is an Elixir-only
--- flag on run; it is not part of this spec.
-record Def : Set where
-  constructor mkDef
-  field
-    dname : String
-    dmode : Mode
-    dtype : Tm 0
-    dbody : Tm 0
-
--- Constructor type is closed: Π params → Π args → D params indices.
-record Ctor : Set where
-  constructor mkCtor
-  field
-    cname : String
-    ctype : Tm 0
-
--- Parameters are binders before `:`. Indices are the telescope after `:`
--- before `Type`. Index types are closed (weakened under the parameter Πs).
-record DataDecl : Set where
-  constructor mkData
-  field
-    dname : String
-    pqtys : List Qty
-    idxs  : List (Qty × Tm 0)
-    ctors : List Ctor
-
-record Sig : Set where
-  constructor mkSig
-  field
-    datas : List DataDecl
-    defs  : List Def
-
-fromDefs : List Def → Sig
-fromDefs ds = mkSig [] ds
-
-lookupList : ∀ {A : Set} → List A → ℕ → Result A
-lookupList []       _       = fail "unknown index"
-lookupList (x ∷ _)  zero    = ok x
-lookupList (_ ∷ xs) (suc i) = lookupList xs i
-
-lookupDef : Sig → ℕ → Result Def
-lookupDef σ i = lookupList (Sig.defs σ) i
-
-lookupData : Sig → ℕ → Result DataDecl
-lookupData σ i = lookupList (Sig.datas σ) i
-
-lookupCtor : DataDecl → ℕ → Result Ctor
-lookupCtor d i = lookupList (DataDecl.ctors d) i
-
-nparams : DataDecl → ℕ
-nparams d = length (DataDecl.pqtys d)
-
-nidxs : DataDecl → ℕ
-nidxs d = length (DataDecl.idxs d)
-
-dtyType : ∀ {n} → List Qty → List (Qty × Tm 0) → Tm n
-dtyType [] []              = typ
-dtyType (q ∷ qs) ixs       = pi q typ (dtyType qs ixs)
-dtyType [] ((q , T) ∷ ixs) = pi q (closed T) (dtyType [] ixs)
-
-------------------------------------------------------------------------
--- Contexts. Newest binder is index zero; every type is weakened to n.
-------------------------------------------------------------------------
-
-record Bind (n : ℕ) : Set where
-  constructor bind
-  field
-    bqty : Qty
-    btyp : Tm n
-
-Ctx : ℕ → Set
-Ctx n = Vec (Bind n) n
-
-wkBind : ∀ {n} → Bind n → Bind (suc n)
-wkBind (bind q A) = bind q (wk A)
-
-ext : ∀ {n} → Ctx n → Qty → Tm n → Ctx (suc n)
-ext Γ q A = bind q (wk A) ∷ map wkBind Γ
-
-qtyOf : ∀ {n} → Ctx n → Fin n → Qty
-qtyOf Γ x = Bind.bqty (lookup Γ x)
-
-typOf : ∀ {n} → Ctx n → Fin n → Tm n
-typOf Γ x = Bind.btyp (lookup Γ x)
+open import Muro.Env public
 
 ------------------------------------------------------------------------
 -- Recursion state: run and evid structural descent (not spec).
@@ -153,69 +64,6 @@ scrutOk _  _       = false
 isSmallerVar : ∀ {n} → RecSt n → Tm n → Bool
 isSmallerVar rs (var x) = lookup (RecSt.smaller rs) x
 isSmallerVar _  _       = false
-
-------------------------------------------------------------------------
--- Usage vectors.
-------------------------------------------------------------------------
-
-UseVec : ℕ → Set
-UseVec n = Vec Use n
-
-u0s : ∀ {n} → UseVec n
-u0s {zero}  = []
-u0s {suc n} = U0 ∷ u0s
-
-oneHot : ∀ {n} → Fin n → Use → UseVec n
-oneHot {suc _} zero    u = u  ∷ u0s
-oneHot {suc _} (suc i) u = U0 ∷ oneHot i u
-
-addUse : Use → Use → Result Use
-addUse U0 u  = ok u
-addUse u  U0 = ok u
-addUse U1 U1 = fail "affine variable used twice"
-addUse Uω _  = ok Uω
-addUse _  Uω = ok Uω
-
-addUses : ∀ {n} → UseVec n → UseVec n → Result (UseVec n)
-addUses []       []       = ok []
-addUses (x ∷ xs) (y ∷ ys) = _∷_ <$> addUse x y ⊛ addUses xs ys
-
-maxUse : Use → Use → Use
-maxUse Uω _  = Uω
-maxUse _  Uω = Uω
-maxUse U1 _  = U1
-maxUse _  U1 = U1
-maxUse U0 U0 = U0
-
-maxUses : ∀ {n} → UseVec n → UseVec n → UseVec n
-maxUses []       []       = []
-maxUses (x ∷ xs) (y ∷ ys) = maxUse x y ∷ maxUses xs ys
-
-combine : ∀ {n} → Mode → UseVec n → UseVec n → Result (UseVec n)
-combine run  u v = addUses u v
-combine evid u v = addUses u v
-combine spec _ _ = ok u0s
-
-combineAlt : ∀ {n} → Mode → UseVec n → UseVec n → UseVec n
-combineAlt run  u v = maxUses u v
-combineAlt evid u v = maxUses u v
-combineAlt spec _ _ = u0s
-
-checkBound : Mode → Qty → Use → Result ⊤
-checkBound run  erased U1 = fail "erased variable used computationally"
-checkBound evid erased U1 = fail "erased variable used computationally"
-checkBound run  erased Uω = fail "erased variable used computationally"
-checkBound evid erased Uω = fail "erased variable used computationally"
-checkBound run  affine Uω = fail "affine variable used as reusable"
-checkBound evid affine Uω = fail "affine variable used as reusable"
-checkBound _    _      _  = ok tt
-
-allowedDef : Mode → Mode → Bool
-allowedDef run  _    = true
-allowedDef evid spec = true
-allowedDef evid evid = true
-allowedDef spec spec = true
-allowedDef _    _    = false
 
 ------------------------------------------------------------------------
 -- Small helpers.
@@ -876,13 +724,6 @@ spos x t           = not (occurs x t)
 
 strictPos : ∀ {n} → Tm (suc n) → Bool
 strictPos F = spos zero F
-
-motSucσ : ∀ {n} → Fin (suc n) → Tm (suc n)
-motSucσ zero    = su (var zero)
-motSucσ (suc i) = var (suc i)
-
-motSuc : ∀ {n} → Tm (suc n) → Tm (suc n)
-motSuc P = sub motSucσ P
 
 mutual
   occursD : ∀ {n} → ℕ → Tm n → Bool
