@@ -25,6 +25,10 @@ Forward references are allowed. The checker sees every definition when it checks
 
 There is one sort, `Type`. It is not `Type : Type`. `Type` itself is erased: you do not compute with it.
 
+A *small type* is a term of type `Type`: `Nat`, `Π (n : Nat) → Nat`, `Π (X : Type) → X`, `IsEven 2`. A *kind* is `Type` or `Π (x : A) → K` with `K` a kind: `Π (n : Nat) → Type` is the kind of `IsEven`. Kinds are well-formed, so they can be the type of a `def` and the type of a binder, but a kind is not a term of type `Type`. The checker refuses `Π (_ : Unit) → Type`, `Type × Unit`, and a constructor field of type `Type` where a small type is expected. Without that refusal `Type` would be a retract of a small type and the sort would be inconsistent (Girard's paradox).
+
+`Type` is impredicative: `Π (X : Type) → X` is itself in `Type`. That is the design, not an accident, and it is why a consistency proof for the calculus cannot come from a set-theoretic model in Agda.
+
 Primitive types you can write as atoms:
 
 | Atom | Meaning |
