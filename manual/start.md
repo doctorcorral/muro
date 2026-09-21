@@ -14,7 +14,7 @@ In brief: clone the repo, write a `.muro` file against the [grammar](grammar.md)
 Elixir via [mise](https://mise.jdx.dev/), then:
 
 ```
-git clone https://github.com/doctorcorral/muro.git
+git clone https://github.com/murolang/muro.git
 cd muro
 mise install
 mix deps.get

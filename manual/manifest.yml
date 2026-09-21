@@ -2,7 +2,7 @@
 # This is not ExDoc. Elixir API docs, when added, live in mix.exs `docs:`.
 # Agda is a third layer: the judgments in agda/Muro.
 
-source: doctorcorral/muro
+source: murolang/muro
 path: manual
 
 pages:
