@@ -13,12 +13,18 @@ defmodule Muro.MixProject do
   end
 
   def application do
-    [extra_applications: [:logger]]
+    [
+      extra_applications: [:logger],
+      mod: {Muro.Application, []}
+    ]
   end
 
   defp elixirc_paths(_), do: ["lib"]
 
   defp deps do
-    [{:nx, "~> 0.9"}]
+    [
+      {:nx, "~> 0.9"},
+      {:makeup, "~> 1.2"}
+    ]
   end
 end
