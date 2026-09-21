@@ -73,7 +73,7 @@ make agda
 
 `Muro.Lexer.tokenize/1` is the highlighter. It walks a fragment with the parser's lexical rules and returns `{kind, start, stop}` byte spans. A snippet that `Parser.parse/1` rejects still yields spans, and joining the slices gives the source back. `Muro.MakeupLexer` maps those spans onto Makeup tags (language `"muro"`, extension `.muro`) and is registered when the application starts. HTML and colors stay with the caller.
 
-`Muro.Check.check_sig/1` returns `:ok` on the book. CI runs the Elixir job and `make agda` on every push and pull request.
+`Muro.Check.check_sig/1` returns `:ok` on the book. CI runs the Elixir job and `make agda` on every push and pull request. `make agda` checks the theorem modules (`Muro.Judgement`, `Muro.Wall`, `Muro.Consistency`) under `--safe`; conversion in ⊢ is a relation, `Muro.Consistency` proves that no closed normal evidence term has type Empty, `Empty-evid` itself is not proved, and data / ν / Tensor are still outside ⊢.
 
 ## Names
 

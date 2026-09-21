@@ -1,15 +1,32 @@
 ------------------------------------------------------------------------
--- Closed evidence of Empty, on the ⊢ fragment.
+-- Closed evidence of Empty, on the ⊢ fragment, under --safe.
 --
 -- Proved here, with conversion the relation ≈ of Muro.Convert:
---   Empty-intro  an introduction form never checks against Empty;
---   Empty-nf     no closed normal evidence term has type Empty
---                (canonical evidence forms at Empty do not exist);
---   progress-⇐   a closed well-typed evidence term is normal or steps.
--- Empty-evid is still postulated here; it is discharged in the next
--- commit.
+--
+--   Empty-intro      an introduction form (ze, su, one, λ, refl) never
+--                    checks against Empty, in any σ, Γ, and mode;
+--   Empty-nf         no closed normal evidence term has type Empty
+--                    (canonical evidence forms at Empty do not exist);
+--   progress-⇐       a closed well-typed evidence term is normal or
+--                    takes a ⟶ step;
+--   Empty-evid-from  preservation and normalisation of closed evidence
+--                    together give: no closed evidence of Empty. Both
+--                    hypotheses are arguments of the lemma. Nothing is
+--                    postulated.
+--
+-- Not proved: Empty-evid itself. What is missing is exactly the two
+-- hypotheses of Empty-evid-from.
+--   * Preservation needs the substitution lemma for ⊢ with uses (β
+--     substitutes the argument into the body and its type).
+--   * Normalisation of closed evidence terms cannot come from a model:
+--     ⇒-pi accepts Π (x : A) → Type : Type, a retraction of Type into a
+--     small type, so with full conversion spec is Type : Type and
+--     Girard's paradox applies to spec terms. An argument for evid must
+--     use that evid is affine outside Data.
+-- Do not cite Empty-evid as a theorem of this development.
 ------------------------------------------------------------------------
 
+{-# OPTIONS --safe #-}
 module Muro.Consistency where
 
 open import Data.Empty using (⊥; ⊥-elim)
@@ -263,9 +280,30 @@ progress-⇒ (⇒-def lk _) = ⊥-elim (fail≢ok lk)
 progress-⇒ (⇒-ann _ _) = inj₂ (_ , ann-e)
 
 ------------------------------------------------------------------------
--- Full statement. Not proved yet.
--- POSTULATE: evidence Empty uninhabited (canonicity)
+-- The remaining obligations, as hypotheses. Not postulated.
 ------------------------------------------------------------------------
 
-postulate
-  Empty-evid : ∀ {e u} → σ-empty , ε ⊢[ evid ] e ⇐ empty ⊣ u → ⊥
+-- Preservation: a ⟶ step keeps closed evidence at Empty.
+Preservation : Set
+Preservation = ∀ {e e′ u} →
+  σ-empty , ε ⊢[ evid ] e ⇐ empty ⊣ u →
+  σ-empty ⊢[ evid ] e ⟶ e′ →
+  σ-empty , ε ⊢[ evid ] e′ ⇐ empty ⊣ u
+
+-- Normalisation: closed evidence at Empty reaches a normal form.
+Normalising : Set
+Normalising = ∀ {e u} →
+  σ-empty , ε ⊢[ evid ] e ⇐ empty ⊣ u →
+  ∃ λ v → (σ-empty ⊢[ evid ] e ⟶* v) × Nf σ-empty evid v
+
+Empty-evid-from : Preservation → Normalising →
+  ∀ {e u} → σ-empty , ε ⊢[ evid ] e ⇐ empty ⊣ u → ⊥
+Empty-evid-from pres norm D with norm D
+... | v , r , nf = Empty-nf nf (pres* r D)
+  where
+    pres* : ∀ {e v u} →
+      σ-empty ⊢[ evid ] e ⟶* v →
+      σ-empty , ε ⊢[ evid ] e ⇐ empty ⊣ u →
+      σ-empty , ε ⊢[ evid ] v ⇐ empty ⊣ u
+    pres* ⟶*-refl D′ = D′
+    pres* (⟶*-step s r′) D′ = pres* r′ (pres D′ s)

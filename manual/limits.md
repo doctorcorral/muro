@@ -38,8 +38,8 @@ The language was once described as *nothing dead runs* and *a proof never become
 ## What is proved, and what is not
 
 - The mode wall is proved for the core fragment in `agda/Muro/Wall.agda`.
-- Closed evidence of Empty is proved for Core terms (no application or rewrite) in `agda/Muro/Consistency.agda`.
-- The full consistency statement is not proved.
+- In `agda/Muro/Consistency.agda`: no closed normal evidence term has type Empty, and closed evidence terms make progress. Conversion there is a relation (`agda/Muro/Convert.agda`), and the modules are checked under `--safe`.
+- The full consistency statement (`Empty-evid`) is not proved. Preservation and normalisation of closed evidence are its open hypotheses (`Empty-evid-from`).
 - Example twins are not a proof that a `.muro` file is correct.
 
 ## If you need a hole
