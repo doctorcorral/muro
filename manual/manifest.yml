@@ -1,0 +1,73 @@
+# Language manual for muro-lang.dev and for agents.
+# This is not ExDoc. Elixir API docs, when added, live in mix.exs `docs:`.
+# Agda is a third layer: the judgments in agda/Muro.
+
+source: doctorcorral/muro
+path: manual
+version: v1
+
+pages:
+  - file: index.md
+    slug: index
+    title: Manual
+    summary: What Muro is, how to read this book, and the three documentation layers.
+  - file: start.md
+    slug: start
+    title: Start
+    summary: Install, write a .muro file, check it, emit Elixir.
+  - file: wall.md
+    slug: wall
+    title: The wall
+    summary: spec, evidence, and run. Promotion is forbidden.
+  - file: language.md
+    slug: language
+    title: Terms
+    summary: Type, Π, λ, match, quantities, and the book.
+  - file: identity.md
+    slug: identity
+    title: Identity
+    summary: Equations, refl, rewrite, and explicit motives.
+  - file: data.md
+    slug: data
+    title: Data
+    summary: Inductive types, positivity, Maybe, List, Tree.
+  - file: indexed.md
+    slug: indexed
+    title: Indexed data
+    summary: Fin, Vec, and lookup without a runtime bounds check.
+  - file: streams.md
+    slug: streams
+    title: Streams
+    summary: ν, unfold, Always, and bisimulation.
+  - file: either.md
+    slug: either
+    title: Either and Dec
+    summary: Disjoint union and decisions. Not LEM.
+  - file: machine.md
+    slug: machine
+    title: Machine numbers
+    summary: I64, F32, Tensor, and Nx. Nat stays Peano.
+  - file: emit.md
+    slug: emit
+    title: Emit
+    summary: What becomes Elixir. Spec and evidence are omitted.
+  - file: grammar.md
+    slug: grammar
+    title: Grammar
+    summary: The surface grammar lib/muro/parser.ex implements.
+  - file: examples.md
+    slug: examples
+    title: Examples
+    summary: Every file in examples/ and what it is for.
+  - file: for-agents.md
+    slug: for-agents
+    title: For agents
+    summary: Two jobs. Do not mix them. Commands and file map.
+  - file: extending.md
+    slug: extending
+    title: Extending the kernel
+    summary: How to change the type theory. Agda first, then Elixir.
+  - file: not-in-v1.md
+    slug: not-in-v1
+    title: Not in v1
+    summary: What MuroTT v1 refuses, on purpose.

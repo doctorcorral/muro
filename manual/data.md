@@ -1,0 +1,124 @@
+---
+title: Data
+slug: data
+order: 6
+summary: Inductive types, positivity, Maybe, List, Tree.
+---
+
+# Data
+
+In brief: a `data` declaration is a book entry. Binders before `:` are parameters. The telescope after `:` before `Type` is indices. Constructors must be strictly positive. Nat, Unit, Empty, and ν stay primitive.
+
+## A declaration
+
+```
+data Maybe (A : Type) : Type where
+  nothing : Maybe A
+  just    : A → Maybe A
+```
+
+(`examples/maybe.muro`.)
+
+- The type former is spec.
+- Constructors compute in run and may appear in evidence.
+- There is no kernel constructor named after your type. `Maybe`, `List`, `Vec`, `Fin` all use the same `dty` / `ctor` / `mData` representation.
+
+Nat, Unit, Empty, and Stream stay primitive. Do not redeclare them.
+
+## Parameters and indices
+
+```
+data Name params : index-telescope Type where
+  ctor : telescope
+```
+
+Parameters are the binders before `:`. Indices are the telescope after `:` and before `Type`.
+
+```
+data List (A : Type) : Type where          -- one parameter, no indices
+  nil  : List A
+  cons : A → List A → List A
+
+data Fin : Nat → Type where                -- no parameters, one index
+  fzero : Π (n : Nat) → Fin suc(n)
+  fsuc  : Π (n : Nat) → Fin n → Fin suc(n)
+```
+
+`Vec` has both; see [Indexed data](indexed.md).
+
+## Match
+
+One named branch per constructor. Explicit motive over the scrutinee (and its indices, when there are indices).
+
+```
+def fromMaybe : run Π (-A : Type) → Π (d : A) → Π (m : Maybe A) → A :=
+  λ (-A : Type) → λ (d : A) → λ (m : Maybe A) →
+    match m motive (λ _ → A)
+      | nothing => d
+      | just a  => a
+```
+
+`A` is erased. Emit drops that argument. `fromMaybe Nat 0 (just (suc 0))` converts to `suc 0`; `fromJust1` is `refl`.
+
+## Positivity
+
+`D` must not occur left of `Π` in a constructor telescope.
+
+This is rejected:
+
+```
+data Bad : Type where
+  mk : Π (n : Nat) → (Bad n → Nat) → Bad n
+```
+
+(`Bad` is not even well-formed that way — the point is the negative occurrence.)
+
+## Recursion
+
+A self-call in run or evidence must use a constructor argument whose type is `D …`. For lists, that is the tail. For trees, either child.
+
+```
+def length : run Π (- A : Type) → Π (xs : List A) → Nat :=
+  λ (- A : Type) → λ (xs : List A) →
+    match xs motive (λ _ → Nat)
+      | nil => 0
+      | cons _ as => suc (length A as)
+```
+
+(`examples/list.muro`. `[]` is `nil`; `::` is `cons`.)
+
+```
+def size : run Π (t : Tree) → Nat :=
+  λ (t : Tree) →
+    match t motive (λ _ → Nat)
+      | leaf => 0
+      | node l r => suc (plus (size l) (size r))
+```
+
+(`examples/tree.muro`. Both children are smaller.)
+
+## When is a data type Data?
+
+`+` is allowed only if the type WHNFs to Data. For a user type, every *parameter* must be Data. Indices are not asked.
+
+- `List Nat` is Data. `+xs : List Nat` may be reused.
+- `List (Nat → Nat)` is not.
+- `Maybe Unit` is Data.
+- `Vec A n` is Data iff `A` is. The index `n` is Nat; it does not disqualify the type.
+
+## Emit dialect
+
+A 0-argument constructor is an atom: `:nil`, `:nothing`, `:leaf`.
+
+Otherwise a tagged tuple: `{:cons, a, as}`, `{:just, a}`, `{:node, l, r}`.
+
+`ones2()` is `{:cons, {:suc, 0}, {:cons, {:suc, 0}, :nil}}`.
+
+```
+{:ok, src} = Muro.emit_file("examples/list.muro", Muro.Lists)
+Code.eval_string(src)
+Muro.Lists.length(Muro.Lists.ones2())
+# {:suc, {:suc, 0}}
+```
+
+Next: [Indexed data](indexed.md).
