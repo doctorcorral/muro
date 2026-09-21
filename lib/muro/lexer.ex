@@ -146,7 +146,7 @@ defmodule Muro.Lexer do
     n = byte_size(word)
 
     case src do
-      <<^word::binary-size(n), rest::binary>> -> not continues?(rest)
+      <<^word::binary-size(^n), rest::binary>> -> not continues?(rest)
       _ -> false
     end
   end
