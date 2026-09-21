@@ -48,7 +48,7 @@ A definition is in the book the moment `Parser.parse/1` returns it. The checker 
 | [Grammar](manual/grammar.md) | What the parser implements |
 | [Examples](manual/examples.md) | Every file in `examples/` |
 | [For agents](manual/for-agents.md) | Operational contract |
-| [Not in v1](manual/not-in-v1.md) | Refused, on purpose |
+| [Limits](manual/limits.md) | What the language does not do |
 
 Index: [`manual/index.md`](manual/index.md). Machine-readable list: [`manual/manifest.yml`](manual/manifest.yml).
 

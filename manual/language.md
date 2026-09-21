@@ -127,7 +127,7 @@ def plus : run Π (n : Nat) → Π (m : Nat) → Nat :=
 
 ## The half example, as a reader
 
-`examples/half_ok.muro` is the v1 kernel in one file.
+`examples/half_ok.muro` puts the three modes in one file.
 
 - `plus` — run. Adds Peano numbers.
 - `IsEven` — spec. A family `Nat → Type`. `0` is even (`Unit`). `1` is odd (`Empty`). `suc(suc p)` is even iff `p` is.

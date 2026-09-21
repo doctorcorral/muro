@@ -120,8 +120,8 @@ All terms check. Evidence never becomes a run.
 
 Elixir constraints when you are in Job B: ASCII identifiers only. Do not define local `hd/1`. Guards cannot call ordinary `defp` helpers.
 
-## Not in v1
+## What is not in the language
 
 Type : Type, cubical, tactics, implicits, unification, metavariables, extra quantities, user-defined ν-predicates, `+` on Stream or Either, typing raw Elixir, emitting spec or evidence.
 
-Full list: [Not in v1](not-in-v1.md).
+Full list: [Limits](limits.md).

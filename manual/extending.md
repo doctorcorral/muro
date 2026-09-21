@@ -90,7 +90,7 @@ CI runs the Elixir job and `make agda` on every push and pull request.
 
 De Bruijn drops the name strings: `{:pi, q, a, b}`, `{:lam, q, a, t}`, `{:mnat, e, p, z, s}` with index 0 = nearest binder.
 
-## Bidirectional rules (v1)
+## Bidirectional rules
 
 ```
 σ , Γ ⊢[ m ] e ⇒ A     infer

@@ -37,7 +37,7 @@ They are not the same book.
 
 Agda is not what `mix muro.check` runs. Elixir is. If Agda and Elixir disagree, Agda wins — you fix Elixir to match, after the Agda clause exists.
 
-## What v1 is
+## What it is
 
 Bidirectional. Explicit. No holes.
 
@@ -49,7 +49,7 @@ Bidirectional. Explicit. No holes.
 - Recursion in `run` and `evidence` must descend. Spec does not check descent.
 - Emitted code is `run` only.
 
-The done bar for the v1 kernel is [half of eight is four](examples.md#half_okmuro): evenness as a spec, half as a run, the proof as evidence. Evidence is an ordinary term. It is not emitted.
+[half of eight is four](examples.md#half_okmuro) is the book that shows the three modes together: evenness as a spec, half as a run, the proof as evidence. Evidence is an ordinary term. It is not emitted.
 
 ## Names
 

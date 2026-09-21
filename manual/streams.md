@@ -11,7 +11,7 @@ In brief: μ descends (`match` on Nat). ν is a greatest fixed point. Stream is 
 
 ## ν Stream
 
-v1 supports one ν former. The block is required for shape, then dropped — Stream is primitive.
+There is one ν former. The block is required for shape, then dropped — Stream is primitive.
 
 ```
 ν Stream (A : Type) : Type where
@@ -88,6 +88,6 @@ def nats-tail-bisim : evidence Π (n : Nat) → tail (natsFrom n) ~ natsFrom (su
 
 (`examples/bisim.muro`.) Always, `~`, and their inhabitants are evidence (or live in evidence). They are not Elixir streams.
 
-User-defined ν-predicates are [not in v1](not-in-v1.md).
+There are no user-defined ν-predicates. See [Limits](limits.md).
 
 Next: [Either and Dec](either.md).

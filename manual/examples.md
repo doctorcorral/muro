@@ -23,7 +23,7 @@ mix muro.check
 
 ## half_ok.muro
 
-The done bar for the v1 kernel.
+The three modes in one book.
 
 ```
 IsEven : Nat → Type                 -- spec

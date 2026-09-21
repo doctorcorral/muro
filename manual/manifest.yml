@@ -4,7 +4,6 @@
 
 source: doctorcorral/muro
 path: manual
-version: v1
 
 pages:
   - file: index.md
@@ -67,7 +66,7 @@ pages:
     slug: extending
     title: Extending the kernel
     summary: How to change the type theory. Agda first, then Elixir.
-  - file: not-in-v1.md
-    slug: not-in-v1
-    title: Not in v1
-    summary: What MuroTT v1 refuses, on purpose.
+  - file: limits.md
+    slug: limits
+    title: Limits
+    summary: What the language does not do. Facts about the checker, not a roadmap.

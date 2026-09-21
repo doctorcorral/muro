@@ -1,15 +1,15 @@
 ---
-title: Not in v1
-slug: not-in-v1
+title: Limits
+slug: limits
 order: 16
-summary: What MuroTT v1 refuses, on purpose.
+summary: What the language does not do. Facts about the checker, not a roadmap.
 ---
 
-# Not in v1
+# Limits
 
-In brief: these are not missing features to patch in a weekend. They are out of the theory. If a user asks for them, say no and point here.
+In brief: this is what the parser and checker refuse today. It is a description of the language, not a version number and not a list of things to add later.
 
-## Refused
+## The checker does not accept
 
 - `Type : Type`
 - Cubical primitives
@@ -17,8 +17,8 @@ In brief: these are not missing features to patch in a weekend. They are out of 
 - Implicits
 - Unification
 - Metavariables / holes
-- Extra quantities beyond affine, `+`, `-`
-- User-defined ν-predicates (only Stream / Always / `~` as specified)
+- Quantities other than affine, `+`, and `-`
+- User-defined ν-predicates (Stream, Always, and `~` are the ones that exist)
 - `+` on Stream
 - `+` on Either, or on `P → Empty`
 - Typing raw Elixir

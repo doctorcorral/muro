@@ -64,7 +64,7 @@ space      ::= [ \t\n\r] | comment
 
 Application is juxtaposition (`f a b`). `motive`, `in`, and `def` never start an argument. Digits start atoms, so `| 0 =>` parses.
 
-v1 only accepts `ν Stream` with constructor `uncons`. Other names are an error.
+The parser only accepts `ν Stream` with constructor `uncons`. Other names are an error.
 
 Rejected as **tags** (not as ordinary identifiers): `live`, `dead`, `proof`, `proof evidence`, `ghost`, `comp`, `export`. There is no other tag.
 
