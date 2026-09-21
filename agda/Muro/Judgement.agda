@@ -136,6 +136,11 @@ data _,_⊢[_]_⇒_⊣_ σ Γ where
     → combine m fu au ≡ ok uses
     → σ , Γ ⊢[ m ] app f a ⇒ inst B a ⊣ uses
 
+  -- The sort A may be a kind: {Nat ≡ Unit : Type} : Type. This is the one
+  -- place a kind sits inside a small type. It is the shape of Coq's eq in
+  -- impredicative Prop (a singleton family indexed by a large sort, with
+  -- elimination allowed): refl carries no field, so rewrite cannot project
+  -- a type back out, and no retract of Type arises.
   ⇒-idt : ∀ {A a b ua ub}
     → σ , Γ ⊢ A wf
     → σ , Γ ⊢[ spec ] a ⇐ A ⊣ ua

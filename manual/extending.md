@@ -34,6 +34,7 @@ Some premises are there for consistency of the calculus, not for programs. Keep 
 - `⇒-pi`: the codomain is checked against `Type`, not merely well-formed. `Π (x : A) → Type` is a kind (`type-pi`), not a term of type `Type`.
 - `⇒-prod`, `⇒-nu`: components and the ν body are checked against `Type`.
 - Constructor fields are checked against `Type` (`checkCtorFields`); parameters `(A : Type)` are exempt.
+- `⇒-idt` is the deliberate exception: the sort in `{a ≡ b : A}` is only `wf`, so `{Nat ≡ Unit : Type} : Type`. That is the shape of Coq's `eq` in impredicative `Prop`, a singleton family indexed by a large sort with elimination allowed. `refl` has no field, so `rewrite` cannot project a type back out and no retract of `Type` arises. Keep it a singleton: an identity type with a field would need the same restriction as constructor fields.
 
 Relaxing any of these to `wf` makes `Type` a retract of a small type, and with `match … motive (λ _ → Type)` or β that is Girard's paradox. That happened once with `⇒-pi`; the test `"a kind is not a small type"` in `test/muro_check_test.exs` guards it.
 

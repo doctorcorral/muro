@@ -416,7 +416,7 @@ data _,_⊢[_]_⇒_ σ Γ where
 
   -- Kernel identity is refused when A WHNFs to F32 or Tensor F32 S
   -- (see floatIdForbidden in the decision procedure).
-  ⇒-idt : ∀ {A a b}
+  ⇒-idt : ∀ {A a b}                                   -- A may be a kind; see Judgement
     → σ , Γ ⊢ A wf
     → σ , Γ ⊢[ spec ] a ⇐ A
     → σ , Γ ⊢[ spec ] b ⇐ A
