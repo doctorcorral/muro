@@ -363,6 +363,10 @@ data _,_⊢_wf    (σ : Sig) {n} (Γ : Ctx n) : Tm n → Set
 
 data _,_⊢_wf σ Γ where
   type-Type : σ , Γ ⊢ typ wf                          -- Type is a sort, not Type : Type
+  type-pi   : ∀ {q A B}                               -- kinds: Π (x : A) → K, not small
+    → σ , Γ ⊢ A wf
+    → σ , ext Γ q A ⊢ B wf
+    → σ , Γ ⊢ pi q A B wf
   type-el   : ∀ {A} → σ , Γ ⊢[ spec ] A ⇒ typ → σ , Γ ⊢ A wf
 
 data _,_⊢[_]_⇒_ σ Γ where
@@ -385,9 +389,9 @@ data _,_⊢[_]_⇒_ σ Γ where
   ⇒-unit  : σ , Γ ⊢[ spec ] unit  ⇒ typ
   ⇒-empty : σ , Γ ⊢[ spec ] empty ⇒ typ
 
-  ⇒-pi : ∀ {q A B}
+  ⇒-pi : ∀ {q A B}                                    -- codomain small
     → σ , Γ ⊢ A wf
-    → σ , ext Γ q A ⊢ B wf
+    → σ , ext Γ q A ⊢[ spec ] B ⇒ typ
     → σ , Γ ⊢[ spec ] pi q A B ⇒ typ
 
   ⇒-lam : ∀ {m q A t B}
@@ -460,9 +464,9 @@ data _,_⊢[_]_⇒_ σ Γ where
     → σ , Γ ⊢[ m ] e ⇐ A
     → σ , Γ ⊢[ m ] ann e A ⇒ A
 
-  ⇒-prod : ∀ {A B}
-    → σ , Γ ⊢ A wf
-    → σ , Γ ⊢ B wf
+  ⇒-prod : ∀ {A B}                                    -- components small
+    → σ , Γ ⊢[ spec ] A ⇒ typ
+    → σ , Γ ⊢[ spec ] B ⇒ typ
     → σ , Γ ⊢[ spec ] prod A B ⇒ typ
 
   ⇒-pair : ∀ {m A B a b}
@@ -478,8 +482,8 @@ data _,_⊢[_]_⇒_ σ Γ where
     → σ , Γ ⊢[ m ] t ⇒ prod A B
     → σ , Γ ⊢[ m ] snd t ⇒ B
 
-  ⇒-nu : ∀ {F}
-    → σ , ext Γ affine typ ⊢ F wf
+  ⇒-nu : ∀ {F}                                        -- body small
+    → σ , ext Γ affine typ ⊢[ spec ] F ⇒ typ
     → σ , Γ ⊢[ spec ] nu F ⇒ typ
 
   ⇒-unf : ∀ {m S A seed f}
@@ -884,9 +888,14 @@ mutual
   check k σ rs Γ m e A = check′ k σ rs Γ m e A
 
   {-# TERMINATING #-}
+  -- A type is Type, a kind Π (x : A) → K, or a small type (⇒ Type).
+  -- Kinds are not small: Π (x : A) → Type is wf but has no type.
   checkTy : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Tm n → Result ⊤
   checkTy k σ rs Γ A with whnf k σ A
   ... | typ = ok tt                                          -- type-Type
+  ... | pi q A₁ B =                                          -- type-pi
+    checkTy k σ rs Γ A₁ >>
+    checkTy k σ (extRec rs false false) (ext Γ q A₁) B
   ... | A′  = infer′ k σ rs Γ spec A′ >>= λ (T , _) → conv k σ T typ   -- type-el
 
   {-# TERMINATING #-}
@@ -1045,9 +1054,11 @@ mutual
   -- ⇒-pi
   infer′ k σ rs Γ run  (pi _ _ _) = fail "no promotion: Π is an erased term"
   infer′ k σ rs Γ evid (pi _ _ _) = fail "no promotion: Π is an erased term"
+  -- The codomain must be small. With B wf instead, Π (x : A) → Type : Type
+  -- and Type is a retract of a small type (Girard's paradox).
   infer′ k σ rs Γ spec (pi q A B) =
     checkTy k σ rs Γ A >>
-    checkTy k σ (extRec rs false false) (ext Γ q A) B >>
+    check k σ (extRec rs false false) (ext Γ q A) spec B typ >>
     ok (typ , u0s)
 
   -- ⇒-lam
@@ -1182,16 +1193,16 @@ mutual
   -- ⇒-prod
   infer′ k σ rs Γ run  (prod _ _) = fail "no promotion: × is an erased term"
   infer′ k σ rs Γ evid (prod _ _) = fail "no promotion: × is an erased term"
-  infer′ k σ rs Γ spec (prod A B) =
-    checkTy k σ rs Γ A >>
-    checkTy k σ rs Γ B >>
+  infer′ k σ rs Γ spec (prod A B) =                        -- components small
+    check k σ rs Γ spec A typ >>
+    check k σ rs Γ spec B typ >>
     ok (typ , u0s)
 
   -- ⇒-nu
   infer′ k σ rs Γ run  (nu _) = fail "no promotion: ν is an erased term"
   infer′ k σ rs Γ evid (nu _) = fail "no promotion: ν is an erased term"
-  infer′ k σ rs Γ spec (nu F) =
-    checkTy k σ (extRec rs false false) (ext Γ affine typ) F >>
+  infer′ k σ rs Γ spec (nu F) =                            -- body small
+    check k σ (extRec rs false false) (ext Γ affine typ) spec F typ >>
     guard "ν body is not strictly positive" (strictPos F) >>
     ok (typ , u0s)
 
@@ -1352,9 +1363,23 @@ emptyRec = recst nothing [] [] false false
 defRec : ℕ → RecSt 0
 defRec i = recst (just i) [] [] true false
 
+-- Constructor fields must be small types. Parameters are (A : Type) and
+-- are skipped; a field of type Type would make the data type a large
+-- inductive in Type, and match with motive Type would retract Type into it.
+checkCtorFields : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → ℕ → Tm n → Result ⊤
+checkCtorFields k σ rs Γ (suc np) (pi q A B) =
+  checkCtorFields k σ (extRec rs false false) (ext Γ q A) np B
+checkCtorFields _ _ _ _ (suc _) _ =
+  fail "constructor type has too few parameter binders"
+checkCtorFields k σ rs Γ zero (pi q A B) =
+  check k σ rs Γ spec A typ >>
+  checkCtorFields k σ (extRec rs false false) (ext Γ q A) zero B
+checkCtorFields _ _ _ _ zero _ = ok tt
+
 checkCtorTy : ℕ → Sig → ℕ → ℕ → ℕ → Tm 0 → Result ⊤
 checkCtorTy k σ di np ni ctype =
   checkTy k σ emptyRec [] ctype >>
+  checkCtorFields k σ emptyRec [] np ctype >>
   checkCtorRest di np ni ctype
 
 checkCtors : ℕ → Sig → ℕ → ℕ → ℕ → List Ctor → Result ⊤

@@ -66,8 +66,16 @@ data _,_⊢[_]_⇐_⊣_ (σ : Sig) {n} (Γ : Ctx n)
     : Mode → Tm n → Tm n → UseVec n → Set
 data _,_⊢_wf (σ : Sig) {n} (Γ : Ctx n) : Tm n → Set
 
+-- A well-formed type is the sort Type, a kind Π (x : A) → K, or a small
+-- type (a term of type Type). Kinds are not small: Π (x : A) → Type is wf
+-- and has no type. Otherwise Type would be a retract of a small type and
+-- Girard's paradox would apply.
 data _,_⊢_wf σ Γ where
   type-Type : σ , Γ ⊢ typ wf
+  type-pi   : ∀ {q A B}
+    → σ , Γ ⊢ A wf
+    → σ , ext Γ q A ⊢ B wf
+    → σ , Γ ⊢ pi q A B wf
   type-el   : ∀ {A u} → σ , Γ ⊢[ spec ] A ⇒ typ ⊣ u → σ , Γ ⊢ A wf
 
 data _,_⊢[_]_⇒_⊣_ σ Γ where
@@ -93,9 +101,10 @@ data _,_⊢[_]_⇒_⊣_ σ Γ where
   ⇒-unit  : σ , Γ ⊢[ spec ] unit  ⇒ typ ⊣ u0s
   ⇒-empty : σ , Γ ⊢[ spec ] empty ⇒ typ ⊣ u0s
 
-  ⇒-pi : ∀ {q A B}
+  -- The codomain is small. The domain may be a kind (Π (F : Nat → Type) → …).
+  ⇒-pi : ∀ {q A B u}
     → σ , Γ ⊢ A wf
-    → σ , ext Γ q A ⊢ B wf
+    → σ , ext Γ q A ⊢[ spec ] B ⇐ typ ⊣ u
     → σ , Γ ⊢[ spec ] pi q A B ⇒ typ ⊣ u0s
 
   ⇒-lam : ∀ {m q A t B u0 us}

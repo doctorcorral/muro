@@ -816,9 +816,12 @@ defmodule Muro.Check do
       {m, {:pi, _, _, _}} when m in [:run, :evidence] ->
         {:error, "no promotion: Π is an erased term"}
 
+      # The codomain must be small (: Type). With check_ty instead,
+      # Π (x : A) → Type : Type and Type is a retract of a small type.
       {:spec, {:pi, q, a, b}} ->
         with :ok <- check_ty(k, book, rs, gamma, a),
-             :ok <- check_ty(k, book, ext_rec(rs, false, false), ext(gamma, q, a), b),
+             {:ok, _} <-
+               check(k, book, ext_rec(rs, false, false), ext(gamma, q, a), :spec, b, :typ),
              do: {:ok, {:typ, u0s(n)}}
 
       # ⇒-lam
@@ -952,18 +955,28 @@ defmodule Muro.Check do
       {m, {:prod, _, _}} when m in [:run, :evidence] ->
         {:error, "no promotion: × is an erased term"}
 
+      # components small
       {:spec, {:prod, a, b}} ->
-        with :ok <- check_ty(k, book, rs, gamma, a),
-             :ok <- check_ty(k, book, rs, gamma, b),
+        with {:ok, _} <- check(k, book, rs, gamma, :spec, a, :typ),
+             {:ok, _} <- check(k, book, rs, gamma, :spec, b, :typ),
              do: {:ok, {:typ, u0s(n)}}
 
       # ⇒-nu
       {m, {:nu, _}} when m in [:run, :evidence] ->
         {:error, "no promotion: ν is an erased term"}
 
+      # body small
       {:spec, {:nu, f}} ->
-        with :ok <-
-               check_ty(k, book, ext_rec(rs, false, false), ext(gamma, :affine, :typ), f),
+        with {:ok, _} <-
+               check(
+                 k,
+                 book,
+                 ext_rec(rs, false, false),
+                 ext(gamma, :affine, :typ),
+                 :spec,
+                 f,
+                 :typ
+               ),
              :ok <-
                if(strict_pos?(f),
                  do: :ok,
@@ -1134,11 +1147,18 @@ defmodule Muro.Check do
     end
   end
 
+  # A type is Type, a kind Π (x : A) → K, or a small type (⇒ Type).
+  # Kinds are not small: Π (x : A) → Type is wf but has no type.
   defp check_ty(k, book, rs, gamma, a) do
     case whnf(k, book, a) do
       # type-Type
       :typ ->
         :ok
+
+      # type-pi
+      {:pi, q, a1, b} ->
+        with :ok <- check_ty(k, book, rs, gamma, a1),
+             do: check_ty(k, book, ext_rec(rs, false, false), ext(gamma, q, a1), b)
 
       # type-el
       a1 ->
@@ -1631,6 +1651,22 @@ defmodule Muro.Check do
     end
   end
 
+  # Constructor fields must be small types. Parameters are (A : Type) and
+  # are skipped; a field of type Type would make the data type a large
+  # inductive in Type, and match with motive Type would retract Type into it.
+  defp check_ctor_fields(k, book, rs, gamma, np, {:pi, q, a, b}) when np > 0,
+    do: check_ctor_fields(k, book, ext_rec(rs, false, false), ext(gamma, q, a), np - 1, b)
+
+  defp check_ctor_fields(_k, _book, _rs, _gamma, np, _t) when np > 0,
+    do: {:error, "constructor type has too few parameter binders"}
+
+  defp check_ctor_fields(k, book, rs, gamma, 0, {:pi, q, a, b}) do
+    with {:ok, _} <- check(k, book, rs, gamma, :spec, a, :typ),
+         do: check_ctor_fields(k, book, ext_rec(rs, false, false), ext(gamma, q, a), 0, b)
+  end
+
+  defp check_ctor_fields(_k, _book, _rs, _gamma, 0, _t), do: :ok
+
   defp check_ctor_rest(book, dname, np, ni, t), do: skip_params(book, dname, np, ni, np, t)
 
   defp skip_params(book, dname, np, ni, 0, t), do: check_tel_pos(book, dname, np, ni, t)
@@ -1648,7 +1684,8 @@ defmodule Muro.Check do
 
     Enum.reduce_while(ctors, :ok, fn c, :ok ->
       result =
-        with :ok <- tag("#{c.name} type", check_ty(k, book, empty_rec(), [], c.type)) do
+        with :ok <- tag("#{c.name} type", check_ty(k, book, empty_rec(), [], c.type)),
+             :ok <- tag("#{c.name} type", check_ctor_fields(k, book, empty_rec(), [], np, c.type)) do
           check_ctor_rest(book, name, np, ni, c.type)
         end
 

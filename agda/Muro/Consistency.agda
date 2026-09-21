@@ -18,11 +18,10 @@
 -- hypotheses of Empty-evid-from.
 --   * Preservation needs the substitution lemma for ⊢ with uses (β
 --     substitutes the argument into the body and its type).
---   * Normalisation of closed evidence terms cannot come from a model:
---     ⇒-pi accepts Π (x : A) → Type : Type, a retraction of Type into a
---     small type, so with full conversion spec is Type : Type and
---     Girard's paradox applies to spec terms. An argument for evid must
---     use that evid is affine outside Data.
+--   * Normalisation of closed evidence terms. Type is impredicative
+--     (Π (X : Type) → X : Type), so a set-theoretic model in Agda is
+--     not available; the argument must be syntactic, and for evid it
+--     can use that evid is affine outside Data.
 -- Do not cite Empty-evid as a theorem of this development.
 ------------------------------------------------------------------------
 
