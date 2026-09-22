@@ -1,3 +1,13 @@
+<p align="center">
+  <a href="https://muro-lang.dev">
+    <img src="https://raw.githubusercontent.com/murolang/muro/main/assets/muro-logo.png" alt="Muro" width="196">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://hex.pm/packages/muro"><img src="https://img.shields.io/hexpm/v/muro?style=flat-square&label=hex&labelColor=111111&color=e8e8e8" alt="Hex version"></a>
+</p>
+
 # Muro
 
 **A spec never becomes evidence. Evidence never becomes a run.**
