@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://muro-lang.dev">
-    <img src="https://raw.githubusercontent.com/murolang/muro/main/assets/muro-logo.png" alt="Muro" width="196">
+    <img src="assets/muro-logo.png" alt="Muro" width="196">
   </a>
 </p>
 
