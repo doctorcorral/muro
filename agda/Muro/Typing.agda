@@ -561,11 +561,11 @@ Subst-inst {m₀ = m₀} {Γ} q A {a} Da (suc x)
 
 -- Every def body has its declared type, in its declared mode.
 WfSig : Sig → Set
-WfSig σ = ∀ {i d} → lookupDef σ i ≡ ok d
+WfSig σ = ∀ i d → lookupDef σ i ≡ ok d
   → σ , ε ⊨[ Def.dmode d ] Def.dbody d ∶ Def.dtype d
 
 WfSig-empty : WfSig σ-empty
-WfSig-empty ()
+WfSig-empty _ _ ()
 
 allowedDef→≤ᵐ : ∀ d m → allowedDef d m ≡ true → d ≤ᵐ m
 allowedDef→≤ᵐ run  _    _ = ≤ᵐ-run
@@ -593,7 +593,7 @@ step-≈ s = ≈-sym (≈-mode ≤ᵐ-spec-top (⟶→≈ s))
 
 -- δ
 pres⁰ wf le (t-def {d = d} lk al) (δ lk′ _) with ok-inj (trans (sym lk) lk′)
-... | refl = ⊨-mode (allowedDef→≤ᵐ (Def.dmode d) _ al) (closed-⊨ (wf lk))
+... | refl = ⊨-mode (allowedDef→≤ᵐ (Def.dmode d) _ al) (closed-⊨ (wf _ _ lk))
 -- β
 pres⁰ wf le (t-app-aff (conv (t-lam W c rok Dt) cpi) Da) β with ≈-pi-inj cpi
 ... | refl , cA , cB =

@@ -6,22 +6,22 @@
 --   Empty-intro      an introduction form (ze, su, one, λ, refl) never
 --                    checks against Empty, in any σ, Γ, and mode;
 --   Empty-nf         no closed normal evidence term has type Empty
---                    (canonical evidence forms at Empty do not exist);
+--                    (canonical evidence forms at Empty do not exist),
+--                    for ⊢ and for the declarative ⊨ of Muro.Typing;
 --   progress-⇐       a closed well-typed evidence term is normal or
 --                    takes a ⟶ step;
---   Empty-evid-from  preservation and normalisation of closed evidence
---                    together give: no closed evidence of Empty. Both
---                    hypotheses are arguments of the lemma. Nothing is
---                    postulated.
+--   preservation     a ⟶ step keeps closed evidence at Empty (⊨), a
+--                    corollary of Muro.Typing.pres;
+--   Empty-evid-from  normalisation of closed evidence gives: no closed
+--                    evidence of Empty. The hypothesis is an argument
+--                    of the lemma. Nothing is postulated.
 --
--- Not proved: Empty-evid itself. What is missing is exactly the two
--- hypotheses of Empty-evid-from.
---   * Preservation needs the substitution lemma for ⊢ with uses (β
---     substitutes the argument into the body and its type).
---   * Normalisation of closed evidence terms. Type is impredicative
---     (Π (X : Type) → X : Type), so a set-theoretic model in Agda is
---     not available; the argument must be syntactic, and for evid it
---     can use that evid is affine outside Data.
+-- Not proved: Empty-evid itself. What is missing is exactly the
+-- hypothesis of Empty-evid-from: normalisation of closed evidence
+-- terms. Type is impredicative (Π (X : Type) → X : Type), so a
+-- set-theoretic model in Agda is not available; the argument must be
+-- syntactic (reducibility candidates), and for evid it can use that
+-- evid is affine outside Data.
 -- Do not cite Empty-evid as a theorem of this development.
 ------------------------------------------------------------------------
 
@@ -39,6 +39,7 @@ open import Muro.Syntax
 open import Muro.Env
 open import Muro.Convert
 open import Muro.Judgement
+open import Muro.Typing
 
 fail≢ok : ∀ {A : Set} {e} {d : A} → fail e ≡ ok d → ⊥
 fail≢ok ()
@@ -275,15 +276,75 @@ progress-⇒ (⇒-def lk _) = ⊥-elim (fail≢ok lk)
 progress-⇒ (⇒-ann _ _) = inj₂ (_ , ann-e)
 
 ------------------------------------------------------------------------
--- The remaining obligations, as hypotheses. Not postulated.
+-- The same canonical-forms argument for the declarative judgment ⊨,
+-- which is what preservation is proved for.
 ------------------------------------------------------------------------
 
--- Preservation: a ⟶ step keeps closed evidence at Empty.
-Preservation : Set
-Preservation = ∀ {e e′ u} →
-  σ-empty , ε ⊢[ evid ] e ⇐ empty ⊣ u →
+ne-untyped⊨ : ∀ {m e A} → Ne σ-empty evid e → σ-empty , ε ⊨[ m ] e ∶ A → ⊥
+ne-untyped⁰ : ∀ {m e A} → Ne σ-empty evid e → σ-empty , ε ⊨⁰[ m ] e ∶ A → ⊥
+
+ne-untyped⊨ ne (conv D _) = ne-untyped⁰ ne D
+
+ne-untyped⁰ ne-var (t-var {x = ()} _)
+ne-untyped⁰ (ne-def _) (t-def () _)
+ne-untyped⁰ (ne-app ne) (t-app-aff Df _) = ne-untyped⊨ ne Df
+ne-untyped⁰ (ne-app ne) (t-app-era Df _) = ne-untyped⊨ ne Df
+ne-untyped⁰ (ne-app ne) (t-app-reuse Df _ _) = ne-untyped⊨ ne Df
+ne-untyped⁰ (ne-mNat ne) (t-mNat De _ _ _) = ne-untyped⊨ ne De
+ne-untyped⁰ (ne-mUnit ne) (t-mUnit De _ _) = ne-untyped⊨ ne De
+ne-untyped⁰ (ne-mEmp ne) (t-mEmp De _) = ne-untyped⊨ ne De
+ne-untyped⁰ (ne-rwt ne) (t-rwt Deq _ _) = ne-untyped⊨ ne Deq
+ne-untyped⁰ (ne-foreign f-dty) ()
+ne-untyped⁰ (ne-foreign f-ctor) ()
+ne-untyped⁰ (ne-foreign f-mData) ()
+ne-untyped⁰ (ne-foreign f-prod) ()
+ne-untyped⁰ (ne-foreign f-pair) ()
+ne-untyped⁰ (ne-foreign f-fst) ()
+ne-untyped⁰ (ne-foreign f-snd) ()
+ne-untyped⁰ (ne-foreign f-nu) ()
+ne-untyped⁰ (ne-foreign f-unf) ()
+ne-untyped⁰ (ne-foreign f-ucons) ()
+ne-untyped⁰ (ne-foreign f-i64) ()
+ne-untyped⁰ (ne-foreign f-f32ty) ()
+ne-untyped⁰ (ne-foreign f-tensor) ()
+ne-untyped⁰ (ne-foreign f-addi) ()
+ne-untyped⁰ (ne-foreign f-muli) ()
+ne-untyped⁰ (ne-foreign f-addt) ()
+ne-untyped⁰ (ne-foreign f-toi64) ()
+ne-untyped⁰ (ne-foreign f-packi) ()
+
+Empty-nf⊨ : ∀ {e} → Nf σ-empty evid e → σ-empty , ε ⊨[ evid ] e ∶ empty → ⊥
+Empty-nf⊨ (nf-ne ne) D = ne-untyped⊨ ne D
+Empty-nf⊨ nf-typ (conv () _)
+Empty-nf⊨ nf-pi (conv () _)
+Empty-nf⊨ nf-lam (conv (t-lam _ _ _ _) c) with ≈-shape h-pi h-empty c
+... | ()
+Empty-nf⊨ nf-nat (conv () _)
+Empty-nf⊨ nf-ze (conv t-ze c) with ≈-shape h-nat h-empty c
+... | ()
+Empty-nf⊨ nf-su (conv (t-su _) c) with ≈-shape h-nat h-empty c
+... | ()
+Empty-nf⊨ nf-unit (conv () _)
+Empty-nf⊨ nf-one (conv t-one c) with ≈-shape h-unit h-empty c
+... | ()
+Empty-nf⊨ nf-empty (conv () _)
+Empty-nf⊨ nf-idt (conv () _)
+Empty-nf⊨ nf-rfl (conv (t-rfl _) c) with ≈-shape h-idt h-empty c
+... | ()
+
+------------------------------------------------------------------------
+-- Preservation, specialised. A corollary of Muro.Typing.pres.
+------------------------------------------------------------------------
+
+preservation : ∀ {e e′} →
+  σ-empty , ε ⊨[ evid ] e ∶ empty →
   σ-empty ⊢[ evid ] e ⟶ e′ →
-  σ-empty , ε ⊢[ evid ] e′ ⇐ empty ⊣ u
+  σ-empty , ε ⊨[ evid ] e′ ∶ empty
+preservation D s = pres WfSig-empty ≤ᵐ-evid D s
+
+------------------------------------------------------------------------
+-- The remaining obligation, as a hypothesis. Not postulated.
+------------------------------------------------------------------------
 
 -- Normalisation: closed evidence at Empty reaches a normal form.
 Normalising : Set
@@ -291,14 +352,7 @@ Normalising = ∀ {e u} →
   σ-empty , ε ⊢[ evid ] e ⇐ empty ⊣ u →
   ∃ λ v → (σ-empty ⊢[ evid ] e ⟶* v) × Nf σ-empty evid v
 
-Empty-evid-from : Preservation → Normalising →
+Empty-evid-from : Normalising →
   ∀ {e u} → σ-empty , ε ⊢[ evid ] e ⇐ empty ⊣ u → ⊥
-Empty-evid-from pres norm D with norm D
-... | v , r , nf = Empty-nf nf (pres* r D)
-  where
-    pres* : ∀ {e v u} →
-      σ-empty ⊢[ evid ] e ⟶* v →
-      σ-empty , ε ⊢[ evid ] e ⇐ empty ⊣ u →
-      σ-empty , ε ⊢[ evid ] v ⇐ empty ⊣ u
-    pres* ⟶*-refl D′ = D′
-    pres* (⟶*-step s r′) D′ = pres* r′ (pres D′ s)
+Empty-evid-from norm D with norm D
+... | v , r , nf = Empty-nf⊨ nf (pres* WfSig-empty ≤ᵐ-evid (forget-⇐ D) r)
