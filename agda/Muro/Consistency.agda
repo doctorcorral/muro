@@ -69,13 +69,13 @@ data Intro {n} : Tm n → Set where
 
 Empty-intro-⇒ : ∀ {σ n} {Γ : Ctx n} {m e B u} →
   Intro e → σ , Γ ⊢[ m ] e ⇒ B ⊣ u → σ ⊢[ m ] B ≈ empty → ⊥
-Empty-intro-⇒ i-ze ⇒-ze c with ≈-nf nf-nat nf-empty c
+Empty-intro-⇒ i-ze ⇒-ze c with ≈-shape h-nat h-empty c
 ... | ()
-Empty-intro-⇒ i-su (⇒-su _) c with ≈-nf nf-nat nf-empty c
+Empty-intro-⇒ i-su (⇒-su _) c with ≈-shape h-nat h-empty c
 ... | ()
-Empty-intro-⇒ i-one ⇒-one c with ≈-nf nf-unit nf-empty c
+Empty-intro-⇒ i-one ⇒-one c with ≈-shape h-unit h-empty c
 ... | ()
-Empty-intro-⇒ i-lam (⇒-lam _ _ _ _) c with ≈-nf nf-pi nf-empty c
+Empty-intro-⇒ i-lam (⇒-lam _ _ _ _) c with ≈-shape h-pi h-empty c
 ... | ()
 Empty-intro-⇒ i-rfl () _
 
@@ -164,11 +164,11 @@ nf-fun : ∀ {f F q A B u} →
   σ-empty ⊢[ evid ] F ≈ pi q A B → IsLam f
 nf-fun (nf-ne ne) D _ = ⊥-elim (ne-untyped-⇒ ne D)
 nf-fun nf-lam _ _ = is-lam
-nf-fun nf-ze ⇒-ze c with ≈-nf nf-nat nf-pi c
+nf-fun nf-ze ⇒-ze c with ≈-shape h-nat h-pi c
 ... | ()
-nf-fun (nf-su _) (⇒-su _) c with ≈-nf nf-nat nf-pi c
+nf-fun (nf-su _) (⇒-su _) c with ≈-shape h-nat h-pi c
 ... | ()
-nf-fun nf-one ⇒-one c with ≈-nf nf-unit nf-pi c
+nf-fun nf-one ⇒-one c with ≈-shape h-unit h-pi c
 ... | ()
 nf-fun nf-typ () _
 nf-fun nf-pi () _
@@ -184,9 +184,9 @@ nf-nat-prog : ∀ {e P z s u} →
 nf-nat-prog (nf-ne ne) D = ⊥-elim (ne-untyped-⇐ ne D)
 nf-nat-prog nf-ze _ = inj₂ (_ , ιz)
 nf-nat-prog (nf-su _) _ = inj₂ (_ , ιs)
-nf-nat-prog nf-lam (⇐-conv (⇒-lam _ _ _ _) c) with ≈-nf nf-pi nf-nat c
+nf-nat-prog nf-lam (⇐-conv (⇒-lam _ _ _ _) c) with ≈-shape h-pi h-nat c
 ... | ()
-nf-nat-prog nf-one (⇐-conv ⇒-one c) with ≈-nf nf-unit nf-nat c
+nf-nat-prog nf-one (⇐-conv ⇒-one c) with ≈-shape h-unit h-nat c
 ... | ()
 nf-nat-prog nf-typ (⇐-conv () _)
 nf-nat-prog nf-pi (⇐-conv () _)
@@ -201,11 +201,11 @@ nf-unit-prog : ∀ {e P t u} →
   Prog (mUnit e P t)
 nf-unit-prog (nf-ne ne) D = ⊥-elim (ne-untyped-⇐ ne D)
 nf-unit-prog nf-one _ = inj₂ (_ , ιtt)
-nf-unit-prog nf-ze (⇐-conv ⇒-ze c) with ≈-nf nf-nat nf-unit c
+nf-unit-prog nf-ze (⇐-conv ⇒-ze c) with ≈-shape h-nat h-unit c
 ... | ()
-nf-unit-prog (nf-su _) (⇐-conv (⇒-su _) c) with ≈-nf nf-nat nf-unit c
+nf-unit-prog (nf-su _) (⇐-conv (⇒-su _) c) with ≈-shape h-nat h-unit c
 ... | ()
-nf-unit-prog nf-lam (⇐-conv (⇒-lam _ _ _ _) c) with ≈-nf nf-pi nf-unit c
+nf-unit-prog nf-lam (⇐-conv (⇒-lam _ _ _ _) c) with ≈-shape h-pi h-unit c
 ... | ()
 nf-unit-prog nf-typ (⇐-conv () _)
 nf-unit-prog nf-pi (⇐-conv () _)
@@ -220,13 +220,13 @@ nf-eq-prog : ∀ {eq E A l r P t u} →
   σ-empty ⊢[ evid ] E ≈ idt A l r → Prog (rwt eq P t)
 nf-eq-prog (nf-ne ne) D _ = ⊥-elim (ne-untyped-⇒ ne D)
 nf-eq-prog nf-rfl _ _ = inj₂ (_ , ιrfl)
-nf-eq-prog nf-ze ⇒-ze c with ≈-nf nf-nat nf-idt c
+nf-eq-prog nf-ze ⇒-ze c with ≈-shape h-nat h-idt c
 ... | ()
-nf-eq-prog (nf-su _) (⇒-su _) c with ≈-nf nf-nat nf-idt c
+nf-eq-prog (nf-su _) (⇒-su _) c with ≈-shape h-nat h-idt c
 ... | ()
-nf-eq-prog nf-one ⇒-one c with ≈-nf nf-unit nf-idt c
+nf-eq-prog nf-one ⇒-one c with ≈-shape h-unit h-idt c
 ... | ()
-nf-eq-prog nf-lam (⇒-lam _ _ _ _) c with ≈-nf nf-pi nf-idt c
+nf-eq-prog nf-lam (⇒-lam _ _ _ _) c with ≈-shape h-pi h-idt c
 ... | ()
 nf-eq-prog nf-typ () _
 nf-eq-prog nf-pi () _
