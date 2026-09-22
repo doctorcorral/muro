@@ -46,7 +46,7 @@ open import Muro.Base
 open import Muro.Syntax
 open import Muro.Subst using (inst; motSuc; closed; appsFrom)
 open import Muro.Env
-open import Muro.Convert using (_⊢[_]_≈_)
+open import Muro.Convert using (_⊢[_]_≈_; ≈-trans; ≈-sym)
 open import Muro.Data
 
 ------------------------------------------------------------------------
@@ -217,17 +217,21 @@ data _,_⊢[_]_⇐_⊣_ σ Γ where
     → σ ⊢[ spec ] B ≈ A
     → σ , Γ ⊢[ m ] e ⇐ A ⊣ u
 
-  ⇐-lam : ∀ {m q A A′ t B u0 us}
+  -- The expected type is read through ≈ (Check: viewPi), so ⇐ is
+  -- closed under conversion of the type (⇐-≈ below).
+  ⇐-lam : ∀ {m q A A′ t B T u0 us}
     → σ , Γ ⊢ A wf
+    → σ ⊢[ spec ] T ≈ pi q A′ B
     → σ ⊢[ spec ] A ≈ A′
     → ReuseOk σ q A′
     → σ , ext Γ q A′ ⊢[ m ] t ⇐ B ⊣ (u0 ∷ us)
     → checkBound m q u0 ≡ ok tt
-    → σ , Γ ⊢[ m ] lam q A t ⇐ pi q A′ B ⊣ us
+    → σ , Γ ⊢[ m ] lam q A t ⇐ T ⊣ us
 
-  ⇐-refl : ∀ {m A a b}
+  ⇐-refl : ∀ {m T A a b}
+    → σ ⊢[ spec ] T ≈ idt A a b
     → σ ⊢[ spec ] a ≈ b
-    → σ , Γ ⊢[ m ] rfl ⇐ idt A a b ⊣ u0s
+    → σ , Γ ⊢[ m ] rfl ⇐ T ⊣ u0s
 
   -- A constructor application is checked against a data type (Check:
   -- viewData on the expected type, then checkCtorApp). The parameters
@@ -270,6 +274,15 @@ data _,_⊢[_]_brs⟨_,_,_,_⟩_⊣_ σ Γ where
 ------------------------------------------------------------------------
 -- Empty signature / empty context (for Wall and Consistency).
 ------------------------------------------------------------------------
+
+-- ⇐ is closed under conversion of the expected type: every ⇐ rule
+-- reads its type through ≈.
+⇐-≈ : ∀ {σ n} {Γ : Ctx n} {m e A A′ u}
+  → σ , Γ ⊢[ m ] e ⇐ A ⊣ u → σ ⊢[ spec ] A ≈ A′ → σ , Γ ⊢[ m ] e ⇐ A′ ⊣ u
+⇐-≈ (⇐-conv D c) c′ = ⇐-conv D (≈-trans c c′)
+⇐-≈ (⇐-lam W c cA rok D b) c′ = ⇐-lam W (≈-trans (≈-sym c′) c) cA rok D b
+⇐-≈ (⇐-refl c cab) c′ = ⇐-refl (≈-trans (≈-sym c′) c) cab
+⇐-≈ (⇐-ctor c lk lps lidx S cR) c′ = ⇐-ctor (≈-trans (≈-sym c′) c) lk lps lidx S cR
 
 σ-empty : Sig
 σ-empty = mkSig [] []

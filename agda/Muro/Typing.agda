@@ -359,9 +359,9 @@ forget-⇒ (⇒-def lk al) = conv (t-def lk al) ≈-refl
 forget-⇒ (⇒-ann W D) = conv (t-ann (forget-wf W) (forget-⇐ D)) ≈-refl
 
 forget-⇐ (⇐-conv D c) = conv-≈ (forget-⇒ D) c
-forget-⇐ (⇐-lam W c rok D _) =
-  conv (t-lam (forget-wf W) c rok (forget-⇐ D)) ≈-refl
-forget-⇐ (⇐-refl c) = conv (t-rfl c) ≈-refl
+forget-⇐ (⇐-lam W cT c rok D _) =
+  conv (t-lam (forget-wf W) c rok (forget-⇐ D)) (≈-sym cT)
+forget-⇐ (⇐-refl cT c) = conv (t-rfl c) (≈-sym cT)
 forget-⇐ (⇐-ctor {e = e} {di = di} {ps} {idxs} c lk lps lidx S cR)
   with sp-head S
 ... | j , as , sp with forget-sp S sp

@@ -165,9 +165,9 @@ spec-⇒-uses (⇒-def _ _) = refl
 spec-⇒-uses (⇒-ann _ D) = spec-⇐-uses D
 
 spec-⇐-uses (⇐-conv D _) = spec-⇒-uses D
-spec-⇐-uses (⇐-lam _ _ _ D _) with spec-⇐-uses D
+spec-⇐-uses (⇐-lam _ _ _ _ D _) with spec-⇐-uses D
 ... | refl = refl
-spec-⇐-uses (⇐-refl _) = refl
+spec-⇐-uses (⇐-refl _ _) = refl
 spec-⇐-uses (⇐-ctor _ _ _ _ S _) = spec-sp-uses S
 
 -- combineArg at spec: an erased argument gives u0s outright; the others
