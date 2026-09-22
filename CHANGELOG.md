@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
 
-No checker change. Agda only.
+No checker change. Every book that checked under 0.2.0 checks under 0.2.1 with the same result. Agda and manual only.
 
 ### Agda (`agda/Muro`)
 
@@ -17,6 +17,10 @@ No checker change. Agda only.
 
 - `extending.md`: the new modules, what each step of the order must add to them, and the two mode facts the metatheory depends on.
 - `limits.md`, `for-agents.md`, README: what is proved now.
+
+### Package
+
+- Version 0.2.1. `agda/Muro.agda` re-exports the new modules.
 
 ## 0.2.0
 
