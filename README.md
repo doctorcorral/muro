@@ -1,6 +1,6 @@
 <a href="https://muro-lang.dev"><img src="assets/muro-logo.png" alt="Muro" width="180" align="left" hspace="28"></a>
 
-<h1>Prove real programs correct.<br>Then run them.</h1>
+<h3>Prove real programs correct.<br>Then run them.</h3>
 
 <br><br><br>
 
