@@ -8,6 +8,8 @@ module Muro where
 open import Muro.Base public
 open import Muro.Syntax public
 open import Muro.Subst public
+open import Muro.Unembed public
+open import Muro.Env public
 open import Muro.Check public
 import Muro.Judgement
 import Muro.Wall

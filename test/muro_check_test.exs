@@ -354,6 +354,53 @@ defmodule Muro.CheckTest do
     assert Muro.Vecs.lookup({:suc, 0}, {:fzero, 0}, ones1) == {:suc, 0}
   end
 
+  # Type is a sort. A kind (Π … → Type) is well-formed but is not a term of
+  # type Type. Otherwise Type would be a retract of a small type (Girard).
+  test "a kind is not a small type: Π, ×, and data fields" do
+    pi_retract = """
+    def U : spec Type := Π (_ : Unit) → Type
+    """
+
+    assert {:ok, book} = Parser.parse(pi_retract)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "Type has no type"
+
+    prod_retract = """
+    def U : spec Type := Type × Unit
+    """
+
+    assert {:ok, book} = Parser.parse(prod_retract)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "Type has no type"
+
+    box_retract = """
+    data Box : Type where
+      box : Π (A : Type) → Box
+    """
+
+    assert {:ok, book} = Parser.parse(box_retract)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "Type has no type"
+  end
+
+  test "kinds are well-formed as def types and binder domains" do
+    src = """
+    def IsEven : spec Π (n : Nat) → Type :=
+      λ (n : Nat) →
+        match n motive (λ _ → Type)
+          | 0 => Unit
+          | suc n1 => Empty
+    def Fam : spec Π (F : Π (n : Nat) → Type) → Type :=
+      λ (F : Π (n : Nat) → Type) → F 0
+    def useFam : spec Fam IsEven := tt
+    def Eq : spec Type := {IsEven ≡ IsEven : Π (n : Nat) → Type}
+    def eqOk : evidence Eq := refl
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+  end
+
   test "indexed positivity rejects Bad" do
     src = """
     data Bad : Nat → Type where

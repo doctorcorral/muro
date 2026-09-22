@@ -6,6 +6,20 @@ An explicit affine dependent type theory. Elixir parses, checks, and emits `.mur
 
 The language book is [`manual/`](manual/index.md). That is what [muro-lang.dev](https://muro-lang.dev) will render. It is not ExDoc. Elixir API docs, when added, stay on `@moduledoc` / `mix docs`. Agda in `agda/Muro/` is a third layer: the rules of the calculus, not a certificate that a `.muro` file is correct.
 
+## Install
+
+[muro on Hex](https://hex.pm/packages/muro) is published by the [murolang](https://hex.pm/users/murolang) organization. Releases are listed in [CHANGELOG.md](CHANGELOG.md).
+
+```elixir
+def deps do
+  [
+    {:muro, "~> 0.2"}
+  ]
+end
+```
+
+A clone is for changing the kernel. A `.muro` file is checked with `mix muro.check` from a project that depends on the package.
+
 ---
 
 ## One-shot (humans and agents)
@@ -73,7 +87,7 @@ make agda
 
 `Muro.Lexer.tokenize/1` is the highlighter. It walks a fragment with the parser's lexical rules and returns `{kind, start, stop}` byte spans. A snippet that `Parser.parse/1` rejects still yields spans, and joining the slices gives the source back. `Muro.MakeupLexer` maps those spans onto Makeup tags (language `"muro"`, extension `.muro`) and is registered when the application starts. HTML and colors stay with the caller.
 
-`Muro.Check.check_sig/1` returns `:ok` on the book. CI runs the Elixir job and `make agda` on every push and pull request.
+`Muro.Check.check_sig/1` returns `:ok` on the book. CI runs the Elixir job and `make agda` on every push and pull request. `make agda` checks the theorem modules (`Muro.Judgement`, `Muro.Wall`, `Muro.Consistency`) under `--safe`; conversion in ⊢ is a relation, `Muro.Consistency` proves that no closed normal evidence term has type Empty, `Empty-evid` itself is not proved, and data / ν / Tensor are still outside ⊢. `Type` is one impredicative sort; kinds (`Π (x : A) → Type`) are well-formed but are not terms of type `Type`, in Agda and in Elixir alike.
 
 ## Names
 

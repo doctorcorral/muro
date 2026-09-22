@@ -41,7 +41,7 @@ Agda is not what `mix muro.check` runs. Elixir is. If Agda and Elixir disagree, 
 
 Bidirectional. Explicit. No holes.
 
-- One sort, `Type`. Not `Type : Type`.
+- One sort, `Type`. Not `Type : Type`, and a kind `Π (x : A) → Type` is not a term of type `Type` either.
 - Every binder is written `(x : A)`, or `(+ x : A)`, or `(- x : A)`.
 - Every `match` and `rewrite` writes its motive.
 - No metavariables, no implicits, no unification, no tactics.

@@ -8,6 +8,7 @@
 -- Raw HOAS (Tm → Tm) is not the inductive syntax.
 ------------------------------------------------------------------------
 
+{-# OPTIONS --safe #-}
 module Muro.Syntax where
 
 open import Data.Bool.Base using (Bool; true; false; if_then_else_)

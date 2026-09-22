@@ -2,6 +2,7 @@
 -- MuroTT: quantities, modes, usages, and the checker's Result type.
 ------------------------------------------------------------------------
 
+{-# OPTIONS --safe #-}
 module Muro.Base where
 
 open import Data.Bool.Base using (Bool; true; false; _∧_; not; if_then_else_)

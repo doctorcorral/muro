@@ -3,7 +3,7 @@
 --
 -- Decide: fuel-based Result, each clause commented with a ⊢ constructor.
 -- The theorem-oriented inductive spec of the core fragment is
--- Muro.Judgement (conversion there is α-equality, not this WHNF).
+-- Muro.Judgement (conversion there is ≈, not this fuelled WHNF).
 --
 -- There is no promotion: spec ↛ evid, evid ↛ run, spec ↛ run.
 -- Emit visibility (def vs defp) is an Elixir-only flag on run.
@@ -30,96 +30,7 @@ open import Relation.Binary.PropositionalEquality.Core using (_≡_; refl)
 open import Muro.Base
 open import Muro.Syntax
 open import Muro.Subst
-
-------------------------------------------------------------------------
--- Signature: data declarations and closed definitions.
-------------------------------------------------------------------------
-
--- dmode is run or spec. Emit visibility (def vs defp) is an Elixir-only
--- flag on run; it is not part of this spec.
-record Def : Set where
-  constructor mkDef
-  field
-    dname : String
-    dmode : Mode
-    dtype : Tm 0
-    dbody : Tm 0
-
--- Constructor type is closed: Π params → Π args → D params indices.
-record Ctor : Set where
-  constructor mkCtor
-  field
-    cname : String
-    ctype : Tm 0
-
--- Parameters are binders before `:`. Indices are the telescope after `:`
--- before `Type`. Index types are closed (weakened under the parameter Πs).
-record DataDecl : Set where
-  constructor mkData
-  field
-    dname : String
-    pqtys : List Qty
-    idxs  : List (Qty × Tm 0)
-    ctors : List Ctor
-
-record Sig : Set where
-  constructor mkSig
-  field
-    datas : List DataDecl
-    defs  : List Def
-
-fromDefs : List Def → Sig
-fromDefs ds = mkSig [] ds
-
-lookupList : ∀ {A : Set} → List A → ℕ → Result A
-lookupList []       _       = fail "unknown index"
-lookupList (x ∷ _)  zero    = ok x
-lookupList (_ ∷ xs) (suc i) = lookupList xs i
-
-lookupDef : Sig → ℕ → Result Def
-lookupDef σ i = lookupList (Sig.defs σ) i
-
-lookupData : Sig → ℕ → Result DataDecl
-lookupData σ i = lookupList (Sig.datas σ) i
-
-lookupCtor : DataDecl → ℕ → Result Ctor
-lookupCtor d i = lookupList (DataDecl.ctors d) i
-
-nparams : DataDecl → ℕ
-nparams d = length (DataDecl.pqtys d)
-
-nidxs : DataDecl → ℕ
-nidxs d = length (DataDecl.idxs d)
-
-dtyType : ∀ {n} → List Qty → List (Qty × Tm 0) → Tm n
-dtyType [] []              = typ
-dtyType (q ∷ qs) ixs       = pi q typ (dtyType qs ixs)
-dtyType [] ((q , T) ∷ ixs) = pi q (closed T) (dtyType [] ixs)
-
-------------------------------------------------------------------------
--- Contexts. Newest binder is index zero; every type is weakened to n.
-------------------------------------------------------------------------
-
-record Bind (n : ℕ) : Set where
-  constructor bind
-  field
-    bqty : Qty
-    btyp : Tm n
-
-Ctx : ℕ → Set
-Ctx n = Vec (Bind n) n
-
-wkBind : ∀ {n} → Bind n → Bind (suc n)
-wkBind (bind q A) = bind q (wk A)
-
-ext : ∀ {n} → Ctx n → Qty → Tm n → Ctx (suc n)
-ext Γ q A = bind q (wk A) ∷ map wkBind Γ
-
-qtyOf : ∀ {n} → Ctx n → Fin n → Qty
-qtyOf Γ x = Bind.bqty (lookup Γ x)
-
-typOf : ∀ {n} → Ctx n → Fin n → Tm n
-typOf Γ x = Bind.btyp (lookup Γ x)
+open import Muro.Env public
 
 ------------------------------------------------------------------------
 -- Recursion state: run and evid structural descent (not spec).
@@ -153,69 +64,6 @@ scrutOk _  _       = false
 isSmallerVar : ∀ {n} → RecSt n → Tm n → Bool
 isSmallerVar rs (var x) = lookup (RecSt.smaller rs) x
 isSmallerVar _  _       = false
-
-------------------------------------------------------------------------
--- Usage vectors.
-------------------------------------------------------------------------
-
-UseVec : ℕ → Set
-UseVec n = Vec Use n
-
-u0s : ∀ {n} → UseVec n
-u0s {zero}  = []
-u0s {suc n} = U0 ∷ u0s
-
-oneHot : ∀ {n} → Fin n → Use → UseVec n
-oneHot {suc _} zero    u = u  ∷ u0s
-oneHot {suc _} (suc i) u = U0 ∷ oneHot i u
-
-addUse : Use → Use → Result Use
-addUse U0 u  = ok u
-addUse u  U0 = ok u
-addUse U1 U1 = fail "affine variable used twice"
-addUse Uω _  = ok Uω
-addUse _  Uω = ok Uω
-
-addUses : ∀ {n} → UseVec n → UseVec n → Result (UseVec n)
-addUses []       []       = ok []
-addUses (x ∷ xs) (y ∷ ys) = _∷_ <$> addUse x y ⊛ addUses xs ys
-
-maxUse : Use → Use → Use
-maxUse Uω _  = Uω
-maxUse _  Uω = Uω
-maxUse U1 _  = U1
-maxUse _  U1 = U1
-maxUse U0 U0 = U0
-
-maxUses : ∀ {n} → UseVec n → UseVec n → UseVec n
-maxUses []       []       = []
-maxUses (x ∷ xs) (y ∷ ys) = maxUse x y ∷ maxUses xs ys
-
-combine : ∀ {n} → Mode → UseVec n → UseVec n → Result (UseVec n)
-combine run  u v = addUses u v
-combine evid u v = addUses u v
-combine spec _ _ = ok u0s
-
-combineAlt : ∀ {n} → Mode → UseVec n → UseVec n → UseVec n
-combineAlt run  u v = maxUses u v
-combineAlt evid u v = maxUses u v
-combineAlt spec _ _ = u0s
-
-checkBound : Mode → Qty → Use → Result ⊤
-checkBound run  erased U1 = fail "erased variable used computationally"
-checkBound evid erased U1 = fail "erased variable used computationally"
-checkBound run  erased Uω = fail "erased variable used computationally"
-checkBound evid erased Uω = fail "erased variable used computationally"
-checkBound run  affine Uω = fail "affine variable used as reusable"
-checkBound evid affine Uω = fail "affine variable used as reusable"
-checkBound _    _      _  = ok tt
-
-allowedDef : Mode → Mode → Bool
-allowedDef run  _    = true
-allowedDef evid spec = true
-allowedDef evid evid = true
-allowedDef spec spec = true
-allowedDef _    _    = false
 
 ------------------------------------------------------------------------
 -- Small helpers.
@@ -515,6 +363,10 @@ data _,_⊢_wf    (σ : Sig) {n} (Γ : Ctx n) : Tm n → Set
 
 data _,_⊢_wf σ Γ where
   type-Type : σ , Γ ⊢ typ wf                          -- Type is a sort, not Type : Type
+  type-pi   : ∀ {q A B}                               -- kinds: Π (x : A) → K, not small
+    → σ , Γ ⊢ A wf
+    → σ , ext Γ q A ⊢ B wf
+    → σ , Γ ⊢ pi q A B wf
   type-el   : ∀ {A} → σ , Γ ⊢[ spec ] A ⇒ typ → σ , Γ ⊢ A wf
 
 data _,_⊢[_]_⇒_ σ Γ where
@@ -537,9 +389,9 @@ data _,_⊢[_]_⇒_ σ Γ where
   ⇒-unit  : σ , Γ ⊢[ spec ] unit  ⇒ typ
   ⇒-empty : σ , Γ ⊢[ spec ] empty ⇒ typ
 
-  ⇒-pi : ∀ {q A B}
+  ⇒-pi : ∀ {q A B}                                    -- codomain small
     → σ , Γ ⊢ A wf
-    → σ , ext Γ q A ⊢ B wf
+    → σ , ext Γ q A ⊢[ spec ] B ⇒ typ
     → σ , Γ ⊢[ spec ] pi q A B ⇒ typ
 
   ⇒-lam : ∀ {m q A t B}
@@ -564,7 +416,7 @@ data _,_⊢[_]_⇒_ σ Γ where
 
   -- Kernel identity is refused when A WHNFs to F32 or Tensor F32 S
   -- (see floatIdForbidden in the decision procedure).
-  ⇒-idt : ∀ {A a b}
+  ⇒-idt : ∀ {A a b}                                   -- A may be a kind; see Judgement
     → σ , Γ ⊢ A wf
     → σ , Γ ⊢[ spec ] a ⇐ A
     → σ , Γ ⊢[ spec ] b ⇐ A
@@ -612,9 +464,9 @@ data _,_⊢[_]_⇒_ σ Γ where
     → σ , Γ ⊢[ m ] e ⇐ A
     → σ , Γ ⊢[ m ] ann e A ⇒ A
 
-  ⇒-prod : ∀ {A B}
-    → σ , Γ ⊢ A wf
-    → σ , Γ ⊢ B wf
+  ⇒-prod : ∀ {A B}                                    -- components small
+    → σ , Γ ⊢[ spec ] A ⇒ typ
+    → σ , Γ ⊢[ spec ] B ⇒ typ
     → σ , Γ ⊢[ spec ] prod A B ⇒ typ
 
   ⇒-pair : ∀ {m A B a b}
@@ -630,8 +482,8 @@ data _,_⊢[_]_⇒_ σ Γ where
     → σ , Γ ⊢[ m ] t ⇒ prod A B
     → σ , Γ ⊢[ m ] snd t ⇒ B
 
-  ⇒-nu : ∀ {F}
-    → σ , ext Γ affine typ ⊢ F wf
+  ⇒-nu : ∀ {F}                                        -- body small
+    → σ , ext Γ affine typ ⊢[ spec ] F ⇒ typ
     → σ , Γ ⊢[ spec ] nu F ⇒ typ
 
   ⇒-unf : ∀ {m S A seed f}
@@ -877,13 +729,6 @@ spos x t           = not (occurs x t)
 strictPos : ∀ {n} → Tm (suc n) → Bool
 strictPos F = spos zero F
 
-motSucσ : ∀ {n} → Fin (suc n) → Tm (suc n)
-motSucσ zero    = su (var zero)
-motSucσ (suc i) = var (suc i)
-
-motSuc : ∀ {n} → Tm (suc n) → Tm (suc n)
-motSuc P = sub motSucσ P
-
 mutual
   occursD : ∀ {n} → ℕ → Tm n → Bool
   occursD i (dty j)        = i ≡ᵇ j
@@ -1043,9 +888,14 @@ mutual
   check k σ rs Γ m e A = check′ k σ rs Γ m e A
 
   {-# TERMINATING #-}
+  -- A type is Type, a kind Π (x : A) → K, or a small type (⇒ Type).
+  -- Kinds are not small: Π (x : A) → Type is wf but has no type.
   checkTy : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Tm n → Result ⊤
   checkTy k σ rs Γ A with whnf k σ A
   ... | typ = ok tt                                          -- type-Type
+  ... | pi q A₁ B =                                          -- type-pi
+    checkTy k σ rs Γ A₁ >>
+    checkTy k σ (extRec rs false false) (ext Γ q A₁) B
   ... | A′  = infer′ k σ rs Γ spec A′ >>= λ (T , _) → conv k σ T typ   -- type-el
 
   {-# TERMINATING #-}
@@ -1204,9 +1054,11 @@ mutual
   -- ⇒-pi
   infer′ k σ rs Γ run  (pi _ _ _) = fail "no promotion: Π is an erased term"
   infer′ k σ rs Γ evid (pi _ _ _) = fail "no promotion: Π is an erased term"
+  -- The codomain must be small. With B wf instead, Π (x : A) → Type : Type
+  -- and Type is a retract of a small type (Girard's paradox).
   infer′ k σ rs Γ spec (pi q A B) =
     checkTy k σ rs Γ A >>
-    checkTy k σ (extRec rs false false) (ext Γ q A) B >>
+    check k σ (extRec rs false false) (ext Γ q A) spec B typ >>
     ok (typ , u0s)
 
   -- ⇒-lam
@@ -1341,16 +1193,16 @@ mutual
   -- ⇒-prod
   infer′ k σ rs Γ run  (prod _ _) = fail "no promotion: × is an erased term"
   infer′ k σ rs Γ evid (prod _ _) = fail "no promotion: × is an erased term"
-  infer′ k σ rs Γ spec (prod A B) =
-    checkTy k σ rs Γ A >>
-    checkTy k σ rs Γ B >>
+  infer′ k σ rs Γ spec (prod A B) =                        -- components small
+    check k σ rs Γ spec A typ >>
+    check k σ rs Γ spec B typ >>
     ok (typ , u0s)
 
   -- ⇒-nu
   infer′ k σ rs Γ run  (nu _) = fail "no promotion: ν is an erased term"
   infer′ k σ rs Γ evid (nu _) = fail "no promotion: ν is an erased term"
-  infer′ k σ rs Γ spec (nu F) =
-    checkTy k σ (extRec rs false false) (ext Γ affine typ) F >>
+  infer′ k σ rs Γ spec (nu F) =                            -- body small
+    check k σ (extRec rs false false) (ext Γ affine typ) spec F typ >>
     guard "ν body is not strictly positive" (strictPos F) >>
     ok (typ , u0s)
 
@@ -1511,9 +1363,23 @@ emptyRec = recst nothing [] [] false false
 defRec : ℕ → RecSt 0
 defRec i = recst (just i) [] [] true false
 
+-- Constructor fields must be small types. Parameters are (A : Type) and
+-- are skipped; a field of type Type would make the data type a large
+-- inductive in Type, and match with motive Type would retract Type into it.
+checkCtorFields : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → ℕ → Tm n → Result ⊤
+checkCtorFields k σ rs Γ (suc np) (pi q A B) =
+  checkCtorFields k σ (extRec rs false false) (ext Γ q A) np B
+checkCtorFields _ _ _ _ (suc _) _ =
+  fail "constructor type has too few parameter binders"
+checkCtorFields k σ rs Γ zero (pi q A B) =
+  check k σ rs Γ spec A typ >>
+  checkCtorFields k σ (extRec rs false false) (ext Γ q A) zero B
+checkCtorFields _ _ _ _ zero _ = ok tt
+
 checkCtorTy : ℕ → Sig → ℕ → ℕ → ℕ → Tm 0 → Result ⊤
 checkCtorTy k σ di np ni ctype =
   checkTy k σ emptyRec [] ctype >>
+  checkCtorFields k σ emptyRec [] np ctype >>
   checkCtorRest di np ni ctype
 
 checkCtors : ℕ → Sig → ℕ → ℕ → ℕ → List Ctor → Result ⊤

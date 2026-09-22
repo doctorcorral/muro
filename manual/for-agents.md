@@ -84,10 +84,15 @@ lib/muro/emit.ex        run → Elixir source
 lib/muro/example.ex     same book as Agda
 lib/mix/tasks/muro.check.ex
 agda/Muro.agda          public re-export
-agda/Muro/Check.agda    fuelled decision procedure
+agda/Muro/Syntax.agda   Tm n (de Bruijn) and PTm V (PHOAS)
+agda/Muro/Subst.agda    wk, sub, inst
+agda/Muro/Unembed.agda  PHOAS → de Bruijn (TERMINATING, not --safe)
+agda/Muro/Env.agda      Sig, Ctx, uses (shared by Check and ⊢)
+agda/Muro/Check.agda    fuelled decision procedure (TERMINATING, not --safe)
+agda/Muro/Convert.agda  reduction ⟶ and conversion ≈ for ⊢
 agda/Muro/Judgement.agda  inductive ⊢ (core fragment)
 agda/Muro/Wall.agda     mode wall lemmas
-agda/Muro/Consistency.agda  Empty-core; Empty-evid is not proved
+agda/Muro/Consistency.agda  Empty-nf, progress; Empty-evid is not proved
 test/muro_check_test.exs
 ```
 

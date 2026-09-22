@@ -2,6 +2,7 @@
 -- Mode wall: spec ↛ evid ↛ run. Lemmas on inductive ⊢. No axioms.
 ------------------------------------------------------------------------
 
+{-# OPTIONS --safe #-}
 module Muro.Wall where
 
 open import Data.Bool.Base using (true; false)
@@ -11,7 +12,7 @@ open import Relation.Binary.PropositionalEquality.Core using (_≡_; refl; sym; 
 
 open import Muro.Base
 open import Muro.Syntax
-open import Muro.Check using (Sig; Def; Ctx; UseVec; u0s; combine; allowedDef; lookupDef)
+open import Muro.Env
 open import Muro.Judgement
 
 ------------------------------------------------------------------------
@@ -137,18 +138,18 @@ spec-⇒-uses ⇒-empty = refl
 spec-⇒-uses (⇒-pi _ _) = refl
 spec-⇒-uses (⇒-lam _ _ D _) with spec-⇒-uses D
 ... | refl = refl
-spec-⇒-uses (⇒-app-aff _ _ eq) = sym (ok-inj eq)
-spec-⇒-uses (⇒-app-era D _) = spec-⇒-uses D
-spec-⇒-uses (⇒-app-reuse _ _ _ eq) = sym (ok-inj eq)
+spec-⇒-uses (⇒-app-aff _ _ _ eq) = sym (ok-inj eq)
+spec-⇒-uses (⇒-app-era D _ _) = spec-⇒-uses D
+spec-⇒-uses (⇒-app-reuse _ _ _ _ eq) = sym (ok-inj eq)
 spec-⇒-uses (⇒-idt _ _ _) = refl
-spec-⇒-uses (⇒-rwt _ _ D) = spec-⇐-uses D
+spec-⇒-uses (⇒-rwt _ _ _ D) = spec-⇐-uses D
 spec-⇒-uses (⇒-mNat _ _ _ _ _ eq) = sym (ok-inj eq)
 spec-⇒-uses (⇒-mEmp D _) = spec-⇐-uses D
 spec-⇒-uses (⇒-mUnit _ _ _ eq) = sym (ok-inj eq)
 spec-⇒-uses (⇒-def _ _) = refl
 spec-⇒-uses (⇒-ann _ D) = spec-⇐-uses D
 
-spec-⇐-uses (⇐-conv D refl) = spec-⇒-uses D
+spec-⇐-uses (⇐-conv D _) = spec-⇒-uses D
 spec-⇐-uses (⇐-lam _ _ _ D _) with spec-⇐-uses D
 ... | refl = refl
 spec-⇐-uses (⇐-refl _) = refl

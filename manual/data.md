@@ -73,6 +73,17 @@ data Bad : Type where
 
 (`Bad` is not even well-formed that way — the point is the negative occurrence.)
 
+## Fields are small
+
+Every constructor field (a binder after the parameters) must be a small type: a term of type `Type`. Parameters are `(A : Type)` and are exempt. A field of type `Type` is rejected:
+
+```
+data Box : Type where
+  box : Π (A : Type) → Box
+```
+
+With `match … motive (λ _ → Type)` such a `Box` would project a type back out of a term of type `Type`, and `Type` would be a retract of `Box`. Parametrise instead: `data Box (A : Type) : Type`.
+
 ## Recursion
 
 A self-call in run or evidence must use a constructor argument whose type is `D …`. For lists, that is the tail. For trees, either child.
