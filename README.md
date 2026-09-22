@@ -71,6 +71,8 @@ git clone --depth 1 --branch v2.3 https://github.com/agda/agda-stdlib.git vendor
 make agda
 ```
 
+`Muro.Lexer.tokenize/1` is the highlighter. It walks a fragment with the parser's lexical rules and returns `{kind, start, stop}` byte spans. A snippet that `Parser.parse/1` rejects still yields spans, and joining the slices gives the source back. `Muro.MakeupLexer` maps those spans onto Makeup tags (language `"muro"`, extension `.muro`) and is registered when the application starts. HTML and colors stay with the caller.
+
 `Muro.Check.check_sig/1` returns `:ok` on the book. CI runs the Elixir job and `make agda` on every push and pull request.
 
 ## Names
