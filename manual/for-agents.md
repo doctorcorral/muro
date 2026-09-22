@@ -87,12 +87,15 @@ agda/Muro.agda          public re-export
 agda/Muro/Syntax.agda   Tm n (de Bruijn) and PTm V (PHOAS)
 agda/Muro/Subst.agda    wk, sub, inst
 agda/Muro/Unembed.agda  PHOAS → de Bruijn (TERMINATING, not --safe)
-agda/Muro/Env.agda      Sig, Ctx, uses (shared by Check and ⊢)
+agda/Muro/SubstLemmas.agda  renaming / substitution algebra
+agda/Muro/Env.agda      Sig, Ctx, uses, mode order (shared by Check and ⊢)
 agda/Muro/Check.agda    fuelled decision procedure (TERMINATING, not --safe)
-agda/Muro/Convert.agda  reduction ⟶ and conversion ≈ for ⊢
-agda/Muro/Judgement.agda  inductive ⊢ (core fragment)
+agda/Muro/Reduction.agda  parallel reduction ⇛, confluence
+agda/Muro/Convert.agda  whnf strategy ⟶ and conversion ≈ for ⊢
+agda/Muro/Judgement.agda  inductive ⊢ with uses (core fragment)
+agda/Muro/Typing.agda   declarative ⊨ (no uses); substitution, preservation
 agda/Muro/Wall.agda     mode wall lemmas
-agda/Muro/Consistency.agda  Empty-nf, progress; Empty-evid is not proved
+agda/Muro/Consistency.agda  Empty-nf, progress, preservation at Empty; Empty-evid is not proved
 test/muro_check_test.exs
 ```
 
