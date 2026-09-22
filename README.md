@@ -6,6 +6,20 @@ An explicit affine dependent type theory. Elixir parses, checks, and emits `.mur
 
 The language book is [`manual/`](manual/index.md). That is what [muro-lang.dev](https://muro-lang.dev) will render. It is not ExDoc. Elixir API docs, when added, stay on `@moduledoc` / `mix docs`. Agda in `agda/Muro/` is a third layer: the rules of the calculus, not a certificate that a `.muro` file is correct.
 
+## Install
+
+[muro on Hex](https://hex.pm/packages/muro) is published by the [murolang](https://hex.pm/users/murolang) organization. Releases are listed in [CHANGELOG.md](CHANGELOG.md).
+
+```elixir
+def deps do
+  [
+    {:muro, "~> 0.2"}
+  ]
+end
+```
+
+A clone is for changing the kernel. A `.muro` file is checked with `mix muro.check` from a project that depends on the package.
+
 ---
 
 ## One-shot (humans and agents)
