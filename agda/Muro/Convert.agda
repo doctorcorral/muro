@@ -6,7 +6,8 @@
 -- ⟶  one-step weak-head reduction, exactly the strategy of Check.whnf:
 --      δ    def i unfolds when allowedDef permits the mode
 --      β    app (lam _ _ t) a ⟶ inst t a
---      ι    mNat ze / mNat (su _) / mUnit one / rwt rfl
+--      ι    mNat ze / mNat (su _) / mUnit one / rwt rfl /
+--           mData (ctor i j a₁ … aₙ) with a j-th branch
 --      ann  ann e A ⟶ e
 --    ⟶ is deterministic (det). Nf / Ne are its normal and neutral
 --    forms; Consistency uses ⟶ for progress.
@@ -20,9 +21,15 @@
 --    different heads are never convertible (≈-shape), and Π / ≡ are
 --    injective up to ≈. No normalisation is assumed anywhere.
 --
--- ≈ does not contain η, or any rule for data / ν / products / Nx
--- (those terms are inert). Check.conv is the algorithm; it compares
--- subterms after whnf and is expected to be sound for ≈.
+-- ≈ does not contain η, or any rule for ν / products / Nx (those
+-- terms are inert). Check.conv is the algorithm; it compares subterms
+-- after whnf and is expected to be sound for ≈.
+--
+-- Data. A constructor application ctor i j a₁ … aₙ and a data type
+-- dty i p₁ … pₙ are spines (Muro.Spine) with a rigid head: they are
+-- normal for ⟶, they only reduce to spines with the same head under ⇛,
+-- and two convertible dty spines have the same head and convertible
+-- arguments (≈-dty-inj). Nothing is assumed about the signature here.
 ------------------------------------------------------------------------
 
 {-# OPTIONS --safe #-}
@@ -31,6 +38,7 @@ module Muro.Convert where
 open import Data.Bool.Base using (Bool; true; false)
 open import Data.Empty using (⊥; ⊥-elim)
 open import Data.Fin.Base using (Fin)
+open import Data.List.Base using (List; []; _∷_)
 open import Data.Nat.Base using (ℕ; suc)
 open import Data.Product.Base using (Σ; _×_; _,_; ∃)
 open import Data.Sum.Base using (_⊎_; inj₁; inj₂)
@@ -41,6 +49,7 @@ open import Muro.Base
 open import Muro.Syntax
 open import Muro.Subst
 open import Muro.Env
+open import Muro.Spine
 open import Muro.Reduction
 
 ok-inj : ∀ {A : Set} {x y : A} → ok x ≡ ok y → x ≡ y
@@ -51,9 +60,6 @@ ok-inj refl = refl
 ------------------------------------------------------------------------
 
 data Foreign {n} : Tm n → Set where
-  f-dty    : ∀ {i} → Foreign (dty i)
-  f-ctor   : ∀ {i j} → Foreign (ctor i j)
-  f-mData  : ∀ {e P bs} → Foreign (mData e P bs)
   f-prod   : ∀ {A B} → Foreign (prod A B)
   f-pair   : ∀ {a b} → Foreign (pair a b)
   f-fst    : ∀ {t} → Foreign (fst t)
@@ -74,7 +80,7 @@ data Foreign {n} : Tm n → Set where
 -- Neutral and normal terms for this strategy (weak head: arguments,
 -- branches, and the body of su are not looked at). Nf is what
 -- Consistency inverts. Neither is complete: some ill-typed terms are
--- stuck without being Ne.
+-- stuck without being Ne (a match on a constructor without a branch).
 ------------------------------------------------------------------------
 
 data Ne (σ : Sig) (m : Mode) {n} : Tm n → Set
@@ -90,6 +96,7 @@ data Ne σ m where
   ne-mUnit   : ∀ {e P u} → Ne σ m e → Ne σ m (mUnit e P u)
   ne-mEmp    : ∀ {e P} → Ne σ m e → Ne σ m (mEmp e P)
   ne-rwt     : ∀ {eq P t} → Ne σ m eq → Ne σ m (rwt eq P t)
+  ne-mData   : ∀ {e P bs} → Ne σ m e → Ne σ m (mData e P bs)
   ne-foreign : ∀ {t} → Foreign t → Ne σ m t
 
 data Nf σ m where
@@ -105,6 +112,8 @@ data Nf σ m where
   nf-empty : Nf σ m empty
   nf-idt   : ∀ {A a b} → Nf σ m (idt A a b)
   nf-rfl   : Nf σ m rfl
+  nf-ctor  : ∀ {i j as e} → Spine (ctor i j) as e → Nf σ m e
+  nf-dty   : ∀ {i as e} → Spine (dty i) as e → Nf σ m e
 
 ------------------------------------------------------------------------
 -- One-step reduction.
@@ -156,14 +165,20 @@ data _⊢[_]_⟶_ (σ : Sig) (m : Mode) {n} : Tm n → Tm n → Set where
   ann-e : ∀ {e A}
     → σ ⊢[ m ] ann e A ⟶ e
 
+  ι-data : ∀ {i j as e P bs b}
+    → Spine (ctor i j) as e
+    → lookupList bs j ≡ ok b
+    → σ ⊢[ m ] mData e P bs ⟶ appsFrom b as
+
+  mData-e : ∀ {e e′ P bs}
+    → σ ⊢[ m ] e ⟶ e′
+    → σ ⊢[ m ] mData e P bs ⟶ mData e′ P bs
+
 ------------------------------------------------------------------------
 -- Normal forms do not step.
 ------------------------------------------------------------------------
 
 foreign-no-step : ∀ {σ m n} {t u : Tm n} → Foreign t → σ ⊢[ m ] t ⟶ u → ⊥
-foreign-no-step f-dty    ()
-foreign-no-step f-ctor   ()
-foreign-no-step f-mData  ()
 foreign-no-step f-prod   ()
 foreign-no-step f-pair   ()
 foreign-no-step f-fst    ()
@@ -180,8 +195,23 @@ foreign-no-step f-addt   ()
 foreign-no-step f-toi64  ()
 foreign-no-step f-packi  ()
 
+-- A spine with a data head does not step: the head is not a λ.
+Spine-no-step : ∀ {σ m n} {h : Tm n} {as e u}
+  → DHead h → Spine h as e → σ ⊢[ m ] e ⟶ u → ⊥
+Spine-no-step dh-ctor sp-[] ()
+Spine-no-step dh-dty sp-[] ()
+Spine-no-step hd (sp-snoc sp) β = Spine-lam hd sp
+Spine-no-step hd (sp-snoc sp) (app-f s) = Spine-no-step hd sp s
+
 ne-no-step : ∀ {σ m n} {t u : Tm n} → Ne σ m t → σ ⊢[ m ] t ⟶ u → ⊥
 nf-no-step : ∀ {σ m n} {t u : Tm n} → Nf σ m t → σ ⊢[ m ] t ⟶ u → ⊥
+
+-- A neutral term is not a constructor application.
+ne-Spine : ∀ {σ m n} {i j} {as : List (Tm n)} {e}
+  → Ne σ m e → Spine (ctor i j) as e → ⊥
+ne-Spine (ne-foreign ()) sp-[]
+ne-Spine (ne-app ne) (sp-snoc sp) = ne-Spine ne sp
+ne-Spine (ne-foreign ()) (sp-snoc sp)
 
 ne-no-step ne-var ()
 ne-no-step (ne-def stuck) (δ lk al) = stuck lk al
@@ -195,6 +225,8 @@ ne-no-step (ne-mUnit ne) (mUnit-e s) = ne-no-step ne s
 ne-no-step (ne-mEmp ne) (mEmp-e s) = ne-no-step ne s
 ne-no-step (ne-rwt (ne-foreign ())) ιrfl
 ne-no-step (ne-rwt ne) (rwt-e s) = ne-no-step ne s
+ne-no-step (ne-mData ne) (ι-data sp _) = ne-Spine ne sp
+ne-no-step (ne-mData ne) (mData-e s) = ne-no-step ne s
 ne-no-step (ne-foreign f) s = foreign-no-step f s
 
 nf-no-step (nf-ne ne) s = ne-no-step ne s
@@ -209,6 +241,8 @@ nf-no-step nf-one ()
 nf-no-step nf-empty ()
 nf-no-step nf-idt ()
 nf-no-step nf-rfl ()
+nf-no-step (nf-ctor sp) s = Spine-no-step dh-ctor sp s
+nf-no-step (nf-dty sp) s = Spine-no-step dh-dty sp s
 
 ------------------------------------------------------------------------
 -- Determinism.
@@ -239,6 +273,12 @@ det ιrfl (rwt-e ())
 det (rwt-e ()) ιrfl
 det (rwt-e s) (rwt-e s′) = cong (λ e → rwt e _ _) (det s s′)
 det ann-e ann-e = refl
+det (ι-data sp lk) (ι-data sp′ lk′) with Spine-unique head-ctor head-ctor sp sp′
+... | refl , refl with ok-inj (trans (sym lk) lk′)
+...   | refl = refl
+det (ι-data sp _) (mData-e s) = ⊥-elim (Spine-no-step dh-ctor sp s)
+det (mData-e s) (ι-data sp _) = ⊥-elim (Spine-no-step dh-ctor sp s)
+det (mData-e s) (mData-e s′) = cong (λ e → mData e _ _) (det s s′)
 
 ------------------------------------------------------------------------
 -- Reflexive-transitive closure.
@@ -283,6 +323,8 @@ nf-⟶* nf (⟶*-step s _) = ⊥-elim (nf-no-step nf s)
 ⟶⊆⇛ ιrfl = ⇛-ιrfl (⇛-refl _)
 ⟶⊆⇛ (rwt-e s) = ⇛-rwt (⟶⊆⇛ s) (⇛-refl _) (⇛-refl _)
 ⟶⊆⇛ ann-e = ⇛-ann (⇛-refl _)
+⟶⊆⇛ (ι-data sp lk) = ⇛-ιdata sp lk (⇛L-refl _) (⇛-refl _)
+⟶⊆⇛ (mData-e s) = ⇛-mData (⟶⊆⇛ s) (⇛-refl _) (⇛L-refl _)
 
 ⟶*⊆⇛* : ∀ {σ m n} {t u : Tm n} → σ ⊢[ m ] t ⟶* u → σ ⊢[ m ] t ⇛* u
 ⟶*⊆⇛* ⟶*-refl = ⇛*-refl
@@ -449,3 +491,84 @@ shape-unique h-rfl h-rfl = refl
 ...   | _ , _ , _ , refl , rA , ra , rb with idt-⇛* uv
 ...     | _ , _ , _ , refl , rA′ , ra′ , rb′ =
   join→≈ rA rA′ , join→≈ ra ra′ , join→≈ rb rb′
+
+------------------------------------------------------------------------
+-- Data types are rigid: a dty spine is not convertible to a form with
+-- another head, and two convertible dty spines have the same head and
+-- pointwise convertible arguments.
+------------------------------------------------------------------------
+
+infix 3 _⊢[_]_≈L_
+
+data _⊢[_]_≈L_ (σ : Sig) (m : Mode) {n} : List (Tm n) → List (Tm n) → Set where
+  ≈L-[] : σ ⊢[ m ] [] ≈L []
+  ≈L-∷  : ∀ {a b as bs} → σ ⊢[ m ] a ≈ b → σ ⊢[ m ] as ≈L bs
+    → σ ⊢[ m ] (a ∷ as) ≈L (b ∷ bs)
+
+≈L-refl : ∀ {σ m n} (as : List (Tm n)) → σ ⊢[ m ] as ≈L as
+≈L-refl [] = ≈L-[]
+≈L-refl (a ∷ as) = ≈L-∷ ≈-refl (≈L-refl as)
+
+≈L-sym : ∀ {σ m n} {as bs : List (Tm n)} → σ ⊢[ m ] as ≈L bs → σ ⊢[ m ] bs ≈L as
+≈L-sym ≈L-[] = ≈L-[]
+≈L-sym (≈L-∷ a as) = ≈L-∷ (≈-sym a) (≈L-sym as)
+
+≈L-trans : ∀ {σ m n} {as bs cs : List (Tm n)}
+  → σ ⊢[ m ] as ≈L bs → σ ⊢[ m ] bs ≈L cs → σ ⊢[ m ] as ≈L cs
+≈L-trans ≈L-[] ≈L-[] = ≈L-[]
+≈L-trans (≈L-∷ a as) (≈L-∷ b bs) = ≈L-∷ (≈-trans a b) (≈L-trans as bs)
+
+join→≈L : ∀ {σ m n} {as bs vs : List (Tm n)}
+  → σ ⊢[ m ] as ⇛L* vs → σ ⊢[ m ] bs ⇛L* vs → σ ⊢[ m ] as ≈L bs
+join→≈L ⇛L*-[] ⇛L*-[] = ≈L-[]
+join→≈L (⇛L*-∷ a as) (⇛L*-∷ b bs) = ≈L-∷ (join→≈ a b) (join→≈L as bs)
+
+-- Spines with a data head have no rigid Shape (their head is app or dty
+-- or ctor), so they are not convertible to a shaped term.
+Spine-shape : ∀ {n} {h : Tm n} {as e s} → DHead h → Spine h as e → HasShape e s → ⊥
+Spine-shape dh-ctor sp-[] ()
+Spine-shape dh-dty sp-[] ()
+Spine-shape _ (sp-snoc _) ()
+
+≈-Spine-shape : ∀ {σ m n} {h : Tm n} {as t u s}
+  → DHead h → Spine h as t → HasShape u s → σ ⊢[ m ] t ≈ u → ⊥
+≈-Spine-shape hd sp hu c with ≈→join c
+... | v , tv , uv with Spine-⇛* hd sp tv
+...   | _ , sp′ , _ = Spine-shape hd sp′ (shape-⇛* hu uv)
+
+-- A ctor spine and a dty spine are not convertible.
+≈-ctor-dty : ∀ {σ m n} {i j k} {as bs : List (Tm n)} {t u}
+  → Spine (ctor i j) as t → Spine (dty k) bs u → σ ⊢[ m ] t ≈ u → ⊥
+≈-ctor-dty sp sp′ c with ≈→join c
+... | v , tv , uv with Spine-⇛* dh-ctor sp tv | Spine-⇛* dh-dty sp′ uv
+...   | _ , sp₁ , _ | _ , sp₂ , _ with Spine-unique head-ctor head-dty sp₁ sp₂
+...     | () , _
+
+≈-dty-inj : ∀ {σ m n} {i j} {as bs : List (Tm n)} {t u}
+  → Spine (dty i) as t → Spine (dty j) bs u → σ ⊢[ m ] t ≈ u
+  → (i ≡ j) × (σ ⊢[ m ] as ≈L bs)
+≈-dty-inj sp sp′ c with ≈→join c
+... | v , tv , uv with Spine-⇛* dh-dty sp tv | Spine-⇛* dh-dty sp′ uv
+...   | _ , sp₁ , r₁ | _ , sp₂ , r₂ with Spine-unique head-dty head-dty sp₁ sp₂
+...     | refl , refl = refl , join→≈L r₁ r₂
+
+-- Convertible dty spines applied to convertible arguments.
+≈-appsFrom : ∀ {σ m n} {f g : Tm n} {as bs}
+  → σ ⊢[ m ] f ≈ g → σ ⊢[ m ] as ≈L bs → σ ⊢[ m ] appsFrom f as ≈ appsFrom g bs
+≈-appsFrom c ≈L-[] = c
+≈-appsFrom c (≈L-∷ a as) = ≈-appsFrom (≈-app c a) as
+  where
+    ≈-app : ∀ {σ m n} {f g a b : Tm n}
+      → σ ⊢[ m ] f ≈ g → σ ⊢[ m ] a ≈ b → σ ⊢[ m ] app f a ≈ app g b
+    ≈-app {g = g} {a = a} cf ca = ≈-trans (go-f cf) (go-a ca)
+      where
+        go-f : ∀ {f g : Tm _} → _ ⊢[ _ ] f ≈ g → _ ⊢[ _ ] app f a ≈ app g a
+        go-f (≈-step s) = ≈-step (⇛-app s (⇛-refl _))
+        go-f ≈-refl = ≈-refl
+        go-f (≈-sym c) = ≈-sym (go-f c)
+        go-f (≈-trans c c′) = ≈-trans (go-f c) (go-f c′)
+        go-a : ∀ {a b : Tm _} → _ ⊢[ _ ] a ≈ b → _ ⊢[ _ ] app g a ≈ app g b
+        go-a (≈-step s) = ≈-step (⇛-app (⇛-refl _) s)
+        go-a ≈-refl = ≈-refl
+        go-a (≈-sym c) = ≈-sym (go-a c)
+        go-a (≈-trans c c′) = ≈-trans (go-a c) (go-a c′)
