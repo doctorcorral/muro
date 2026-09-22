@@ -148,6 +148,22 @@ checkBound run  affine Uω = fail "affine variable used as reusable"
 checkBound evid affine Uω = fail "affine variable used as reusable"
 checkBound _    _      _  = ok tt
 
+-- Mode of a constructor argument (Check.checkCtorArgs): an erased field
+-- is checked in spec, the others in the mode of the application.
+fieldMode : Qty → Mode → Mode
+fieldMode erased _ = spec
+fieldMode affine m = m
+fieldMode reuse  m = m
+
+-- Uses of a constructor application (Check.checkCtorArgs): an erased
+-- argument contributes nothing, and spec forgets everything.
+combineArg : ∀ {n} → Qty → Mode → UseVec n → UseVec n → Result (UseVec n)
+combineArg erased spec _  _  = ok u0s
+combineArg erased run  _  fu = ok fu
+combineArg erased evid _  fu = ok fu
+combineArg affine m    au fu = combine m au fu
+combineArg reuse  m    au fu = combine m au fu
+
 allowedDef : Mode → Mode → Bool
 allowedDef run  _    = true
 allowedDef evid spec = true

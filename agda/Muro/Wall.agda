@@ -7,6 +7,7 @@ module Muro.Wall where
 
 open import Data.Bool.Base using (true; false)
 open import Data.Empty using (⊥)
+open import Data.List.Base using (List)
 open import Data.Nat.Base using (ℕ)
 open import Relation.Binary.PropositionalEquality.Core using (_≡_; refl; sym; trans)
 
@@ -82,6 +83,14 @@ no-evid-idt : ∀ {σ n} {Γ : Ctx n} {A a b T u} →
   σ , Γ ⊢[ evid ] idt A a b ⇒ T ⊣ u → ⊥
 no-evid-idt ()
 
+no-run-dty : ∀ {σ n} {Γ : Ctx n} {i T u} →
+  σ , Γ ⊢[ run ] dty i ⇒ T ⊣ u → ⊥
+no-run-dty ()
+
+no-evid-dty : ∀ {σ n} {Γ : Ctx n} {i T u} →
+  σ , Γ ⊢[ evid ] dty i ⇒ T ⊣ u → ⊥
+no-evid-dty ()
+
 ------------------------------------------------------------------------
 -- A spec definition is not a run (or evid) term.
 ------------------------------------------------------------------------
@@ -127,6 +136,10 @@ spec-⇒-uses : ∀ {σ n} {Γ : Ctx n} {e A u} →
   σ , Γ ⊢[ spec ] e ⇒ A ⊣ u → u ≡ u0s
 spec-⇐-uses : ∀ {σ n} {Γ : Ctx n} {e A u} →
   σ , Γ ⊢[ spec ] e ⇐ A ⊣ u → u ≡ u0s
+spec-sp-uses : ∀ {σ n} {Γ : Ctx n} {e di ps R u} →
+  σ , Γ ⊢[ spec ] e ctor⟨ di , ps ⟩⇝ R ⊣ u → u ≡ u0s
+spec-brs-uses : ∀ {σ n} {Γ : Ctx n} {bs di ps P ci cs u} →
+  σ , Γ ⊢[ spec ] bs brs⟨ di , ps , P , ci ⟩ cs ⊣ u → u ≡ u0s
 
 spec-⇒-uses ⇒-var-spec = refl
 spec-⇒-uses ⇒-ze = refl
@@ -146,6 +159,8 @@ spec-⇒-uses (⇒-rwt _ _ _ D) = spec-⇐-uses D
 spec-⇒-uses (⇒-mNat _ _ _ _ _ eq) = sym (ok-inj eq)
 spec-⇒-uses (⇒-mEmp D _) = spec-⇐-uses D
 spec-⇒-uses (⇒-mUnit _ _ _ eq) = sym (ok-inj eq)
+spec-⇒-uses (⇒-dty _) = refl
+spec-⇒-uses (⇒-mData _ _ _ _ _ _ _ eq) = sym (ok-inj eq)
 spec-⇒-uses (⇒-def _ _) = refl
 spec-⇒-uses (⇒-ann _ D) = spec-⇐-uses D
 
@@ -153,3 +168,14 @@ spec-⇐-uses (⇐-conv D _) = spec-⇒-uses D
 spec-⇐-uses (⇐-lam _ _ _ D _) with spec-⇐-uses D
 ... | refl = refl
 spec-⇐-uses (⇐-refl _) = refl
+spec-⇐-uses (⇐-ctor _ _ _ _ S _) = spec-sp-uses S
+
+-- combineArg at spec: an erased argument gives u0s outright; the others
+-- go through combine spec, which forgets.
+spec-sp-uses (sp-ctor _ _ _) = refl
+spec-sp-uses (sp-app {q = erased} _ _ _ eq) = sym (ok-inj eq)
+spec-sp-uses (sp-app {q = affine} _ _ _ eq) = sym (ok-inj eq)
+spec-sp-uses (sp-app {q = reuse}  _ _ _ eq) = sym (ok-inj eq)
+
+spec-brs-uses brs-[] = refl
+spec-brs-uses (brs-∷ _ _ _ _) = refl
