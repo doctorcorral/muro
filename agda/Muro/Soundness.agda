@@ -36,9 +36,11 @@ open import Muro.Spine
 open import Muro.Frag
 open import Muro.Reduction
 open import Muro.Convert
+open import Muro.Data hiding (subst₂)
 open import Muro.Check
   using (whnf; dataWhnf; synEq; synEqD; synEqList; conv; convStuck; convN; convND;
-         convArgs; eqFin; ctorHead; apps)
+         convArgs; eqFin; ctorHead; apps; viewPi; viewId; viewData; splitData;
+         isData; allData; dataParamsData; instParams)
 
 ------------------------------------------------------------------------
 -- ⟶* under evaluation contexts.
@@ -594,3 +596,209 @@ convND-sound k σ sh-muli sh-muli fs () _ _
 convND-sound k σ sh-addt sh-addt fs () _ _
 convND-sound k σ sh-toi64 sh-toi64 fs () _ _
 convND-sound k σ sh-packi sh-packi fs () _ _
+
+------------------------------------------------------------------------
+-- Part 2: the checker's views of a type.
+------------------------------------------------------------------------
+
+>>=-ok : ∀ {A B : Set} {r : Result A} {f : A → Result B} {x}
+  → (r >>= f) ≡ ok x → ∃ λ y → (r ≡ ok y) × (f y ≡ ok x)
+>>=-ok {r = ok y} eq = y , refl , eq
+
+if-ok : ∀ {b s} {y : ⊤} → (if b then ok tt else fail s) ≡ ok y → b ≡ true
+if-ok {true} _ = refl
+
+whnf-pi : ∀ k σ {n q} {A : Tm n} {B} → whnf k σ (pi q A B) ≡ pi q A B
+whnf-pi zero σ = refl
+whnf-pi (suc k) σ = refl
+
+-- dty spines are whnf-normal for whnf.
+whnf-dty : ∀ k σ {n i} {as : List (Tm n)} {e} → Spine (dty i) as e → whnf k σ e ≡ e
+whnf-dty zero σ sp = refl
+whnf-dty (suc k) σ sp-[] = refl
+whnf-dty (suc k) σ (sp-snoc {f = f} sp) with whnf k σ f | whnf-dty k σ sp
+whnf-dty (suc k) σ (sp-snoc sp-[]) | _ | refl = refl
+whnf-dty (suc k) σ (sp-snoc (sp-snoc _)) | _ | refl = refl
+
+viewPi-sound : ∀ k σ {n} {T : Tm n} {q A B}
+  → viewPi k σ T ≡ ok (q , A , B) → whnf k σ T ≡ pi q A B
+viewPi-sound k σ {T = T} eq with whnf k σ T
+viewPi-sound k σ refl | pi _ _ _ = refl
+viewPi-sound k σ () | (var _)
+viewPi-sound k σ () | typ
+viewPi-sound k σ () | (lam _ _ _)
+viewPi-sound k σ () | (app _ _)
+viewPi-sound k σ () | nat
+viewPi-sound k σ () | ze
+viewPi-sound k σ () | (su _)
+viewPi-sound k σ () | unit
+viewPi-sound k σ () | one
+viewPi-sound k σ () | empty
+viewPi-sound k σ () | (dty _)
+viewPi-sound k σ () | (ctor _ _)
+viewPi-sound k σ () | (mData _ _ _)
+viewPi-sound k σ () | (mNat _ _ _ _)
+viewPi-sound k σ () | (mEmp _ _)
+viewPi-sound k σ () | (mUnit _ _ _)
+viewPi-sound k σ () | (idt _ _ _)
+viewPi-sound k σ () | rfl
+viewPi-sound k σ () | (rwt _ _ _)
+viewPi-sound k σ () | (def _)
+viewPi-sound k σ () | (ann _ _)
+viewPi-sound k σ () | (prod _ _)
+viewPi-sound k σ () | (pair _ _)
+viewPi-sound k σ () | (fst _)
+viewPi-sound k σ () | (snd _)
+viewPi-sound k σ () | (nu _)
+viewPi-sound k σ () | (unf _ _)
+viewPi-sound k σ () | (ucons _)
+viewPi-sound k σ () | i64
+viewPi-sound k σ () | f32ty
+viewPi-sound k σ () | (tensor _ _)
+viewPi-sound k σ () | (addi _ _)
+viewPi-sound k σ () | (muli _ _)
+viewPi-sound k σ () | (addt _ _)
+viewPi-sound k σ () | (toi64 _)
+viewPi-sound k σ () | (packi _ _)
+
+viewId-sound : ∀ k σ {n} {T : Tm n} {A a b}
+  → viewId k σ T ≡ ok (A , a , b) → whnf k σ T ≡ idt A a b
+viewId-sound k σ {T = T} eq with whnf k σ T
+viewId-sound k σ refl | idt _ _ _ = refl
+viewId-sound k σ () | (var _)
+viewId-sound k σ () | typ
+viewId-sound k σ () | (pi _ _ _)
+viewId-sound k σ () | (lam _ _ _)
+viewId-sound k σ () | (app _ _)
+viewId-sound k σ () | nat
+viewId-sound k σ () | ze
+viewId-sound k σ () | (su _)
+viewId-sound k σ () | unit
+viewId-sound k σ () | one
+viewId-sound k σ () | empty
+viewId-sound k σ () | (dty _)
+viewId-sound k σ () | (ctor _ _)
+viewId-sound k σ () | (mData _ _ _)
+viewId-sound k σ () | (mNat _ _ _ _)
+viewId-sound k σ () | (mEmp _ _)
+viewId-sound k σ () | (mUnit _ _ _)
+viewId-sound k σ () | rfl
+viewId-sound k σ () | (rwt _ _ _)
+viewId-sound k σ () | (def _)
+viewId-sound k σ () | (ann _ _)
+viewId-sound k σ () | (prod _ _)
+viewId-sound k σ () | (pair _ _)
+viewId-sound k σ () | (fst _)
+viewId-sound k σ () | (snd _)
+viewId-sound k σ () | (nu _)
+viewId-sound k σ () | (unf _ _)
+viewId-sound k σ () | (ucons _)
+viewId-sound k σ () | i64
+viewId-sound k σ () | f32ty
+viewId-sound k σ () | (tensor _ _)
+viewId-sound k σ () | (addi _ _)
+viewId-sound k σ () | (muli _ _)
+viewId-sound k σ () | (addt _ _)
+viewId-sound k σ () | (toi64 _)
+viewId-sound k σ () | (packi _ _)
+
+viewData-sound : ∀ k σ {n} {T : Tm n} {di ps idxs}
+  → viewData k σ T ≡ ok (di , ps , idxs)
+  → ∃ λ d → ∃ λ args
+    → (lookupData σ di ≡ ok d) × Spine (dty di) args (whnf k σ T)
+    × (length args ≡ nparams d + nidxs d)
+    × (ps ≡ take (nparams d) args) × (idxs ≡ drop (nparams d) args)
+viewData-sound k σ {T = T} {di} {ps} {idxs} eq with dtyArgs (whnf k σ T) in deq
+... | nothing = ⊥-elim (fail≢ok eq)
+... | just (i , args) with lookupData σ i in leq
+...   | fail _ = ⊥-elim (fail≢ok eq)
+...   | ok d with length args ≡ᵇ (nparams d + nidxs d) in geq
+...     | false = ⊥-elim (fail≢ok eq)
+...     | true with ok-inj eq
+...       | refl = d , args , leq , dtyArgs-just deq , ≡ᵇ-sound geq , refl , refl
+
+------------------------------------------------------------------------
+-- isData decides IsData (soundly).
+------------------------------------------------------------------------
+
+FragL-take : ∀ {n} k {as : List (Tm n)} → FragL as → FragL (take k as)
+FragL-take zero _ = fl-[]
+FragL-take (suc k) fl-[] = fl-[]
+FragL-take (suc k) (fl-∷ F Fs) = fl-∷ F (FragL-take k Fs)
+
+FragL-drop : ∀ {n} k {as : List (Tm n)} → FragL as → FragL (drop k as)
+FragL-drop zero Fs = Fs
+FragL-drop (suc k) fl-[] = fl-[]
+FragL-drop (suc k) (fl-∷ F Fs) = FragL-drop k Fs
+
+isData-sound : ∀ k σ {n} {t : Tm n} → FragSig σ → Frag t → isData k σ t ≡ true → IsData σ t
+allData-sound : ∀ k σ {n} {ts : List (Tm n)} → FragSig σ → FragL ts
+  → allData k σ ts ≡ true → AllData σ ts
+
+allData-sound k σ fs fl-[] _ = ad-[]
+allData-sound k σ fs (fl-∷ F Fs) eq with ∧-true eq
+... | e , es = ad-∷ (isData-sound k σ fs F e) (allData-sound k σ fs Fs es)
+
+isData-sound (suc k) σ {t = t} fs Ft eq
+  with unspine (whnf (suc k) σ t) in ueq | whnf-sound (suc k) σ fs Ft
+... | (nat , []) | r , F with Spine-≡ (unspine→Spine′ ueq)
+...   | weq = d-conv (⟶*→≈ r) (subst (IsData σ) (sym weq) d-nat)
+isData-sound (suc k) σ fs Ft eq | (unit , []) | r , F with Spine-≡ (unspine→Spine′ ueq)
+...   | weq = d-conv (⟶*→≈ r) (subst (IsData σ) (sym weq) d-unit)
+isData-sound (suc k) σ fs Ft eq | (empty , []) | r , F with Spine-≡ (unspine→Spine′ ueq)
+...   | weq = d-conv (⟶*→≈ r) (subst (IsData σ) (sym weq) d-empty)
+isData-sound (suc k) σ fs Ft eq | (i64 , []) | r , F with Spine-≡ (unspine→Spine′ ueq)
+...   | weq = ⊥-elim (noFrag (subst Frag weq F))
+  where noFrag : ∀ {n} → Frag {n} i64 → ⊥
+        noFrag ()
+isData-sound (suc k) σ fs Ft eq | (f32ty , []) | r , F with Spine-≡ (unspine→Spine′ ueq)
+...   | weq = ⊥-elim (noFrag (subst Frag weq F))
+  where noFrag : ∀ {n} → Frag {n} f32ty → ⊥
+        noFrag ()
+isData-sound (suc k) σ fs Ft eq | (tensor _ _ , []) | r , F with Spine-≡ (unspine→Spine′ ueq)
+...   | weq = ⊥-elim (noFrag (subst Frag weq F))
+  where noFrag : ∀ {n d s} → Frag {n} (tensor d s) → ⊥
+        noFrag ()
+isData-sound (suc k) σ {t = t} fs Ft eq | (dty i , as) | r , F with lookupData σ i in leq
+...   | fail _ = ⊥-elim (false≢true eq)
+  where false≢true : false ≡ true → ⊥
+        false≢true ()
+...   | ok d with unspine→Spine′ ueq
+...     | sp = d-conv (⟶*→≈ r)
+      (d-dty leq sp (allData-sound k σ fs (FragL-take (nparams d) (proj₂ (Frag-Spine sp F))) eq))
+isData-sound (suc k) σ fs Ft () | ((var _) , _) | _
+isData-sound (suc k) σ fs Ft () | (typ , _) | _
+isData-sound (suc k) σ fs Ft () | ((pi _ _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((lam _ _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((app _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | (nat , _ ∷ _) | _
+isData-sound (suc k) σ fs Ft () | (ze , _) | _
+isData-sound (suc k) σ fs Ft () | ((su _) , _) | _
+isData-sound (suc k) σ fs Ft () | (unit , _ ∷ _) | _
+isData-sound (suc k) σ fs Ft () | (one , _) | _
+isData-sound (suc k) σ fs Ft () | (empty , _ ∷ _) | _
+isData-sound (suc k) σ fs Ft () | ((ctor _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((mData _ _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((mNat _ _ _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((mEmp _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((mUnit _ _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((idt _ _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | (rfl , _) | _
+isData-sound (suc k) σ fs Ft () | ((rwt _ _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((def _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((ann _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((prod _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((pair _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((fst _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((snd _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((nu _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((unf _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((ucons _) , _) | _
+isData-sound (suc k) σ fs Ft () | (i64 , _ ∷ _) | _
+isData-sound (suc k) σ fs Ft () | (f32ty , _ ∷ _) | _
+isData-sound (suc k) σ fs Ft () | ((tensor _ _) , _ ∷ _) | _
+isData-sound (suc k) σ fs Ft () | ((addi _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((muli _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((addt _ _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((toi64 _) , _) | _
+isData-sound (suc k) σ fs Ft () | ((packi _ _) , _) | _

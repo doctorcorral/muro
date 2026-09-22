@@ -81,7 +81,11 @@ data _,_⊢_wf σ Γ where
     → σ , Γ ⊢ A wf
     → σ , ext Γ q A ⊢ B wf
     → σ , Γ ⊢ pi q A B wf
-  type-el   : ∀ {A u} → σ , Γ ⊢[ spec ] A ⇒ typ ⊣ u → σ , Γ ⊢ A wf
+  -- The sort is read through ≈ (Check.checkTy: infer, then conv with Type).
+  type-el   : ∀ {A T u}
+    → σ , Γ ⊢[ spec ] A ⇒ T ⊣ u
+    → σ ⊢[ spec ] T ≈ typ
+    → σ , Γ ⊢ A wf
 
 data _,_⊢[_]_⇒_⊣_ σ Γ where
 
@@ -120,11 +124,13 @@ data _,_⊢[_]_⇒_⊣_ σ Γ where
     → σ , Γ ⊢[ m ] lam q A t ⇒ pi q A B ⊣ us
 
   -- The function type is read through ≈ (Check: viewPi = whnf, then Π).
+  -- Uses: Env.appUses (at a call site of an evidence definition in evid
+  -- mode the argument's uses are discarded).
   ⇒-app-aff : ∀ {m F A B f a fu au uses}
     → σ , Γ ⊢[ m ] f ⇒ F ⊣ fu
     → σ ⊢[ spec ] F ≈ pi affine A B
     → σ , Γ ⊢[ m ] a ⇐ A ⊣ au
-    → combine m fu au ≡ ok uses
+    → appUses σ m f fu au ≡ ok uses
     → σ , Γ ⊢[ m ] app f a ⇒ inst B a ⊣ uses
 
   ⇒-app-era : ∀ {m F A B f a fu au}
@@ -138,7 +144,7 @@ data _,_⊢[_]_⇒_⊣_ σ Γ where
     → σ ⊢[ spec ] F ≈ pi reuse A B
     → IsData σ A
     → σ , Γ ⊢[ m ] a ⇐ A ⊣ au
-    → combine m fu au ≡ ok uses
+    → appUses σ m f fu au ≡ ok uses
     → σ , Γ ⊢[ m ] app f a ⇒ inst B a ⊣ uses
 
   -- The sort A may be a kind: {Nat ≡ Unit : Type} : Type. This is the one

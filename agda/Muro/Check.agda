@@ -32,7 +32,7 @@ open import Muro.Syntax
 open import Muro.Subst
 open import Muro.Env public
 open import Muro.Tag using (tmTag)
-open import Muro.Spine using (unspine; ctorSpine; dtyArgs; defArgs)
+open import Muro.Spine using (unspine; ctorSpine; dtyArgs; defArgs; lamView)
 
 ------------------------------------------------------------------------
 -- Recursion state: run and evid structural descent (not spec).
@@ -137,9 +137,11 @@ mutual
   allData _ _ []       = true
   allData k σ (a ∷ as) = isData k σ a ∧ allData k σ as
 
-  {-# TERMINATING #-}
+  -- Fuel also bounds the descent into data parameters (a spec
+  -- definition may be recursive: X : Type := D X).
   isData : ∀ {n} → ℕ → Sig → Tm n → Bool
-  isData k σ t with apps (whnf k σ t)
+  isData zero    _ _ = false
+  isData (suc k) σ t with apps (whnf (suc k) σ t)
   ... | (nat , [])        = true
   ... | (unit , [])       = true
   ... | (empty , [])      = true
@@ -149,7 +151,6 @@ mutual
   ... | (dty i , as)      = dataParamsData k σ i as
   ... | _                 = false
 
-  {-# TERMINATING #-}
   dataParamsData : ∀ {n} → ℕ → Sig → ℕ → List (Tm n) → Bool
   dataParamsData k σ i as with lookupData σ i
   ... | fail _ = false
@@ -621,9 +622,9 @@ viewData k σ t with dtyArgs (whnf k σ t)
 ... | nothing         = fail ("expected data type, got " ++ showTm (whnf k σ t))
 
 isDType : ∀ {n} → ℕ → Tm n → Bool
-isDType i t with proj₁ (apps t)
-... | dty j = i ≡ᵇ j
-... | _     = false
+isDType i t with dtyArgs t
+... | just (j , _) = i ≡ᵇ j
+... | nothing      = false
 
 mutual
   hasSelf : ∀ {n} → Maybe ℕ → Tm n → Bool
@@ -863,13 +864,16 @@ forcesFor (suc k) fs = lookupForce fs 0 ∷ forcesFor k (shift fs)
     shift ((zero  , _) ∷ rest) = shift rest
     shift ((suc j , u) ∷ rest) = (j , u) ∷ shift rest
 
+-- Walk the constructor telescope to its target and match the target's
+-- indices against the expected ones (d = number of binders passed).
+forcePairs : ∀ {n m} → ℕ → Sig → ℕ → List (Tm n) → ℕ → Tm m → Result (List (ℕ × Tm n))
+forcePairs k σ np expected d (pi _ _ B) = forcePairs k σ np expected (suc d) B
+forcePairs k σ np expected d t =
+  matchIdxs k σ d expected (drop np (proj₂ (apps (whnf k σ t))))
+
 analyzeForces : ∀ {n} → ℕ → Sig → ℕ → List (Tm n) → Tm n → Result (List (Maybe (Tm n)))
-analyzeForces {n} k σ np expected tel =
-  walk 0 tel >>= λ pairs → ok (forcesFor (countPis tel) pairs)
-  where
-    walk : ∀ {m} → ℕ → Tm m → Result (List (ℕ × Tm n))
-    walk d (pi _ _ B) = walk (suc d) B
-    walk d t          = matchIdxs k σ d expected (drop np (proj₂ (apps (whnf k σ t))))
+analyzeForces k σ np expected tel =
+  forcePairs k σ np expected 0 tel >>= λ pairs → ok (forcesFor (countPis tel) pairs)
 
 wkForce : ∀ {n} → Maybe (Tm n) → Maybe (Tm (suc n))
 wkForce (just t) = just (wk t)
@@ -891,13 +895,16 @@ mutual
   {-# TERMINATING #-}
   -- A type is Type, a kind Π (x : A) → K, or a small type (⇒ Type).
   -- Kinds are not small: Π (x : A) → Type is wf but has no type.
+  -- Syntax-directed, as ⊢ wf: a kind is recognised by its shape, anything
+  -- else must infer a type convertible to Type. (Reducing first would
+  -- accept terms that merely reduce to Type or to a kind, such as
+  -- (λ (x : Nat) → Type) 0, which have no derivation.)
   checkTy : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Tm n → Result ⊤
-  checkTy k σ rs Γ A with whnf k σ A
-  ... | typ = ok tt                                          -- type-Type
-  ... | pi q A₁ B =                                          -- type-pi
+  checkTy k σ rs Γ typ = ok tt                               -- type-Type
+  checkTy k σ rs Γ (pi q A₁ B) =                             -- type-pi
     checkTy k σ rs Γ A₁ >>
     checkTy k σ (extRec rs false false) (ext Γ q A₁) B
-  ... | A′  = infer′ k σ rs Γ spec A′ >>= λ (T , _) → conv k σ T typ   -- type-el
+  checkTy k σ rs Γ A = infer′ k σ rs Γ spec A >>= λ (T , _) → conv k σ T typ   -- type-el
 
   {-# TERMINATING #-}
   infer′ : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Result (Tm n × UseVec n)
@@ -934,14 +941,14 @@ mutual
   checkBr : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Tm n → Tm n → Tm n → List (Tm n) → List (Maybe (Tm n)) → Result (UseVec n)
   checkBr k σ rs Γ m di ci ty br mot args forces with whnf k σ ty
   ... | pi q A B =
-    case (forces , br) of λ where
-      (just u ∷ fs , lam q′ A′ t) →
+    case (forces , lamView br) of λ where
+      (just u ∷ fs , just (q′ , A′ , t)) →
         guard "λ/Π quantity mismatch" (eqQty q q′) >>
         checkTy k σ rs Γ A′ >>
         conv k σ A′ A >>
         checkBr k σ rs Γ m di ci (inst B u) (inst t u) mot
           (List._++_ args (u ∷ [])) fs
-      (nothing ∷ fs , lam q′ A′ t) →
+      (nothing ∷ fs , just (q′ , A′ , t)) →
         guard "λ/Π quantity mismatch" (eqQty q q′) >>
         checkTy k σ rs Γ A′ >>
         conv k σ A′ A >>
@@ -953,7 +960,7 @@ mutual
         in checkBr k σ rs′ (ext Γ q A) m di ci B t (wk mot) args′ (wkForces fs) >>= λ uses →
         let (u₀ , us) = headTailU uses
         in checkBound m q u₀ >> ok us
-      (_ ∷ _ , _) → fail "match branch expected a λ for a constructor argument"
+      (_ ∷ _ , nothing) → fail "match branch expected a λ for a constructor argument"
       ([] , _)    → fail "constructor telescope / force list mismatch"
   ... | ty′ =
     check k σ rs Γ m br
@@ -1078,6 +1085,9 @@ mutual
       headTail (u ∷ us) = u , us
 
   -- ⇒-app-aff / ⇒-app-era / ⇒-app-reuse
+  -- The argument is checked in the mode of the application; at a call
+  -- site of an evidence definition in evid mode its uses are discarded
+  -- (Env.appUses: instantiating a theorem does not consume resources).
   infer′ {n} k σ rs Γ m (app f a) =
     infer k σ rs Γ m f >>= λ (ft , fu) →
     viewPi k σ ft >>= λ (q , A , B) →
@@ -1085,23 +1095,15 @@ mutual
     checkRec k σ m rs (app f a) >>
     ok (inst B a , uses)
     where
-      argMode : Tm n → Mode
-      argMode f with proj₁ (apps f)
-      ... | def i =
-        case lookupDef σ i of λ where
-          (ok d) → if eqMode m evid ∧ eqMode (Def.dmode d) evid then spec else m
-          (fail _) → m
-      ... | _ = m
-
       inferArg : Qty → Tm n → UseVec n → Result (UseVec n)
       inferArg erased A fu =
         check k σ rs Γ spec a A >>= λ _ →
         (if eqMode m spec then ok u0s else ok fu)
       inferArg affine A fu =
-        check k σ rs Γ (argMode f) a A >>= λ au → combine m fu au
+        check k σ rs Γ m a A >>= λ au → appUses σ m f fu au
       inferArg reuse A fu =
         guard "+ argument is not Data" (isData k σ A) >>
-        check k σ rs Γ (argMode f) a A >>= λ au → combine m fu au
+        check k σ rs Γ m a A >>= λ au → appUses σ m f fu au
 
   -- ⇒-idt
   infer′ k σ rs Γ run  (idt _ _ _) = fail "no promotion: identity type is an erased term"
@@ -1345,13 +1347,18 @@ mutual
     combine m seedU fu
 
   -- ⇐-ctor / ⇐-conv (default)
-  check′ k σ rs Γ m e A with viewData k σ A | ctorSpine e
-  ... | ok (di , params , idxs) | just (di′ , ci , args) =
+  check′ k σ rs Γ m e A = checkAgainst k σ rs Γ m e A (viewData k σ A) (ctorSpine e)
+
+  -- A constructor spine against a data type is checked along the
+  -- constructor's telescope; anything else is inferred and converted.
+  checkAgainst : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n
+    → Result (ℕ × List (Tm n) × List (Tm n)) → Maybe (ℕ × ℕ × List (Tm n)) → Result (UseVec n)
+  checkAgainst k σ rs Γ m e A (ok (di , params , idxs)) (just (di′ , ci , args)) =
     if di ≡ᵇ di′
     then checkCtorApp k σ rs Γ m di ci params args
            (appsFrom (dty di) (List._++_ params idxs))
     else (infer k σ rs Γ m e >>= λ (B , u) → conv k σ B A >> ok u)
-  ... | _ | _ =
+  checkAgainst k σ rs Γ m e A _ _ =
     infer k σ rs Γ m e >>= λ (B , u) → conv k σ B A >> ok u
 
 ------------------------------------------------------------------------

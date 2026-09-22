@@ -360,7 +360,7 @@ forget-brs (brs-∷ ip bt Db Bs) = b-∷ ip bt (forget-⇐ Db) (forget-brs Bs)
 
 forget-wf type-Type = wf-typ
 forget-wf (type-pi WA WB) = wf-pi (forget-wf WA) (forget-wf WB)
-forget-wf (type-el D) = wf-el (forget-⇒ D)
+forget-wf (type-el D c) = wf-el (conv-≈ (forget-⇒ D) c)
 
 ------------------------------------------------------------------------
 -- Mode weakening.
