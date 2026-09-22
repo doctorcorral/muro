@@ -11,7 +11,11 @@ open import Muro.Subst public
 open import Muro.Unembed public
 open import Muro.Env public
 open import Muro.Check public
+import Muro.SubstLemmas
+import Muro.Reduction
+import Muro.Convert
 import Muro.Judgement
+import Muro.Typing
 import Muro.Wall
 import Muro.Consistency
 open import Muro.Example public

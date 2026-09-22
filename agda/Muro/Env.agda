@@ -13,6 +13,7 @@ open import Data.Product.Base using (_×_; _,_)
 open import Data.String.Base using (String)
 open import Data.Unit.Base using (⊤; tt)
 open import Data.Vec.Base as Vec using (Vec; lookup; map)
+open import Relation.Binary.PropositionalEquality.Core using (_≡_; refl)
 
 open import Muro.Base
 open import Muro.Syntax
@@ -153,3 +154,41 @@ allowedDef evid spec = true
 allowedDef evid evid = true
 allowedDef spec spec = true
 allowedDef _    _    = false
+
+-- Modes are ordered run ≤ evid ≤ spec: a run term may be used as
+-- evidence, evidence may be used in a spec. allowedDef d is monotone in
+-- the use mode along this order, which is what mode weakening needs.
+infix 4 _≤ᵐ_
+data _≤ᵐ_ : Mode → Mode → Set where
+  ≤ᵐ-run  : ∀ {m} → run ≤ᵐ m
+  ≤ᵐ-evid : evid ≤ᵐ evid
+  ≤ᵐ-evsp : evid ≤ᵐ spec
+  ≤ᵐ-spec : spec ≤ᵐ spec
+
+≤ᵐ-refl : ∀ {m} → m ≤ᵐ m
+≤ᵐ-refl {run}  = ≤ᵐ-run
+≤ᵐ-refl {evid} = ≤ᵐ-evid
+≤ᵐ-refl {spec} = ≤ᵐ-spec
+
+≤ᵐ-trans : ∀ {a b c} → a ≤ᵐ b → b ≤ᵐ c → a ≤ᵐ c
+≤ᵐ-trans ≤ᵐ-run  _       = ≤ᵐ-run
+≤ᵐ-trans ≤ᵐ-evid h       = h
+≤ᵐ-trans ≤ᵐ-evsp ≤ᵐ-spec = ≤ᵐ-evsp
+≤ᵐ-trans ≤ᵐ-spec ≤ᵐ-spec = ≤ᵐ-spec
+
+≤ᵐ-spec-top : ∀ {m} → m ≤ᵐ spec
+≤ᵐ-spec-top {run}  = ≤ᵐ-run
+≤ᵐ-spec-top {evid} = ≤ᵐ-evsp
+≤ᵐ-spec-top {spec} = ≤ᵐ-spec
+
+allowedDef-mono : ∀ d {m m′} → m ≤ᵐ m′
+  → allowedDef d m ≡ true → allowedDef d m′ ≡ true
+allowedDef-mono run  _       _ = refl
+allowedDef-mono evid ≤ᵐ-run  ()
+allowedDef-mono evid ≤ᵐ-evid h = h
+allowedDef-mono evid ≤ᵐ-evsp _ = refl
+allowedDef-mono evid ≤ᵐ-spec h = h
+allowedDef-mono spec ≤ᵐ-run  ()
+allowedDef-mono spec ≤ᵐ-evid ()
+allowedDef-mono spec ≤ᵐ-evsp ()
+allowedDef-mono spec ≤ᵐ-spec h = h
