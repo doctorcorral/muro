@@ -31,6 +31,8 @@ open import Muro.Base
 open import Muro.Syntax
 open import Muro.Subst
 open import Muro.Env public
+open import Muro.Tag using (tmTag)
+open import Muro.Spine using (unspine; ctorSpine; dtyArgs; defArgs)
 
 ------------------------------------------------------------------------
 -- Recursion state: run and evid structural descent (not spec).
@@ -76,11 +78,7 @@ eqFin {suc _} zero    (suc _) = false
 eqFin {suc _} (suc _) zero    = false
 
 apps : ∀ {n} → Tm n → Tm n × List (Tm n)
-apps t = go t []
-  where
-    go : ∀ {n} → Tm n → List (Tm n) → Tm n × List (Tm n)
-    go (app f a) acc = go f (a ∷ acc)
-    go f         acc = f , acc
+apps = unspine
 
 nthQty : ∀ {n} → Tm n → ℕ → Result Qty
 nthQty (pi q _ _) zero    = ok q
@@ -125,23 +123,10 @@ mutual
   ... | _        = ucons (unf s f)
   uconsWhnf _ _ e = ucons e
 
-  nthList : ∀ {A : Set} → List A → ℕ → Result A
-  nthList []       _       = fail "unknown index"
-  nthList (x ∷ _)  zero    = ok x
-  nthList (_ ∷ xs) (suc i) = nthList xs i
-
-  ctorSpine : ∀ {n} → Tm n → Maybe (ℕ × ℕ × List (Tm n))
-  ctorSpine t = go t []
-    where
-      go : ∀ {n} → Tm n → List (Tm n) → Maybe (ℕ × ℕ × List (Tm n))
-      go (app f a) acc = go f (a ∷ acc)
-      go (ctor i j) acc = just (i , j , acc)
-      go _ _ = nothing
-
   dataWhnf : ∀ {n} → ℕ → Sig → Tm n → Tm (suc n) → List (Tm n) → Tm n
   dataWhnf k σ e P bs with ctorSpine e
   ... | just (_ , ci , args) =
-    case nthList bs ci of λ where
+    case lookupList bs ci of λ where
       (ok b)  → whnf k σ (appsFrom b args)
       (fail _) → mData e P bs
   ... | nothing = mData e P bs
@@ -201,47 +186,52 @@ mutual
   synEqList (x ∷ xs) (y ∷ ys) = synEq x y ∧ synEqList xs ys
   synEqList _        _        = false
 
+  -- Tags are compared first (Muro.Tag); synEqD only has to handle terms
+  -- of the same shape.
   synEq : ∀ {n} → Tm n → Tm n → Bool
-  synEq (var i)        (var j)        = eqFin i j
-  synEq typ            typ            = true
-  synEq (pi q A B)     (pi q′ A′ B′)  = eqQty q q′ ∧ synEq A A′ ∧ synEq B B′
-  synEq (lam q A t)    (lam q′ A′ t′) = eqQty q q′ ∧ synEq A A′ ∧ synEq t t′
-  synEq (app f a)      (app g b)      = synEq f g ∧ synEq a b
-  synEq nat            nat            = true
-  synEq ze             ze             = true
-  synEq (su a)         (su b)         = synEq a b
-  synEq unit           unit           = true
-  synEq one            one            = true
-  synEq empty          empty          = true
-  synEq (dty i)        (dty j)        = i ≡ᵇ j
-  synEq (ctor i j)     (ctor i′ j′)   = (i ≡ᵇ i′) ∧ (j ≡ᵇ j′)
-  synEq (mData e P bs) (mData e′ P′ bs′) =
+  synEq u v = (tmTag u ≡ᵇ tmTag v) ∧ synEqD u v
+
+  synEqD : ∀ {n} → Tm n → Tm n → Bool
+  synEqD (var i)        (var j)        = eqFin i j
+  synEqD typ            typ            = true
+  synEqD (pi q A B)     (pi q′ A′ B′)  = eqQty q q′ ∧ synEq A A′ ∧ synEq B B′
+  synEqD (lam q A t)    (lam q′ A′ t′) = eqQty q q′ ∧ synEq A A′ ∧ synEq t t′
+  synEqD (app f a)      (app g b)      = synEq f g ∧ synEq a b
+  synEqD nat            nat            = true
+  synEqD ze             ze             = true
+  synEqD (su a)         (su b)         = synEq a b
+  synEqD unit           unit           = true
+  synEqD one            one            = true
+  synEqD empty          empty          = true
+  synEqD (dty i)        (dty j)        = i ≡ᵇ j
+  synEqD (ctor i j)     (ctor i′ j′)   = (i ≡ᵇ i′) ∧ (j ≡ᵇ j′)
+  synEqD (mData e P bs) (mData e′ P′ bs′) =
     synEq e e′ ∧ synEq P P′ ∧ synEqList bs bs′
-  synEq (mNat e P z s) (mNat e′ P′ z′ s′) =
+  synEqD (mNat e P z s) (mNat e′ P′ z′ s′) =
     synEq e e′ ∧ synEq P P′ ∧ synEq z z′ ∧ synEq s s′
-  synEq (mEmp e P)     (mEmp e′ P′)   = synEq e e′ ∧ synEq P P′
-  synEq (mUnit e P u)  (mUnit e′ P′ u′) = synEq e e′ ∧ synEq P P′ ∧ synEq u u′
-  synEq (idt A a b)    (idt A′ a′ b′) = synEq A A′ ∧ synEq a a′ ∧ synEq b b′
-  synEq rfl            rfl            = true
-  synEq (rwt e P t)    (rwt e′ P′ t′) = synEq e e′ ∧ synEq P P′ ∧ synEq t t′
-  synEq (def i)        (def j)        = i ≡ᵇ j
-  synEq (ann e A)      (ann e′ A′)    = synEq e e′ ∧ synEq A A′
-  synEq (prod A B)     (prod A′ B′)   = synEq A A′ ∧ synEq B B′
-  synEq (pair a b)     (pair a′ b′)   = synEq a a′ ∧ synEq b b′
-  synEq (fst t)        (fst t′)       = synEq t t′
-  synEq (snd t)        (snd t′)       = synEq t t′
-  synEq (nu F)         (nu F′)        = synEq F F′
-  synEq (unf s f)      (unf s′ f′)    = synEq s s′ ∧ synEq f f′
-  synEq (ucons s)      (ucons s′)     = synEq s s′
-  synEq i64            i64            = true
-  synEq f32ty          f32ty          = true
-  synEq (tensor d s)   (tensor d′ s′) = synEq d d′ ∧ synEq s s′
-  synEq (addi x y)     (addi x′ y′)   = synEq x x′ ∧ synEq y y′
-  synEq (muli x y)     (muli x′ y′)   = synEq x x′ ∧ synEq y y′
-  synEq (addt t u)     (addt t′ u′)   = synEq t t′ ∧ synEq u u′
-  synEq (toi64 t)      (toi64 t′)     = synEq t t′
-  synEq (packi x y)    (packi x′ y′)  = synEq x x′ ∧ synEq y y′
-  synEq _              _              = false
+  synEqD (mEmp e P)     (mEmp e′ P′)   = synEq e e′ ∧ synEq P P′
+  synEqD (mUnit e P u)  (mUnit e′ P′ u′) = synEq e e′ ∧ synEq P P′ ∧ synEq u u′
+  synEqD (idt A a b)    (idt A′ a′ b′) = synEq A A′ ∧ synEq a a′ ∧ synEq b b′
+  synEqD rfl            rfl            = true
+  synEqD (rwt e P t)    (rwt e′ P′ t′) = synEq e e′ ∧ synEq P P′ ∧ synEq t t′
+  synEqD (def i)        (def j)        = i ≡ᵇ j
+  synEqD (ann e A)      (ann e′ A′)    = synEq e e′ ∧ synEq A A′
+  synEqD (prod A B)     (prod A′ B′)   = synEq A A′ ∧ synEq B B′
+  synEqD (pair a b)     (pair a′ b′)   = synEq a a′ ∧ synEq b b′
+  synEqD (fst t)        (fst t′)       = synEq t t′
+  synEqD (snd t)        (snd t′)       = synEq t t′
+  synEqD (nu F)         (nu F′)        = synEq F F′
+  synEqD (unf s f)      (unf s′ f′)    = synEq s s′ ∧ synEq f f′
+  synEqD (ucons s)      (ucons s′)     = synEq s s′
+  synEqD i64            i64            = true
+  synEqD f32ty          f32ty          = true
+  synEqD (tensor d s)   (tensor d′ s′) = synEq d d′ ∧ synEq s s′
+  synEqD (addi x y)     (addi x′ y′)   = synEq x x′ ∧ synEq y y′
+  synEqD (muli x y)     (muli x′ y′)   = synEq x x′ ∧ synEq y y′
+  synEqD (addt t u)     (addt t′ u′)   = synEq t t′ ∧ synEq u u′
+  synEqD (toi64 t)      (toi64 t′)     = synEq t t′
+  synEqD (packi x y)    (packi x′ y′)  = synEq x x′ ∧ synEq y y′
+  synEqD _              _              = false
 
 ctorHead : ∀ {n} → Tm n → Bool
 ctorHead t with proj₁ (apps t)
@@ -261,65 +251,76 @@ mutual
   {-# TERMINATING #-}
   conv : ∀ {n} → ℕ → Sig → Tm n → Tm n → Result ⊤
   conv zero    _ _ _ = fail "conv: out of fuel"
-  conv {n} (suc k) σ u v =
+  conv (suc k) σ u v =
     if synEq u v then ok tt
-    else stuckCong u v
-    where
-      stuckCong : Tm n → Tm n → Result ⊤
-      stuckCong u′ v′ with apps u′ | apps v′
-      ... | (def i , a ∷ as) | (def j , b ∷ bs) =
-        if (i ≡ᵇ j) ∧ not (ctorHead a) ∧ not (ctorHead b)
-        then (conv k σ a b >> convArgs k σ as bs)
-        else convN k σ (whnf k σ u′) (whnf k σ v′)
-      ... | _ | _ = convN k σ (whnf k σ u′) (whnf k σ v′)
+    else convStuck k σ u v (defArgs u) (defArgs v)
+
+  -- Two applications of the same def to arguments that are not
+  -- constructor-headed are compared argumentwise before unfolding
+  -- (otherwise a recursive def is unfolded just to compare a call with
+  -- itself).
+  convStuck : ∀ {n} → ℕ → Sig → Tm n → Tm n
+    → Maybe (ℕ × Tm n × List (Tm n)) → Maybe (ℕ × Tm n × List (Tm n)) → Result ⊤
+  convStuck k σ u v (just (i , a , as)) (just (j , b , bs)) =
+    if (i ≡ᵇ j) ∧ not (ctorHead a) ∧ not (ctorHead b)
+    then (conv k σ a b >> convArgs k σ as bs)
+    else convN k σ (whnf k σ u) (whnf k σ v)
+  convStuck k σ u v _ _ = convN k σ (whnf k σ u) (whnf k σ v)
+
+  -- Tags are compared first (Muro.Tag); convND only has to handle terms
+  -- of the same shape.
+  convN : ∀ {n} → ℕ → Sig → Tm n → Tm n → Result ⊤
+  convN k σ u v =
+    if tmTag u ≡ᵇ tmTag v then convND k σ u v
+    else fail ("cannot convert " ++ showTm u ++ " ≁ " ++ showTm v)
 
   {-# TERMINATING #-}
-  convN : ∀ {n} → ℕ → Sig → Tm n → Tm n → Result ⊤
-  convN k σ typ           typ           = ok tt
-  convN k σ nat           nat           = ok tt
-  convN k σ unit          unit          = ok tt
-  convN k σ empty         empty         = ok tt
-  convN k σ (dty i)       (dty j)       = guard "data index mismatch" (i ≡ᵇ j)
-  convN k σ (ctor i j)    (ctor i′ j′)  =
+  convND : ∀ {n} → ℕ → Sig → Tm n → Tm n → Result ⊤
+  convND k σ typ           typ           = ok tt
+  convND k σ nat           nat           = ok tt
+  convND k σ unit          unit          = ok tt
+  convND k σ empty         empty         = ok tt
+  convND k σ (dty i)       (dty j)       = guard "data index mismatch" (i ≡ᵇ j)
+  convND k σ (ctor i j)    (ctor i′ j′)  =
     guard "constructor mismatch" ((i ≡ᵇ i′) ∧ (j ≡ᵇ j′))
-  convN k σ (mData e P bs) (mData e′ P′ bs′) =
+  convND k σ (mData e P bs) (mData e′ P′ bs′) =
     conv k σ e e′ >> conv k σ P P′ >> convArgs k σ bs bs′
-  convN k σ ze            ze            = ok tt
-  convN k σ one           one           = ok tt
-  convN k σ rfl           rfl           = ok tt
-  convN k σ (su a)        (su b)        = conv k σ a b
-  convN k σ (var i)       (var j)       = guard ("var " ++ showTm (var i) ++ " ≠ " ++ showTm (var j)) (eqFin i j)
-  convN k σ (def i)       (def j)       = guard ("def " ++ showDef i ++ " ≠ " ++ showDef j) (i ≡ᵇ j)
-  convN k σ (pi q A B)    (pi q′ A′ B′) =
+  convND k σ ze            ze            = ok tt
+  convND k σ one           one           = ok tt
+  convND k σ rfl           rfl           = ok tt
+  convND k σ (su a)        (su b)        = conv k σ a b
+  convND k σ (var i)       (var j)       = guard ("var " ++ showTm (var i) ++ " ≠ " ++ showTm (var j)) (eqFin i j)
+  convND k σ (def i)       (def j)       = guard ("def " ++ showDef i ++ " ≠ " ++ showDef j) (i ≡ᵇ j)
+  convND k σ (pi q A B)    (pi q′ A′ B′) =
     guard "Π quantity mismatch" (eqQty q q′) >> conv k σ A A′ >> conv k σ B B′
-  convN k σ (lam q A t)   (lam q′ A′ t′) =
+  convND k σ (lam q A t)   (lam q′ A′ t′) =
     guard "λ quantity mismatch" (eqQty q q′) >> conv k σ A A′ >> conv k σ t t′
-  convN k σ (app f a)     (app g b)     = conv k σ f g >> conv k σ a b
-  convN k σ (idt A a b)   (idt A′ a′ b′) = conv k σ A A′ >> conv k σ a a′ >> conv k σ b b′
-  convN k σ (mNat e P z s) (mNat e′ P′ z′ s′) =
+  convND k σ (app f a)     (app g b)     = conv k σ f g >> conv k σ a b
+  convND k σ (idt A a b)   (idt A′ a′ b′) = conv k σ A A′ >> conv k σ a a′ >> conv k σ b b′
+  convND k σ (mNat e P z s) (mNat e′ P′ z′ s′) =
     conv k σ e e′ >> conv k σ P P′ >> conv k σ z z′ >> conv k σ s s′
-  convN k σ (mEmp e P)    (mEmp e′ P′)  = conv k σ e e′ >> conv k σ P P′
-  convN k σ (mUnit e P u) (mUnit e′ P′ u′) =
+  convND k σ (mEmp e P)    (mEmp e′ P′)  = conv k σ e e′ >> conv k σ P P′
+  convND k σ (mUnit e P u) (mUnit e′ P′ u′) =
     conv k σ e e′ >> conv k σ P P′ >> conv k σ u u′
-  convN k σ (rwt e P t)   (rwt e′ P′ t′) =
+  convND k σ (rwt e P t)   (rwt e′ P′ t′) =
     conv k σ e e′ >> conv k σ P P′ >> conv k σ t t′
-  convN k σ (ann e A)     (ann e′ A′)   = conv k σ e e′ >> conv k σ A A′
-  convN k σ (prod A B)    (prod A′ B′)  = conv k σ A A′ >> conv k σ B B′
-  convN k σ (pair a b)    (pair a′ b′)  = conv k σ a a′ >> conv k σ b b′
-  convN k σ (fst t)       (fst t′)      = conv k σ t t′
-  convN k σ (snd t)       (snd t′)      = conv k σ t t′
-  convN k σ (nu F)        (nu F′)       = conv k σ F F′
-  convN k σ (unf s f)     (unf s′ f′)   = conv k σ s s′ >> conv k σ f f′
-  convN k σ (ucons s)     (ucons s′)    = conv k σ s s′
-  convN k σ i64           i64           = ok tt
-  convN k σ f32ty         f32ty         = ok tt
-  convN k σ (tensor d s)  (tensor d′ s′) = conv k σ d d′ >> conv k σ s s′
-  convN k σ (addi x y)    (addi x′ y′)  = conv k σ x x′ >> conv k σ y y′
-  convN k σ (muli x y)    (muli x′ y′)  = conv k σ x x′ >> conv k σ y y′
-  convN k σ (addt t u)    (addt t′ u′)  = conv k σ t t′ >> conv k σ u u′
-  convN k σ (toi64 t)     (toi64 t′)    = conv k σ t t′
-  convN k σ (packi x y)   (packi x′ y′) = conv k σ x x′ >> conv k σ y y′
-  convN _ _ u             v             =
+  convND k σ (ann e A)     (ann e′ A′)   = conv k σ e e′ >> conv k σ A A′
+  convND k σ (prod A B)    (prod A′ B′)  = conv k σ A A′ >> conv k σ B B′
+  convND k σ (pair a b)    (pair a′ b′)  = conv k σ a a′ >> conv k σ b b′
+  convND k σ (fst t)       (fst t′)      = conv k σ t t′
+  convND k σ (snd t)       (snd t′)      = conv k σ t t′
+  convND k σ (nu F)        (nu F′)       = conv k σ F F′
+  convND k σ (unf s f)     (unf s′ f′)   = conv k σ s s′ >> conv k σ f f′
+  convND k σ (ucons s)     (ucons s′)    = conv k σ s s′
+  convND k σ i64           i64           = ok tt
+  convND k σ f32ty         f32ty         = ok tt
+  convND k σ (tensor d s)  (tensor d′ s′) = conv k σ d d′ >> conv k σ s s′
+  convND k σ (addi x y)    (addi x′ y′)  = conv k σ x x′ >> conv k σ y y′
+  convND k σ (muli x y)    (muli x′ y′)  = conv k σ x x′ >> conv k σ y y′
+  convND k σ (addt t u)    (addt t′ u′)  = conv k σ t t′ >> conv k σ u u′
+  convND k σ (toi64 t)     (toi64 t′)    = conv k σ t t′
+  convND k σ (packi x y)   (packi x′ y′) = conv k σ x x′ >> conv k σ y y′
+  convND _ _ u            v             =
     fail ("cannot convert " ++ showTm u ++ " ≁ " ++ showTm v)
 
 ------------------------------------------------------------------------
@@ -615,9 +616,9 @@ splitData σ i args =
   ok (i , take np args , drop np args)
 
 viewData : ∀ {n} → ℕ → Sig → Tm n → Result (ℕ × List (Tm n) × List (Tm n))
-viewData k σ t with apps (whnf k σ t)
-... | (dty i , args) = splitData σ i args
-... | t′             = fail ("expected data type, got " ++ showTm (proj₁ t′))
+viewData k σ t with dtyArgs (whnf k σ t)
+... | just (i , args) = splitData σ i args
+... | nothing         = fail ("expected data type, got " ++ showTm (whnf k σ t))
 
 isDType : ∀ {n} → ℕ → Tm n → Bool
 isDType i t with proj₁ (apps t)
