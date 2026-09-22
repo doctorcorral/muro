@@ -47,25 +47,27 @@ open import Muro.Syntax
 open import Muro.Subst using (inst; motSuc; closed; appsFrom)
 open import Muro.Env
 open import Muro.Convert using (_⊢[_]_≈_; ≈-trans; ≈-sym)
+open import Muro.Spine using (Spine)
 open import Muro.Data
 
 ------------------------------------------------------------------------
 -- Bidirectional ⊢. Uses sit in the conclusion (⊣). Two auxiliary
--- judgments for data: a constructor application read head first
--- (ctor⟨ di , ps ⟩⇝ R: the remaining telescope is R), and the branches
--- of a match, one per constructor in declaration order.
+-- judgments for data: the arguments of a constructor application along
+-- its telescope (T ▹ as ⇝ R: after the arguments as, the remaining
+-- telescope is R; Check.checkCtorArgs), and the branches of a match,
+-- one per constructor in declaration order.
 ------------------------------------------------------------------------
 
 infix 3 _,_⊢[_]_⇒_⊣_ _,_⊢[_]_⇐_⊣_ _,_⊢_wf
-infix 3 _,_⊢[_]_ctor⟨_,_⟩⇝_⊣_ _,_⊢[_]_brs⟨_,_,_,_⟩_⊣_
+infix 3 _,_⊢[_]_▹_⇝_⊣_ _,_⊢[_]_brs⟨_,_,_,_⟩_⊣_
 
 data _,_⊢[_]_⇒_⊣_ (σ : Sig) {n} (Γ : Ctx n)
     : Mode → Tm n → Tm n → UseVec n → Set
 data _,_⊢[_]_⇐_⊣_ (σ : Sig) {n} (Γ : Ctx n)
     : Mode → Tm n → Tm n → UseVec n → Set
 data _,_⊢_wf (σ : Sig) {n} (Γ : Ctx n) : Tm n → Set
-data _,_⊢[_]_ctor⟨_,_⟩⇝_⊣_ (σ : Sig) {n} (Γ : Ctx n)
-    : Mode → Tm n → ℕ → List (Tm n) → Tm n → UseVec n → Set
+data _,_⊢[_]_▹_⇝_⊣_ (σ : Sig) {n} (Γ : Ctx n)
+    : Mode → Tm n → List (Tm n) → Tm n → UseVec n → Set
 data _,_⊢[_]_brs⟨_,_,_,_⟩_⊣_ (σ : Sig) {n} (Γ : Ctx n)
     : Mode → List (Tm n) → ℕ → List (Tm n) → Tm (suc n) → ℕ → List Ctor → UseVec n → Set
 
@@ -233,32 +235,36 @@ data _,_⊢[_]_⇐_⊣_ σ Γ where
     → σ ⊢[ spec ] a ≈ b
     → σ , Γ ⊢[ m ] rfl ⇐ T ⊣ u0s
 
-  -- A constructor application is checked against a data type (Check:
-  -- viewData on the expected type, then checkCtorApp). The parameters
-  -- come from the expected type, not from the term; the residual
-  -- telescope after the arguments must be the expected type.
-  ⇐-ctor : ∀ {m e A di ps idxs d R u}
+  -- A constructor application ctor di ci a₁ … aₙ is checked against a
+  -- data type (Check: viewData on the expected type, then
+  -- checkCtorApp). The parameters come from the expected type, not from
+  -- the term; the constructor's type with the parameters instantiated
+  -- is walked along the arguments, and the residual telescope must be
+  -- the expected type.
+  ⇐-ctor : ∀ {m e A di ci as ps idxs d c T R u}
+    → Spine (ctor di ci) as e
     → σ ⊢[ spec ] A ≈ appsFrom (dty di) (ps ++ idxs)
     → lookupData σ di ≡ ok d
     → length ps ≡ nparams d
     → length idxs ≡ nidxs d
-    → σ , Γ ⊢[ m ] e ctor⟨ di , ps ⟩⇝ R ⊣ u
+    → lookupCtor d ci ≡ ok c
+    → InstParams σ (closed (Ctor.ctype c)) ps T
+    → σ , Γ ⊢[ m ] T ▹ as ⇝ R ⊣ u
     → σ ⊢[ spec ] R ≈ appsFrom (dty di) (ps ++ idxs)
     → σ , Γ ⊢[ m ] e ⇐ A ⊣ u
 
-data _,_⊢[_]_ctor⟨_,_⟩⇝_⊣_ σ Γ where
-  sp-ctor : ∀ {m di ci ps d c T}
-    → lookupData σ di ≡ ok d
-    → lookupCtor d ci ≡ ok c
-    → InstParams σ (closed (Ctor.ctype c)) ps T
-    → σ , Γ ⊢[ m ] ctor di ci ctor⟨ di , ps ⟩⇝ T ⊣ u0s
+-- Arguments along a telescope, left to right (Check.checkCtorArgs): an
+-- erased field is checked in spec and contributes no uses.
+data _,_⊢[_]_▹_⇝_⊣_ σ Γ where
+  args-[] : ∀ {m T}
+    → σ , Γ ⊢[ m ] T ▹ [] ⇝ T ⊣ u0s
 
-  sp-app : ∀ {m di ps f a T q A B fu au uses}
-    → σ , Γ ⊢[ m ] f ctor⟨ di , ps ⟩⇝ T ⊣ fu
+  args-∷ : ∀ {m T q A B a as R au asu uses}
     → σ ⊢[ spec ] T ≈ pi q A B
     → σ , Γ ⊢[ fieldMode q m ] a ⇐ A ⊣ au
-    → combineArg q m au fu ≡ ok uses
-    → σ , Γ ⊢[ m ] app f a ctor⟨ di , ps ⟩⇝ inst B a ⊣ uses
+    → σ , Γ ⊢[ m ] inst B a ▹ as ⇝ R ⊣ asu
+    → combineArg q m au asu ≡ ok uses
+    → σ , Γ ⊢[ m ] T ▹ (a ∷ as) ⇝ R ⊣ uses
 
 data _,_⊢[_]_brs⟨_,_,_,_⟩_⊣_ σ Γ where
   brs-[] : ∀ {m di ps P ci}
@@ -282,7 +288,7 @@ data _,_⊢[_]_brs⟨_,_,_,_⟩_⊣_ σ Γ where
 ⇐-≈ (⇐-conv D c) c′ = ⇐-conv D (≈-trans c c′)
 ⇐-≈ (⇐-lam W c cA rok D b) c′ = ⇐-lam W (≈-trans (≈-sym c′) c) cA rok D b
 ⇐-≈ (⇐-refl c cab) c′ = ⇐-refl (≈-trans (≈-sym c′) c) cab
-⇐-≈ (⇐-ctor c lk lps lidx S cR) c′ = ⇐-ctor (≈-trans (≈-sym c′) c) lk lps lidx S cR
+⇐-≈ (⇐-ctor sp c lk lps lidx lkc ip Ar cR) c′ = ⇐-ctor sp (≈-trans (≈-sym c′) c) lk lps lidx lkc ip Ar cR
 
 σ-empty : Sig
 σ-empty = mkSig [] []
