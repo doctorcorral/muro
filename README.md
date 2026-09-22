@@ -1,6 +1,12 @@
-# Muro
+<a href="https://muro-lang.dev"><img src="assets/muro-logo.png" alt="Muro" width="180" align="left" hspace="28"></a>
 
-**A spec never becomes evidence. Evidence never becomes a run.**
+<h3>Prove real programs correct.<br>Then run them.</h3>
+
+<br><br><br>
+
+<a href="https://hex.pm/packages/muro"><img src="https://img.shields.io/hexpm/v/muro?style=flat-square&label=hex&labelColor=111111&color=e8e8e8" alt="Hex version"></a>
+
+<br clear="left">
 
 An explicit affine dependent type theory. Elixir parses, checks, and emits `.muro`. Only run terms become running code. Users do not need Agda.
 
