@@ -90,9 +90,11 @@ agda/Muro/Unembed.agda  PHOAS → de Bruijn (TERMINATING, not --safe)
 agda/Muro/SubstLemmas.agda  renaming / substitution algebra
 agda/Muro/Env.agda      Sig, Ctx, uses, mode order (shared by Check and ⊢)
 agda/Muro/Check.agda    fuelled decision procedure (TERMINATING, not --safe)
+agda/Muro/Spine.agda    application spines (constructor / dty applications)
 agda/Muro/Reduction.agda  parallel reduction ⇛, confluence
 agda/Muro/Convert.agda  whnf strategy ⟶ and conversion ≈ for ⊢
-agda/Muro/Judgement.agda  inductive ⊢ with uses (core fragment)
+agda/Muro/Data.agda     IsData, InstParams, BrTy: what the data rules are stated with
+agda/Muro/Judgement.agda  inductive ⊢ with uses (core fragment, with data / match)
 agda/Muro/Typing.agda   declarative ⊨ (no uses); substitution, preservation
 agda/Muro/Wall.agda     mode wall lemmas
 agda/Muro/Consistency.agda  Empty-nf, progress, preservation at Empty; Empty-evid is not proved

@@ -12,8 +12,10 @@ open import Muro.Unembed public
 open import Muro.Env public
 open import Muro.Check public
 import Muro.SubstLemmas
+import Muro.Spine
 import Muro.Reduction
 import Muro.Convert
+import Muro.Data
 import Muro.Judgement
 import Muro.Typing
 import Muro.Wall

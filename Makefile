@@ -2,9 +2,10 @@ AGDA  := agda
 # --no-libraries: vendored stdlib ships extra .agda-lib files (tests, cubical).
 AFLAGS := --no-libraries -i agda -i vendor/agda-stdlib/src --warning=noUnsupportedIndexedMatch
 
-# Theorem modules — Judgement, Wall, Consistency, Convert and what they
-# import (Base, Syntax, Subst, Env) — are checked under --safe: no
-# postulates, no TERMINATING, no --type-in-type. Check.agda is the fuelled
+# Theorem modules — Judgement, Wall, Consistency, Typing, Convert,
+# Reduction, Spine, Data and what they import (Base, Syntax, Subst,
+# SubstLemmas, Env) — are checked under --safe: no postulates, no
+# TERMINATING, no --type-in-type. Check.agda is the fuelled
 # decision procedure and carries TERMINATING pragmas (as does Unembed), so
 # the full tree is checked without --safe.
 .PHONY: agda agda-safe agda-all agda-syntax agda-check elixir clean

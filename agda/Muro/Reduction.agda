@@ -21,9 +21,9 @@ module Muro.Reduction where
 open import Data.Bool.Base using (Bool; true; false)
 open import Data.Empty using (⊥; ⊥-elim)
 open import Data.Fin.Base using (Fin; zero; suc)
-open import Data.List.Base using (List; []; _∷_)
+open import Data.List.Base using (List; []; _∷_; _++_)
 open import Data.Nat.Base using (ℕ; zero; suc)
-open import Data.Product.Base using (_×_; _,_; ∃)
+open import Data.Product.Base using (_×_; _,_; ∃; proj₂)
 open import Relation.Binary.PropositionalEquality.Core
   using (_≡_; refl; sym; trans; cong; subst)
 
@@ -32,6 +32,7 @@ open import Muro.Syntax
 open import Muro.Subst
 open import Muro.SubstLemmas
 open import Muro.Env
+open import Muro.Spine
 
 infix 3 _⊢[_]_⇛_ _⊢[_]_⇛L_ _⊢[_]_⇛*_
 
@@ -62,6 +63,13 @@ data _⊢[_]_⇛_ σ m where
   ⇛-ann : ∀ {e e′ A}
     → σ ⊢[ m ] e ⇛ e′
     → σ ⊢[ m ] ann e A ⇛ e′
+  -- match on a constructor application: the j-th branch applied to the
+  -- constructor's arguments (Check.dataWhnf)
+  ⇛-ιdata : ∀ {i j as as′ e P bs b b′}
+    → Spine (ctor i j) as e
+    → lookupList bs j ≡ ok b
+    → σ ⊢[ m ] as ⇛L as′ → σ ⊢[ m ] b ⇛ b′
+    → σ ⊢[ m ] mData e P bs ⇛ appsFrom b′ as′
   -- congruence
   ⇛-var   : ∀ {x} → σ ⊢[ m ] var x ⇛ var x
   ⇛-typ   : σ ⊢[ m ] typ ⇛ typ
@@ -191,6 +199,7 @@ mutual
   ⇛-mode h (⇛-ιtt u) = ⇛-ιtt (⇛-mode h u)
   ⇛-mode h (⇛-ιrfl t) = ⇛-ιrfl (⇛-mode h t)
   ⇛-mode h (⇛-ann e) = ⇛-ann (⇛-mode h e)
+  ⇛-mode h (⇛-ιdata sp lk as b) = ⇛-ιdata sp lk (⇛L-mode h as) (⇛-mode h b)
   ⇛-mode h ⇛-var = ⇛-var
   ⇛-mode h ⇛-typ = ⇛-typ
   ⇛-mode h (⇛-pi A B) = ⇛-pi (⇛-mode h A) (⇛-mode h B)
@@ -251,6 +260,9 @@ mutual
   ⇛-ren ρ (⇛-ιtt u) = ⇛-ιtt (⇛-ren ρ u)
   ⇛-ren ρ (⇛-ιrfl t) = ⇛-ιrfl (⇛-ren ρ t)
   ⇛-ren ρ (⇛-ann e) = ⇛-ann (⇛-ren ρ e)
+  ⇛-ren ρ (⇛-ιdata {as′ = as′} {bs = bs} {b′ = b′} sp lk as b)
+    rewrite ren-appsFrom ρ b′ as′ =
+    ⇛-ιdata (Spine-ren ρ sp) (lookupList-ren ρ bs _ lk) (⇛L-ren ρ as) (⇛-ren ρ b)
   ⇛-ren ρ ⇛-var = ⇛-var
   ⇛-ren ρ ⇛-typ = ⇛-typ
   ⇛-ren ρ (⇛-pi A B) = ⇛-pi (⇛-ren ρ A) (⇛-ren (lift ρ) B)
@@ -320,6 +332,9 @@ mutual
   ⇛-sub h (⇛-ιtt u) = ⇛-ιtt (⇛-sub h u)
   ⇛-sub h (⇛-ιrfl t) = ⇛-ιrfl (⇛-sub h t)
   ⇛-sub h (⇛-ann e) = ⇛-ann (⇛-sub h e)
+  ⇛-sub {τ′ = τ′} h (⇛-ιdata {as′ = as′} {bs = bs} {b′ = b′} sp lk as b)
+    rewrite sub-appsFrom τ′ b′ as′ =
+    ⇛-ιdata (Spine-sub _ sp) (lookupList-sub _ bs _ lk) (⇛L-sub h as) (⇛-sub h b)
   ⇛-sub h (⇛-var {x}) = h x
   ⇛-sub h ⇛-typ = ⇛-typ
   ⇛-sub h (⇛-pi A B) = ⇛-pi (⇛-sub h A) (⇛-sub (⇛σ-lifts h) B)
@@ -398,6 +413,19 @@ devDef : ∀ {n} → Mode → ℕ → Result Def → Tm n
 devDef m i (fail _) = def i
 devDef m i (ok d)   = devDef′ i d (allowedDef (Def.dmode d) m)
 
+-- mData: the redex is contracted iff the scrutinee is a constructor
+-- application with a branch. The arguments of the developed scrutinee
+-- are read back with unspine (dev-Spine: they are the developed
+-- arguments), and the branch is read from the developed branch list.
+devData′ : ∀ {n} → List (Tm n) → Result (Tm n) → Tm n → Tm (suc n) → List (Tm n) → Tm n
+devData′ as′ (ok b′)   _  _  _   = appsFrom b′ as′
+devData′ as′ (fail _)  e′ P′ bs′ = mData e′ P′ bs′
+
+devData : ∀ {n} → Tm n × List (Tm n) → Tm n → Tm (suc n) → List (Tm n) → Tm n
+devData (ctor i j , _) e′ P′ bs′ =
+  devData′ (proj₂ (unspine e′)) (lookupList bs′ j) e′ P′ bs′
+devData _ e′ P′ bs′ = mData e′ P′ bs′
+
 mutual
   dev : ∀ {n} → Sig → Mode → Tm n → Tm n
   dev σ m (var x) = var x
@@ -414,7 +442,7 @@ mutual
   dev σ m empty = empty
   dev σ m (dty i) = dty i
   dev σ m (ctor i j) = ctor i j
-  dev σ m (mData e P bs) = mData (dev σ m e) (dev σ m P) (devL σ m bs)
+  dev σ m (mData e P bs) = devData (unspine e) (dev σ m e) (dev σ m P) (devL σ m bs)
   dev σ m (mNat ze P z s) = dev σ m z
   dev σ m (mNat (su u) P z s) = inst (dev σ m s) (dev σ m u)
   dev σ m (mNat e P z s) = mNat (dev σ m e) (dev σ m P) (dev σ m z) (dev σ m s)
@@ -456,6 +484,92 @@ dev-def {σ} {m} i with lookupDef σ i in lk
 ...   | false = ⇛-def
 
 ------------------------------------------------------------------------
+-- Spines with a data head (ctor or dty). The head is not a λ, so a
+-- spine reduces only to a spine with the same head and reduced
+-- arguments; its development is the spine of developed arguments.
+------------------------------------------------------------------------
+
+data DHead {n} : Tm n → Set where
+  dh-ctor : ∀ {i j} → DHead (ctor i j)
+  dh-dty  : ∀ {i} → DHead (dty i)
+
+DHead-Head : ∀ {n} {h : Tm n} → DHead h → Head h
+DHead-Head dh-ctor = head-ctor
+DHead-Head dh-dty = head-dty
+
+Spine-lam : ∀ {n} {h : Tm n} {as q A t} → DHead h → Spine h as (lam q A t) → ⊥
+Spine-lam () sp-[]
+
+⇛L-++ : ∀ {σ m n} {as as′ bs bs′ : List (Tm n)}
+  → σ ⊢[ m ] as ⇛L as′ → σ ⊢[ m ] bs ⇛L bs′ → σ ⊢[ m ] (as ++ bs) ⇛L (as′ ++ bs′)
+⇛L-++ ⇛L-[] r = r
+⇛L-++ (⇛L-∷ a as) r = ⇛L-∷ a (⇛L-++ as r)
+
+⇛-appsFrom : ∀ {σ m n} {f f′ : Tm n} {as as′}
+  → σ ⊢[ m ] f ⇛ f′ → σ ⊢[ m ] as ⇛L as′ → σ ⊢[ m ] appsFrom f as ⇛ appsFrom f′ as′
+⇛-appsFrom f ⇛L-[] = f
+⇛-appsFrom f (⇛L-∷ a as) = ⇛-appsFrom (⇛-app f a) as
+
+⇛L-lookup : ∀ {σ m n} {bs bs′ : List (Tm n)} {j b}
+  → σ ⊢[ m ] bs ⇛L bs′ → lookupList bs j ≡ ok b
+  → ∃ λ b′ → (lookupList bs′ j ≡ ok b′) × (σ ⊢[ m ] b ⇛ b′)
+⇛L-lookup {j = zero} (⇛L-∷ t ts) refl = _ , refl , t
+⇛L-lookup {j = suc j} (⇛L-∷ t ts) eq = ⇛L-lookup ts eq
+⇛L-lookup {j = zero} ⇛L-[] ()
+⇛L-lookup {j = suc j} ⇛L-[] ()
+
+⇛L-lookup⁻ : ∀ {σ m n} {bs cs : List (Tm n)} {j c}
+  → σ ⊢[ m ] bs ⇛L cs → lookupList cs j ≡ ok c
+  → ∃ λ b → (lookupList bs j ≡ ok b) × (σ ⊢[ m ] b ⇛ c)
+⇛L-lookup⁻ {j = zero} (⇛L-∷ t ts) refl = _ , refl , t
+⇛L-lookup⁻ {j = suc j} (⇛L-∷ t ts) eq = ⇛L-lookup⁻ ts eq
+⇛L-lookup⁻ {j = zero} ⇛L-[] ()
+⇛L-lookup⁻ {j = suc j} ⇛L-[] ()
+
+Spine-⇛ : ∀ {σ m n} {h : Tm n} {as e e′} → DHead h → Spine h as e → σ ⊢[ m ] e ⇛ e′
+  → ∃ λ as′ → Spine h as′ e′ × (σ ⊢[ m ] as ⇛L as′)
+Spine-⇛ dh-ctor sp-[] ⇛-ctor = [] , sp-[] , ⇛L-[]
+Spine-⇛ dh-dty sp-[] ⇛-dty = [] , sp-[] , ⇛L-[]
+Spine-⇛ hd (sp-snoc sp) (⇛-β _ _) = ⊥-elim (Spine-lam hd sp)
+Spine-⇛ hd (sp-snoc sp) (⇛-app f a) with Spine-⇛ hd sp f
+... | as′ , sp′ , as⇛ = as′ ++ (_ ∷ []) , sp-snoc sp′ , ⇛L-++ as⇛ (⇛L-∷ a ⇛L-[])
+
+devL-++ : ∀ {σ m n} (as bs : List (Tm n)) → devL σ m (as ++ bs) ≡ devL σ m as ++ devL σ m bs
+devL-++ [] bs = refl
+devL-++ (a ∷ as) bs = cong (_ ∷_) (devL-++ as bs)
+
+dev-app-Spine : ∀ {σ m n} {h : Tm n} {as f} a → DHead h → Spine h as f
+  → dev σ m (app f a) ≡ app (dev σ m f) (dev σ m a)
+dev-app-Spine a dh-ctor sp-[] = refl
+dev-app-Spine a dh-dty sp-[] = refl
+dev-app-Spine a _ (sp-snoc _) = refl
+
+dev-DHead : ∀ {σ m n} {h : Tm n} → DHead h → dev σ m h ≡ h
+dev-DHead dh-ctor = refl
+dev-DHead dh-dty = refl
+
+dev-Spine : ∀ {σ m n} {h : Tm n} {as e} → DHead h → Spine h as e
+  → Spine h (devL σ m as) (dev σ m e)
+dev-Spine {σ} {m} hd sp-[] rewrite dev-DHead {σ} {m} hd = sp-[]
+dev-Spine {σ} {m} hd (sp-snoc {as = as} {a = a} sp)
+  rewrite devL-++ {σ} {m} as (a ∷ []) | dev-app-Spine {σ} {m} a hd sp =
+  sp-snoc (dev-Spine hd sp)
+
+lookupList-devL : ∀ {σ m n} (bs : List (Tm n)) j {b}
+  → lookupList bs j ≡ ok b → lookupList (devL σ m bs) j ≡ ok (dev σ m b)
+lookupList-devL (b ∷ bs) zero refl = refl
+lookupList-devL (b ∷ bs) (suc j) eq = lookupList-devL bs j eq
+lookupList-devL [] zero ()
+lookupList-devL [] (suc j) ()
+
+lookupList-devL-fail : ∀ {σ m n} (bs : List (Tm n)) j {s}
+  → lookupList bs j ≡ fail s → lookupList (devL σ m bs) j ≡ fail s
+lookupList-devL-fail [] zero refl = refl
+lookupList-devL-fail [] (suc j) refl = refl
+lookupList-devL-fail (b ∷ bs) zero ()
+lookupList-devL-fail (b ∷ bs) (suc j) eq = lookupList-devL-fail bs j eq
+
+------------------------------------------------------------------------
 -- Triangle: every one-step reduct reduces to the development.
 ------------------------------------------------------------------------
 
@@ -468,6 +582,7 @@ mutual
   tri (⇛-ιtt u) = tri u
   tri (⇛-ιrfl t) = tri t
   tri (⇛-ann e) = tri e
+  tri (⇛-ιdata {P = P} sp lk as b) = tri-ιdata {P = P} sp lk (triL as) (tri b)
   tri ⇛-var = ⇛-var
   tri ⇛-typ = ⇛-typ
   tri (⇛-pi A B) = ⇛-pi (tri A) (tri B)
@@ -481,7 +596,7 @@ mutual
   tri ⇛-empty = ⇛-empty
   tri ⇛-dty = ⇛-dty
   tri ⇛-ctor = ⇛-ctor
-  tri (⇛-mData e P bs) = ⇛-mData (tri e) (tri P) (triL bs)
+  tri (⇛-mData {P = P} e P⇛ bs) = tri-mData {P = P} e (tri e) (tri P⇛) (triL bs)
   tri (⇛-mNat e P z s) = tri-mNat e (tri e) (tri P) (tri z) (tri s)
   tri (⇛-mEmp e P) = ⇛-mEmp (tri e) (tri P)
   tri (⇛-mUnit e P u) = tri-mUnit e (tri e) (tri P) (tri u)
@@ -509,6 +624,79 @@ mutual
   triL : ∀ {σ m n} {ts us : List (Tm n)} → σ ⊢[ m ] ts ⇛L us → σ ⊢[ m ] us ⇛L devL σ m ts
   triL ⇛L-[] = ⇛L-[]
   triL (⇛L-∷ t ts) = ⇛L-∷ (tri t) (triL ts)
+
+  -- mData: the development contracts the redex iff the scrutinee is a
+  -- constructor application with a branch.
+  tri-ιdata : ∀ {σ m n} {i j} {as as′ : List (Tm n)} {e : Tm n} {P : Tm (suc n)} {bs : List (Tm n)} {b b′}
+    → Spine (ctor i j) as e → lookupList bs j ≡ ok b
+    → σ ⊢[ m ] as′ ⇛L devL σ m as → σ ⊢[ m ] b′ ⇛ dev σ m b
+    → σ ⊢[ m ] appsFrom b′ as′ ⇛ dev σ m (mData e P bs)
+  tri-ιdata {σ} {m} {bs = bs} sp lk as* b*
+    rewrite Spine→unspine head-ctor sp
+          | Spine→unspine head-ctor (dev-Spine {σ} {m} dh-ctor sp)
+          | lookupList-devL {σ} {m} bs _ lk = ⇛-appsFrom b* as*
+
+  tri-mData-ctor : ∀ {σ m n} {i j} {as : List (Tm n)} {e e′ : Tm n} {P P′ : Tm (suc n)} {bs bs′ : List (Tm n)}
+    → Spine (ctor i j) as e
+    → σ ⊢[ m ] e ⇛ e′ → σ ⊢[ m ] e′ ⇛ dev σ m e → σ ⊢[ m ] P′ ⇛ dev σ m P
+    → σ ⊢[ m ] bs′ ⇛L devL σ m bs
+    → σ ⊢[ m ] mData e′ P′ bs′ ⇛
+        devData′ (proj₂ (unspine (dev σ m e))) (lookupList (devL σ m bs) j)
+          (dev σ m e) (dev σ m P) (devL σ m bs)
+  tri-mData-ctor {σ} {m} {j = j} {bs = bs} sp e⇛ e* P* bs*
+    rewrite Spine→unspine head-ctor (dev-Spine {σ} {m} dh-ctor sp)
+    with lookupList bs j in lk
+  ... | fail s rewrite lookupList-devL-fail {σ} {m} bs j lk = ⇛-mData e* P* bs*
+  ... | ok b rewrite lookupList-devL {σ} {m} bs j lk
+    with Spine-⇛ dh-ctor sp e⇛
+  ...   | as′ , sp′ , _
+    with Spine-⇛ dh-ctor sp′ e* | ⇛L-lookup⁻ bs* (lookupList-devL {σ} {m} bs j lk)
+  ...     | as″ , sp″ , as′⇛ | b′ , lk′ , b′⇛
+    with Spine-unique head-ctor head-ctor sp″ (dev-Spine {σ} {m} dh-ctor sp)
+  ...       | refl , refl = ⇛-ιdata sp′ lk′ as′⇛ b′⇛
+
+  tri-mData : ∀ {σ m n} {e e′ : Tm n} {P P′ : Tm (suc n)} {bs bs′ : List (Tm n)}
+    → σ ⊢[ m ] e ⇛ e′ → σ ⊢[ m ] e′ ⇛ dev σ m e → σ ⊢[ m ] P′ ⇛ dev σ m P
+    → σ ⊢[ m ] bs′ ⇛L devL σ m bs
+    → σ ⊢[ m ] mData e′ P′ bs′ ⇛ dev σ m (mData e P bs)
+  tri-mData {e = e} {P = P} e⇛ e* P* bs* with unspine e in eq
+  ... | (ctor i j , as) = tri-mData-ctor {P = P} (unspine→Spine′ eq) e⇛ e* P* bs*
+  ... | (var _ , _) = ⇛-mData e* P* bs*
+  ... | (typ , _) = ⇛-mData e* P* bs*
+  ... | (pi _ _ _ , _) = ⇛-mData e* P* bs*
+  ... | (lam _ _ _ , _) = ⇛-mData e* P* bs*
+  ... | (app _ _ , _) = ⇛-mData e* P* bs*
+  ... | (nat , _) = ⇛-mData e* P* bs*
+  ... | (ze , _) = ⇛-mData e* P* bs*
+  ... | (su _ , _) = ⇛-mData e* P* bs*
+  ... | (unit , _) = ⇛-mData e* P* bs*
+  ... | (one , _) = ⇛-mData e* P* bs*
+  ... | (empty , _) = ⇛-mData e* P* bs*
+  ... | (dty _ , _) = ⇛-mData e* P* bs*
+  ... | (mData _ _ _ , _) = ⇛-mData e* P* bs*
+  ... | (mNat _ _ _ _ , _) = ⇛-mData e* P* bs*
+  ... | (mEmp _ _ , _) = ⇛-mData e* P* bs*
+  ... | (mUnit _ _ _ , _) = ⇛-mData e* P* bs*
+  ... | (idt _ _ _ , _) = ⇛-mData e* P* bs*
+  ... | (rfl , _) = ⇛-mData e* P* bs*
+  ... | (rwt _ _ _ , _) = ⇛-mData e* P* bs*
+  ... | (def _ , _) = ⇛-mData e* P* bs*
+  ... | (ann _ _ , _) = ⇛-mData e* P* bs*
+  ... | (prod _ _ , _) = ⇛-mData e* P* bs*
+  ... | (pair _ _ , _) = ⇛-mData e* P* bs*
+  ... | (fst _ , _) = ⇛-mData e* P* bs*
+  ... | (snd _ , _) = ⇛-mData e* P* bs*
+  ... | (nu _ , _) = ⇛-mData e* P* bs*
+  ... | (unf _ _ , _) = ⇛-mData e* P* bs*
+  ... | (ucons _ , _) = ⇛-mData e* P* bs*
+  ... | (i64 , _) = ⇛-mData e* P* bs*
+  ... | (f32ty , _) = ⇛-mData e* P* bs*
+  ... | (tensor _ _ , _) = ⇛-mData e* P* bs*
+  ... | (addi _ _ , _) = ⇛-mData e* P* bs*
+  ... | (muli _ _ , _) = ⇛-mData e* P* bs*
+  ... | (addt _ _ , _) = ⇛-mData e* P* bs*
+  ... | (toi64 _ , _) = ⇛-mData e* P* bs*
+  ... | (packi _ _ , _) = ⇛-mData e* P* bs*
 
   -- app: the development contracts the redex iff the function is a λ.
   tri-app : ∀ {σ m n} {f f′ a a′ : Tm n}
@@ -793,3 +981,31 @@ one-⇛* (⇛*-step ⇛-one r) = one-⇛* r
 rfl-⇛* : ∀ {σ m n} {u : Tm n} → σ ⊢[ m ] rfl ⇛* u → u ≡ rfl
 rfl-⇛* ⇛*-refl = refl
 rfl-⇛* (⇛*-step ⇛-rfl r) = rfl-⇛* r
+
+------------------------------------------------------------------------
+-- Spines with a data head along ⇛*: the head stays, the arguments
+-- reduce pointwise.
+------------------------------------------------------------------------
+
+infix 3 _⊢[_]_⇛L*_
+
+data _⊢[_]_⇛L*_ (σ : Sig) (m : Mode) {n} : List (Tm n) → List (Tm n) → Set where
+  ⇛L*-[] : σ ⊢[ m ] [] ⇛L* []
+  ⇛L*-∷  : ∀ {a a′ as as′} → σ ⊢[ m ] a ⇛* a′ → σ ⊢[ m ] as ⇛L* as′
+    → σ ⊢[ m ] (a ∷ as) ⇛L* (a′ ∷ as′)
+
+⇛L*-refl : ∀ {σ m n} (as : List (Tm n)) → σ ⊢[ m ] as ⇛L* as
+⇛L*-refl [] = ⇛L*-[]
+⇛L*-refl (a ∷ as) = ⇛L*-∷ ⇛*-refl (⇛L*-refl as)
+
+⇛L-⇛L* : ∀ {σ m n} {as as₁ as′ : List (Tm n)}
+  → σ ⊢[ m ] as ⇛L as₁ → σ ⊢[ m ] as₁ ⇛L* as′ → σ ⊢[ m ] as ⇛L* as′
+⇛L-⇛L* ⇛L-[] ⇛L*-[] = ⇛L*-[]
+⇛L-⇛L* (⇛L-∷ a as) (⇛L*-∷ a′ as′) = ⇛L*-∷ (⇛*-step a a′) (⇛L-⇛L* as as′)
+
+Spine-⇛* : ∀ {σ m n} {h : Tm n} {as e e′} → DHead h → Spine h as e → σ ⊢[ m ] e ⇛* e′
+  → ∃ λ as′ → Spine h as′ e′ × (σ ⊢[ m ] as ⇛L* as′)
+Spine-⇛* hd sp ⇛*-refl = _ , sp , ⇛L*-refl _
+Spine-⇛* hd sp (⇛*-step d r) with Spine-⇛ hd sp d
+... | as₁ , sp₁ , as⇛ with Spine-⇛* hd sp₁ r
+...   | as′ , sp′ , r′ = as′ , sp′ , ⇛L-⇛L* as⇛ r′
