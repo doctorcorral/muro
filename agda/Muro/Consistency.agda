@@ -68,7 +68,7 @@ data Intro {n} : Tm n → Set where
   i-rfl : Intro rfl
 
 Empty-intro-⇒ : ∀ {σ n} {Γ : Ctx n} {m e B u} →
-  Intro e → σ , Γ ⊢[ m ] e ⇒ B ⊣ u → σ ⊢[ m ] B ≈ empty → ⊥
+  Intro e → σ , Γ ⊢[ m ] e ⇒ B ⊣ u → σ ⊢[ spec ] B ≈ empty → ⊥
 Empty-intro-⇒ i-ze ⇒-ze c with ≈-shape h-nat h-empty c
 ... | ()
 Empty-intro-⇒ i-su (⇒-su _) c with ≈-shape h-nat h-empty c
@@ -95,9 +95,9 @@ ne-untyped-⇐ : ∀ {e A u} →
 
 ne-untyped-⇒ (ne-var {x = ()}) _
 ne-untyped-⇒ (ne-def _) (⇒-def lk _) = fail≢ok lk
-ne-untyped-⇒ (ne-app ne _) (⇒-app-aff D _ _ _) = ne-untyped-⇒ ne D
-ne-untyped-⇒ (ne-app ne _) (⇒-app-era D _ _) = ne-untyped-⇒ ne D
-ne-untyped-⇒ (ne-app ne _) (⇒-app-reuse D _ _ _ _) = ne-untyped-⇒ ne D
+ne-untyped-⇒ (ne-app ne) (⇒-app-aff D _ _ _) = ne-untyped-⇒ ne D
+ne-untyped-⇒ (ne-app ne) (⇒-app-era D _ _) = ne-untyped-⇒ ne D
+ne-untyped-⇒ (ne-app ne) (⇒-app-reuse D _ _ _ _) = ne-untyped-⇒ ne D
 ne-untyped-⇒ (ne-mNat ne) (⇒-mNat D _ _ _ _ _) = ne-untyped-⇐ ne D
 ne-untyped-⇒ (ne-mUnit ne) (⇒-mUnit D _ _ _) = ne-untyped-⇐ ne D
 ne-untyped-⇒ (ne-mEmp ne) (⇒-mEmp D _) = ne-untyped-⇐ ne D
@@ -137,7 +137,7 @@ Empty-nf nf-pi (⇐-conv () _)
 Empty-nf nf-lam D = Empty-intro i-lam D
 Empty-nf nf-nat (⇐-conv () _)
 Empty-nf nf-ze D = Empty-intro i-ze D
-Empty-nf (nf-su _) D = Empty-intro i-su D
+Empty-nf nf-su D = Empty-intro i-su D
 Empty-nf nf-unit (⇐-conv () _)
 Empty-nf nf-one D = Empty-intro i-one D
 Empty-nf nf-empty D = no-evid-empty-⇐ D
@@ -161,12 +161,12 @@ data IsLam {n} : Tm n → Set where
 
 nf-fun : ∀ {f F q A B u} →
   Nf σ-empty evid f → σ-empty , ε ⊢[ evid ] f ⇒ F ⊣ u →
-  σ-empty ⊢[ evid ] F ≈ pi q A B → IsLam f
+  σ-empty ⊢[ spec ] F ≈ pi q A B → IsLam f
 nf-fun (nf-ne ne) D _ = ⊥-elim (ne-untyped-⇒ ne D)
 nf-fun nf-lam _ _ = is-lam
 nf-fun nf-ze ⇒-ze c with ≈-shape h-nat h-pi c
 ... | ()
-nf-fun (nf-su _) (⇒-su _) c with ≈-shape h-nat h-pi c
+nf-fun nf-su (⇒-su _) c with ≈-shape h-nat h-pi c
 ... | ()
 nf-fun nf-one ⇒-one c with ≈-shape h-unit h-pi c
 ... | ()
@@ -183,7 +183,7 @@ nf-nat-prog : ∀ {e P z s u} →
   Prog (mNat e P z s)
 nf-nat-prog (nf-ne ne) D = ⊥-elim (ne-untyped-⇐ ne D)
 nf-nat-prog nf-ze _ = inj₂ (_ , ιz)
-nf-nat-prog (nf-su _) _ = inj₂ (_ , ιs)
+nf-nat-prog nf-su _ = inj₂ (_ , ιs)
 nf-nat-prog nf-lam (⇐-conv (⇒-lam _ _ _ _) c) with ≈-shape h-pi h-nat c
 ... | ()
 nf-nat-prog nf-one (⇐-conv ⇒-one c) with ≈-shape h-unit h-nat c
@@ -203,7 +203,7 @@ nf-unit-prog (nf-ne ne) D = ⊥-elim (ne-untyped-⇐ ne D)
 nf-unit-prog nf-one _ = inj₂ (_ , ιtt)
 nf-unit-prog nf-ze (⇐-conv ⇒-ze c) with ≈-shape h-nat h-unit c
 ... | ()
-nf-unit-prog (nf-su _) (⇐-conv (⇒-su _) c) with ≈-shape h-nat h-unit c
+nf-unit-prog nf-su (⇐-conv (⇒-su _) c) with ≈-shape h-nat h-unit c
 ... | ()
 nf-unit-prog nf-lam (⇐-conv (⇒-lam _ _ _ _) c) with ≈-shape h-pi h-unit c
 ... | ()
@@ -217,12 +217,12 @@ nf-unit-prog nf-rfl (⇐-conv () _)
 
 nf-eq-prog : ∀ {eq E A l r P t u} →
   Nf σ-empty evid eq → σ-empty , ε ⊢[ evid ] eq ⇒ E ⊣ u →
-  σ-empty ⊢[ evid ] E ≈ idt A l r → Prog (rwt eq P t)
+  σ-empty ⊢[ spec ] E ≈ idt A l r → Prog (rwt eq P t)
 nf-eq-prog (nf-ne ne) D _ = ⊥-elim (ne-untyped-⇒ ne D)
 nf-eq-prog nf-rfl _ _ = inj₂ (_ , ιrfl)
 nf-eq-prog nf-ze ⇒-ze c with ≈-shape h-nat h-idt c
 ... | ()
-nf-eq-prog (nf-su _) (⇒-su _) c with ≈-shape h-nat h-idt c
+nf-eq-prog nf-su (⇒-su _) c with ≈-shape h-nat h-idt c
 ... | ()
 nf-eq-prog nf-one ⇒-one c with ≈-shape h-unit h-idt c
 ... | ()
@@ -244,9 +244,7 @@ progress-⇐ (⇐-refl _) = inj₁ nf-rfl
 
 progress-⇒ (⇒-var-evid {x = ()} _)
 progress-⇒ ⇒-ze = inj₁ nf-ze
-progress-⇒ (⇒-su D) with progress-⇐ D
-... | inj₁ nf = inj₁ (nf-su nf)
-... | inj₂ (_ , s) = inj₂ (_ , su-c s)
+progress-⇒ (⇒-su D) = inj₁ nf-su
 progress-⇒ ⇒-one = inj₁ nf-one
 progress-⇒ (⇒-lam _ _ _ _) = inj₁ nf-lam
 progress-⇒ (⇒-app-aff Df c _ _) with progress-⇒ Df
@@ -266,9 +264,7 @@ progress-⇒ (⇒-rwt Deq c _ _) with progress-⇒ Deq
 ... | inj₁ nf = nf-eq-prog nf Deq c
 progress-⇒ (⇒-mNat De _ _ _ _ _) with progress-⇐ De
 ... | inj₁ nf = nf-nat-prog nf De
-... | inj₂ (_ , s) with step-natCanon s
-...   | inj₁ nc = inj₂ (_ , mNat-e nc s)
-...   | inj₂ (_ , refl) = inj₂ (_ , ιs)
+... | inj₂ (_ , s) = inj₂ (_ , mNat-e s)
 progress-⇒ (⇒-mEmp De _) with progress-⇐ De
 ... | inj₁ nf = ⊥-elim (Empty-nf nf De)
 ... | inj₂ (_ , s) = inj₂ (_ , mEmp-e s)

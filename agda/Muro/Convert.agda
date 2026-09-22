@@ -3,8 +3,7 @@
 --
 -- Two relations, one strategy and one equivalence:
 --
--- ⟶  one-step weak-head reduction, the strategy of Check.whnf plus
---    reduction in the argument of a stuck application and under su:
+-- ⟶  one-step weak-head reduction, exactly the strategy of Check.whnf:
 --      δ    def i unfolds when allowedDef permits the mode
 --      β    app (lam _ _ t) a ⟶ inst t a
 --      ι    mNat ze / mNat (su _) / mUnit one / rwt rfl
@@ -71,15 +70,11 @@ data Foreign {n} : Tm n → Set where
   f-toi64  : ∀ {t} → Foreign (toi64 t)
   f-packi  : ∀ {x y} → Foreign (packi x y)
 
-natCanon : ∀ {n} → Tm n → Bool
-natCanon ze     = true
-natCanon (su _) = true
-natCanon _      = false
-
 ------------------------------------------------------------------------
--- Neutral and normal terms for this strategy. Ne is the side condition
--- for reducing an application argument; Nf is what Consistency inverts.
--- Neither is complete: some ill-typed terms are stuck without being Ne.
+-- Neutral and normal terms for this strategy (weak head: arguments,
+-- branches, and the body of su are not looked at). Nf is what
+-- Consistency inverts. Neither is complete: some ill-typed terms are
+-- stuck without being Ne.
 ------------------------------------------------------------------------
 
 data Ne (σ : Sig) (m : Mode) {n} : Tm n → Set
@@ -90,7 +85,7 @@ data Ne σ m where
   ne-def     : ∀ {i}
     → (∀ {d} → lookupDef σ i ≡ ok d → allowedDef (Def.dmode d) m ≡ true → ⊥)
     → Ne σ m (def i)
-  ne-app     : ∀ {f a} → Ne σ m f → Nf σ m a → Ne σ m (app f a)
+  ne-app     : ∀ {f a} → Ne σ m f → Ne σ m (app f a)
   ne-mNat    : ∀ {e P z s} → Ne σ m e → Ne σ m (mNat e P z s)
   ne-mUnit   : ∀ {e P u} → Ne σ m e → Ne σ m (mUnit e P u)
   ne-mEmp    : ∀ {e P} → Ne σ m e → Ne σ m (mEmp e P)
@@ -104,7 +99,7 @@ data Nf σ m where
   nf-lam   : ∀ {q A t} → Nf σ m (lam q A t)
   nf-nat   : Nf σ m nat
   nf-ze    : Nf σ m ze
-  nf-su    : ∀ {t} → Nf σ m t → Nf σ m (su t)
+  nf-su    : ∀ {t} → Nf σ m (su t)
   nf-unit  : Nf σ m unit
   nf-one   : Nf σ m one
   nf-empty : Nf σ m empty
@@ -130,15 +125,6 @@ data _⊢[_]_⟶_ (σ : Sig) (m : Mode) {n} : Tm n → Tm n → Set where
     → σ ⊢[ m ] f ⟶ f′
     → σ ⊢[ m ] app f a ⟶ app f′ a
 
-  app-a : ∀ {f a a′}
-    → Ne σ m f
-    → σ ⊢[ m ] a ⟶ a′
-    → σ ⊢[ m ] app f a ⟶ app f a′
-
-  su-c : ∀ {t t′}
-    → σ ⊢[ m ] t ⟶ t′
-    → σ ⊢[ m ] su t ⟶ su t′
-
   ιz : ∀ {P z s}
     → σ ⊢[ m ] mNat ze P z s ⟶ z
 
@@ -146,7 +132,6 @@ data _⊢[_]_⟶_ (σ : Sig) (m : Mode) {n} : Tm n → Tm n → Set where
     → σ ⊢[ m ] mNat (su u) P z s ⟶ inst s u
 
   mNat-e : ∀ {e e′ P z s}
-    → natCanon e ≡ false
     → σ ⊢[ m ] e ⟶ e′
     → σ ⊢[ m ] mNat e P z s ⟶ mNat e′ P z s
 
@@ -170,24 +155,6 @@ data _⊢[_]_⟶_ (σ : Sig) (m : Mode) {n} : Tm n → Tm n → Set where
 
   ann-e : ∀ {e A}
     → σ ⊢[ m ] ann e A ⟶ e
-
--- A term that steps is either su _ or not a Nat constructor.
-step-natCanon : ∀ {σ m n} {e e′ : Tm n}
-  → σ ⊢[ m ] e ⟶ e′ → (natCanon e ≡ false) ⊎ (∃ λ u → e ≡ su u)
-step-natCanon (δ _ _)      = inj₁ refl
-step-natCanon β            = inj₁ refl
-step-natCanon (app-f _)    = inj₁ refl
-step-natCanon (app-a _ _)  = inj₁ refl
-step-natCanon (su-c _)     = inj₂ (_ , refl)
-step-natCanon ιz           = inj₁ refl
-step-natCanon ιs           = inj₁ refl
-step-natCanon (mNat-e _ _) = inj₁ refl
-step-natCanon ιtt          = inj₁ refl
-step-natCanon (mUnit-e _)  = inj₁ refl
-step-natCanon (mEmp-e _)   = inj₁ refl
-step-natCanon ιrfl         = inj₁ refl
-step-natCanon (rwt-e _)    = inj₁ refl
-step-natCanon ann-e        = inj₁ refl
 
 ------------------------------------------------------------------------
 -- Normal forms do not step.
@@ -218,12 +185,11 @@ nf-no-step : ∀ {σ m n} {t u : Tm n} → Nf σ m t → σ ⊢[ m ] t ⟶ u →
 
 ne-no-step ne-var ()
 ne-no-step (ne-def stuck) (δ lk al) = stuck lk al
-ne-no-step (ne-app (ne-foreign ()) _) β
-ne-no-step (ne-app nf _) (app-f s) = ne-no-step nf s
-ne-no-step (ne-app _ na) (app-a _ s) = nf-no-step na s
+ne-no-step (ne-app (ne-foreign ())) β
+ne-no-step (ne-app nf) (app-f s) = ne-no-step nf s
 ne-no-step (ne-mNat (ne-foreign ())) ιz
 ne-no-step (ne-mNat (ne-foreign ())) ιs
-ne-no-step (ne-mNat ne) (mNat-e _ s) = ne-no-step ne s
+ne-no-step (ne-mNat ne) (mNat-e s) = ne-no-step ne s
 ne-no-step (ne-mUnit (ne-foreign ())) ιtt
 ne-no-step (ne-mUnit ne) (mUnit-e s) = ne-no-step ne s
 ne-no-step (ne-mEmp ne) (mEmp-e s) = ne-no-step ne s
@@ -237,7 +203,7 @@ nf-no-step nf-pi ()
 nf-no-step nf-lam ()
 nf-no-step nf-nat ()
 nf-no-step nf-ze ()
-nf-no-step (nf-su nf) (su-c s) = nf-no-step nf s
+nf-no-step nf-su ()
 nf-no-step nf-unit ()
 nf-no-step nf-one ()
 nf-no-step nf-empty ()
@@ -254,21 +220,15 @@ det (δ lk _) (δ lk′ _) with ok-inj (trans (sym lk) lk′)
 ... | refl = refl
 det β β = refl
 det β (app-f ())
-det β (app-a (ne-foreign ()) _)
 det (app-f ()) β
 det (app-f s) (app-f s′) = cong (λ f → app f _) (det s s′)
-det (app-f s) (app-a ne _) = ⊥-elim (ne-no-step ne s)
-det (app-a (ne-foreign ()) _) β
-det (app-a ne _) (app-f s) = ⊥-elim (ne-no-step ne s)
-det (app-a _ s) (app-a _ s′) = cong (app _) (det s s′)
-det (su-c s) (su-c s′) = cong su (det s s′)
 det ιz ιz = refl
-det ιz (mNat-e _ ())
+det ιz (mNat-e ())
 det ιs ιs = refl
-det ιs (mNat-e () _)
-det (mNat-e _ ()) ιz
-det (mNat-e () _) ιs
-det (mNat-e _ s) (mNat-e _ s′) = cong (λ e → mNat e _ _ _) (det s s′)
+det ιs (mNat-e ())
+det (mNat-e ()) ιz
+det (mNat-e ()) ιs
+det (mNat-e s) (mNat-e s′) = cong (λ e → mNat e _ _ _) (det s s′)
 det ιtt ιtt = refl
 det ιtt (mUnit-e ())
 det (mUnit-e ()) ιtt
@@ -314,11 +274,9 @@ nf-⟶* nf (⟶*-step s _) = ⊥-elim (nf-no-step nf s)
 ⟶⊆⇛ (δ lk al) = ⇛-δ lk al
 ⟶⊆⇛ β = ⇛-β (⇛-refl _) (⇛-refl _)
 ⟶⊆⇛ (app-f s) = ⇛-app (⟶⊆⇛ s) (⇛-refl _)
-⟶⊆⇛ (app-a _ s) = ⇛-app (⇛-refl _) (⟶⊆⇛ s)
-⟶⊆⇛ (su-c s) = ⇛-su (⟶⊆⇛ s)
 ⟶⊆⇛ ιz = ⇛-ιz (⇛-refl _)
 ⟶⊆⇛ ιs = ⇛-ιs (⇛-refl _) (⇛-refl _)
-⟶⊆⇛ (mNat-e _ s) = ⇛-mNat (⟶⊆⇛ s) (⇛-refl _) (⇛-refl _) (⇛-refl _)
+⟶⊆⇛ (mNat-e s) = ⇛-mNat (⟶⊆⇛ s) (⇛-refl _) (⇛-refl _) (⇛-refl _)
 ⟶⊆⇛ ιtt = ⇛-ιtt (⇛-refl _)
 ⟶⊆⇛ (mUnit-e s) = ⇛-mUnit (⟶⊆⇛ s) (⇛-refl _) (⇛-refl _)
 ⟶⊆⇛ (mEmp-e s) = ⇛-mEmp (⟶⊆⇛ s) (⇛-refl _)
