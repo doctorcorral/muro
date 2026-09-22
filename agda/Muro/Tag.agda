@@ -1,5 +1,5 @@
 ------------------------------------------------------------------------
--- Constructor tags. `tmTag` numbers the constructors of Tm; `Shape k t`
+-- Constructor tags. `tmTag` numbers the constructors of Tm; `TmShape k t`
 -- says t is built from constructor number k. The checker compares tags
 -- before structural comparison (synEq, convN) so that proofs about
 -- those functions can case on two terms of equal tag without listing
@@ -51,46 +51,46 @@ tmTag (addt _ _) = 34
 tmTag (toi64 _) = 35
 tmTag (packi _ _) = 36
 
-data Shape {n} : ℕ → Tm n → Set where
-  sh-var : ∀ {a} → Shape 0 (var a)
-  sh-typ : Shape 1 typ
-  sh-pi : ∀ {a b c} → Shape 2 (pi a b c)
-  sh-lam : ∀ {a b c} → Shape 3 (lam a b c)
-  sh-app : ∀ {a b} → Shape 4 (app a b)
-  sh-nat : Shape 5 nat
-  sh-ze : Shape 6 ze
-  sh-su : ∀ {a} → Shape 7 (su a)
-  sh-unit : Shape 8 unit
-  sh-one : Shape 9 one
-  sh-empty : Shape 10 empty
-  sh-dty : ∀ {a} → Shape 11 (dty a)
-  sh-ctor : ∀ {a b} → Shape 12 (ctor a b)
-  sh-mData : ∀ {a b c} → Shape 13 (mData a b c)
-  sh-mNat : ∀ {a b c d} → Shape 14 (mNat a b c d)
-  sh-mEmp : ∀ {a b} → Shape 15 (mEmp a b)
-  sh-mUnit : ∀ {a b c} → Shape 16 (mUnit a b c)
-  sh-idt : ∀ {a b c} → Shape 17 (idt a b c)
-  sh-rfl : Shape 18 rfl
-  sh-rwt : ∀ {a b c} → Shape 19 (rwt a b c)
-  sh-def : ∀ {a} → Shape 20 (def a)
-  sh-ann : ∀ {a b} → Shape 21 (ann a b)
-  sh-prod : ∀ {a b} → Shape 22 (prod a b)
-  sh-pair : ∀ {a b} → Shape 23 (pair a b)
-  sh-fst : ∀ {a} → Shape 24 (fst a)
-  sh-snd : ∀ {a} → Shape 25 (snd a)
-  sh-nu : ∀ {a} → Shape 26 (nu a)
-  sh-unf : ∀ {a b} → Shape 27 (unf a b)
-  sh-ucons : ∀ {a} → Shape 28 (ucons a)
-  sh-i64 : Shape 29 i64
-  sh-f32ty : Shape 30 f32ty
-  sh-tensor : ∀ {a b} → Shape 31 (tensor a b)
-  sh-addi : ∀ {a b} → Shape 32 (addi a b)
-  sh-muli : ∀ {a b} → Shape 33 (muli a b)
-  sh-addt : ∀ {a b} → Shape 34 (addt a b)
-  sh-toi64 : ∀ {a} → Shape 35 (toi64 a)
-  sh-packi : ∀ {a b} → Shape 36 (packi a b)
+data TmShape {n} : ℕ → Tm n → Set where
+  sh-var : ∀ {a} → TmShape 0 (var a)
+  sh-typ : TmShape 1 typ
+  sh-pi : ∀ {a b c} → TmShape 2 (pi a b c)
+  sh-lam : ∀ {a b c} → TmShape 3 (lam a b c)
+  sh-app : ∀ {a b} → TmShape 4 (app a b)
+  sh-nat : TmShape 5 nat
+  sh-ze : TmShape 6 ze
+  sh-su : ∀ {a} → TmShape 7 (su a)
+  sh-unit : TmShape 8 unit
+  sh-one : TmShape 9 one
+  sh-empty : TmShape 10 empty
+  sh-dty : ∀ {a} → TmShape 11 (dty a)
+  sh-ctor : ∀ {a b} → TmShape 12 (ctor a b)
+  sh-mData : ∀ {a b c} → TmShape 13 (mData a b c)
+  sh-mNat : ∀ {a b c d} → TmShape 14 (mNat a b c d)
+  sh-mEmp : ∀ {a b} → TmShape 15 (mEmp a b)
+  sh-mUnit : ∀ {a b c} → TmShape 16 (mUnit a b c)
+  sh-idt : ∀ {a b c} → TmShape 17 (idt a b c)
+  sh-rfl : TmShape 18 rfl
+  sh-rwt : ∀ {a b c} → TmShape 19 (rwt a b c)
+  sh-def : ∀ {a} → TmShape 20 (def a)
+  sh-ann : ∀ {a b} → TmShape 21 (ann a b)
+  sh-prod : ∀ {a b} → TmShape 22 (prod a b)
+  sh-pair : ∀ {a b} → TmShape 23 (pair a b)
+  sh-fst : ∀ {a} → TmShape 24 (fst a)
+  sh-snd : ∀ {a} → TmShape 25 (snd a)
+  sh-nu : ∀ {a} → TmShape 26 (nu a)
+  sh-unf : ∀ {a b} → TmShape 27 (unf a b)
+  sh-ucons : ∀ {a} → TmShape 28 (ucons a)
+  sh-i64 : TmShape 29 i64
+  sh-f32ty : TmShape 30 f32ty
+  sh-tensor : ∀ {a b} → TmShape 31 (tensor a b)
+  sh-addi : ∀ {a b} → TmShape 32 (addi a b)
+  sh-muli : ∀ {a b} → TmShape 33 (muli a b)
+  sh-addt : ∀ {a b} → TmShape 34 (addt a b)
+  sh-toi64 : ∀ {a} → TmShape 35 (toi64 a)
+  sh-packi : ∀ {a b} → TmShape 36 (packi a b)
 
-shape : ∀ {n} (t : Tm n) → Shape (tmTag t) t
+shape : ∀ {n} (t : Tm n) → TmShape (tmTag t) t
 shape (var _) = sh-var
 shape typ = sh-typ
 shape (pi _ _ _) = sh-pi
