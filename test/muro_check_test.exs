@@ -383,6 +383,38 @@ defmodule Muro.CheckTest do
     assert msg =~ "Type has no type"
   end
 
+  test "a type is recognised by its shape, not by what it reduces to" do
+    src = """
+    def U : spec (λ (x : Nat) → Type) 0 := Nat
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "Type has no type"
+  end
+
+  test "instantiating an evidence lemma does not consume its argument" do
+    src = """
+    def lem : evidence Π (n : Nat) → {n ≡ n : Nat} := λ (n : Nat) → refl
+    def twice : evidence Π (n : Nat) → {n ≡ n : Nat} × {n ≡ n : Nat} :=
+      λ (n : Nat) → (lem n, lem n)
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+
+    # the argument is still checked in the mode of the application
+    spec_arg = """
+    def P : spec Type := Nat
+    def lem : evidence Π (A : Type) → {A ≡ A : Type} := λ (A : Type) → refl
+    def bad : evidence {P ≡ P : Type} := lem P
+    """
+
+    assert {:ok, book} = Parser.parse(spec_arg)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "no promotion"
+  end
+
   test "kinds are well-formed as def types and binder domains" do
     src = """
     def IsEven : spec Π (n : Nat) → Type :=

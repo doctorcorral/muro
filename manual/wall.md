@@ -52,7 +52,8 @@ Even inside a `run` or `evidence` term, some positions are spec:
 
 - Erased Π-arguments (`(- x : A)`).
 - The two sides of an identity `{a ≡ b : A}`, and the sort `A`.
-- Arguments at a **call site of an evidence definition**. Instantiating a theorem does not consume affine resources. Uses of those arguments are discarded.
+
+Arguments at a **call site of an evidence definition** are not spec, but their uses do not count. Instantiating a theorem does not consume affine resources: inside an evidence term, the argument of an application whose head is an evidence definition is checked in `evidence` like any other argument, and its uses are then discarded. Before 0.3.0 the argument was checked in `spec`, so a spec variable could be handed to a theorem from evidence; it cannot now.
 
 Local affine binders in an evidence λ still fail if you use them twice. Evidence pays the same affinity tax as run. It is not a free ride.
 

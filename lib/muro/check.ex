@@ -308,8 +308,13 @@ defmodule Muro.Check do
 
   defp whnf(_, _, t), do: t
 
+  # Fuelled, as Agda's isData: fuel also bounds the descent into data
+  # parameters (a spec definition may be recursive: X : Type := D X).
+  defp is_data?(0, _book, _t), do: false
+
   defp is_data?(k, book, t) do
     {h, as} = apps(whnf(k, book, t))
+    k = k - 1
 
     case h do
       :nat ->
@@ -1108,23 +1113,27 @@ defmodule Muro.Check do
     end
   end
 
-  # Arguments of an evidence definition are checked in spec: they instantiate
-  # a theorem and are not computational uses.
-  defp arg_mode(book, m, f) do
-    if m == :evidence do
-      case elem(apps(f), 0) do
-        {:def, name} ->
-          case lookup_def(book, name) do
-            {:ok, %{mode: :evidence}} -> :spec
-            _ -> m
-          end
+  # An application f a in evidence mode whose head is an evidence
+  # definition instantiates a theorem: the argument is still checked in
+  # the mode of the application, but its uses are not computational and
+  # are discarded (Agda: Env.appUses / evidCall).
+  defp evid_call?(book, :evidence, f) do
+    case elem(apps(f), 0) do
+      {:def, name} ->
+        case lookup_def(book, name) do
+          {:ok, %{mode: :evidence}} -> true
+          _ -> false
+        end
 
-        _ ->
-          m
-      end
-    else
-      m
+      _ ->
+        false
     end
+  end
+
+  defp evid_call?(_book, _m, _f), do: false
+
+  defp app_uses(book, m, f, fu, au) do
+    if evid_call?(book, m, f), do: {:ok, fu}, else: combine(m, fu, au)
   end
 
   defp infer_arg(k, book, rs, gamma, m, :erased, a, fu, arg, _f) do
@@ -1134,14 +1143,14 @@ defmodule Muro.Check do
   end
 
   defp infer_arg(k, book, rs, gamma, m, :affine, a, fu, arg, f) do
-    with {:ok, au} <- check(k, book, rs, gamma, arg_mode(book, m, f), arg, a),
-         do: combine(m, fu, au)
+    with {:ok, au} <- check(k, book, rs, gamma, m, arg, a),
+         do: app_uses(book, m, f, fu, au)
   end
 
   defp infer_arg(k, book, rs, gamma, m, :reuse, a, fu, arg, f) do
     if is_data?(k, book, a) do
-      with {:ok, au} <- check(k, book, rs, gamma, arg_mode(book, m, f), arg, a),
-           do: combine(m, fu, au)
+      with {:ok, au} <- check(k, book, rs, gamma, m, arg, a),
+           do: app_uses(book, m, f, fu, au)
     else
       {:error, "+ argument is not Data"}
     end
@@ -1149,8 +1158,12 @@ defmodule Muro.Check do
 
   # A type is Type, a kind Π (x : A) → K, or a small type (⇒ Type).
   # Kinds are not small: Π (x : A) → Type is wf but has no type.
+  # Syntax-directed, as ⊢ wf: a kind is recognised by its shape, anything
+  # else must infer a type convertible to Type. (Reducing first would
+  # accept terms that merely reduce to Type or to a kind, such as
+  # (λ (x : Nat) → Type) 0, which have no derivation.)
   defp check_ty(k, book, rs, gamma, a) do
-    case whnf(k, book, a) do
+    case a do
       # type-Type
       :typ ->
         :ok
