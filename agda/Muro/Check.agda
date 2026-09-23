@@ -9,6 +9,7 @@
 -- Emit visibility (def vs defp) is an Elixir-only flag on run.
 ------------------------------------------------------------------------
 
+{-# OPTIONS --safe #-}
 module Muro.Check where
 
 open import Data.Bool.Base
@@ -20,7 +21,6 @@ open import Data.Maybe.Base using (Maybe; just; nothing)
 open import Data.Nat.Base using (ℕ; zero; suc; _≡ᵇ_; _<ᵇ_; _+_; _∸_)
 open import Data.Nat.Show using (show)
 open import Data.Product.Base using (_×_; _,_; proj₁; proj₂)
-open import Agda.Builtin.String using (primStringEquality)
 open import Data.String.Base using (String; _++_)
 open import Data.Unit.Base using (⊤; tt)
 open import Data.Vec.Base as Vec using (Vec; []; _∷_; lookup; map)
@@ -32,7 +32,7 @@ open import Muro.Syntax
 open import Muro.Subst
 open import Muro.Env public
 open import Muro.Tag using (tmTag)
-open import Muro.Spine using (unspine; ctorSpine; dtyArgs; defArgs; lamView)
+open import Muro.Spine using (unspine; ctorSpine; dtyArgs; defArgs)
 
 ------------------------------------------------------------------------
 -- Recursion state: run and evid structural descent (not spec).
@@ -86,77 +86,94 @@ nthQty (pi _ _ B) (suc i) = nthQty B i
 nthQty _          _       = fail "recursive-call spine longer than Π telescope"
 
 ------------------------------------------------------------------------
--- Weak-head normalisation (β, ι, δ, ann). Fuel is the clock.
+-- Weak-head normalisation (β, ι, δ, ann). Fuel is the clock: every
+-- recursive call spends one unit, and running out is a failure of its
+-- own (outOfFuel), never a silently unreduced term.
 ------------------------------------------------------------------------
 
+outOfFuel : String
+outOfFuel = "out of fuel (the checker gave up reducing; raise the fuel)"
+
 mutual
-  whnf : ∀ {n} → ℕ → Sig → Tm n → Tm n
-  whnf zero    _ t = t
+  whnf : ∀ {n} → ℕ → Sig → Tm n → Result (Tm n)
+  whnf zero    _ _ = fail outOfFuel
   whnf (suc k) σ (app f a) with whnf k σ f
-  ... | lam _ _ t = whnf k σ (inst t a)
-  ... | f′        = app f′ a
+  ... | fail e            = fail e
+  ... | ok (lam _ _ t)    = whnf k σ (inst t a)
+  ... | ok f′             = ok (app f′ a)
   whnf (suc k) σ (mNat e P z s) with whnf k σ e
-  ... | ze   = whnf k σ z
-  ... | su u = whnf k σ (inst s u)
-  ... | e′   = mNat e′ P z s
+  ... | fail m      = fail m
+  ... | ok ze       = whnf k σ z
+  ... | ok (su u)   = whnf k σ (inst s u)
+  ... | ok e′       = ok (mNat e′ P z s)
   whnf (suc k) σ (mUnit e P u) with whnf k σ e
-  ... | one = whnf k σ u
-  ... | e′  = mUnit e′ P u
-  whnf (suc k) σ (mEmp e P) = mEmp (whnf k σ e) P
-  whnf (suc k) σ (mData e P bs) = dataWhnf k σ (whnf k σ e) P bs
+  ... | fail m   = fail m
+  ... | ok one   = whnf k σ u
+  ... | ok e′    = ok (mUnit e′ P u)
+  whnf (suc k) σ (mEmp e P) = whnf k σ e >>= λ e′ → ok (mEmp e′ P)
+  whnf (suc k) σ (mData e P bs) = whnf k σ e >>= λ e′ → dataWhnf k σ e′ P bs
   whnf (suc k) σ (def i) with lookupDef σ i
   ... | ok d    = whnf k σ (closed (Def.dbody d))
-  ... | fail _  = def i
+  ... | fail _  = ok (def i)
   whnf (suc k) σ (ann e _) = whnf k σ e
   whnf (suc k) σ (fst e) with whnf k σ e
-  ... | pair a _ = whnf k σ a
-  ... | e′       = fst e′
+  ... | fail m          = fail m
+  ... | ok (pair a _)   = whnf k σ a
+  ... | ok e′           = ok (fst e′)
   whnf (suc k) σ (snd e) with whnf k σ e
-  ... | pair _ b = whnf k σ b
-  ... | e′       = snd e′
-  whnf (suc k) σ (ucons e) = uconsWhnf k σ (whnf k σ e)
-  whnf (suc _) _ t = t
+  ... | fail m          = fail m
+  ... | ok (pair _ b)   = whnf k σ b
+  ... | ok e′           = ok (snd e′)
+  whnf (suc k) σ (ucons e) = whnf k σ e >>= uconsWhnf k σ
+  whnf (suc _) _ t = ok t
 
-  uconsWhnf : ∀ {n} → ℕ → Sig → Tm n → Tm n
+  uconsWhnf : ∀ {n} → ℕ → Sig → Tm n → Result (Tm n)
   uconsWhnf k σ (unf s f) with whnf k σ (app f s)
-  ... | pair h t = pair h (unf t f)
-  ... | _        = ucons (unf s f)
-  uconsWhnf _ _ e = ucons e
+  ... | fail m          = fail m
+  ... | ok (pair h t)   = ok (pair h (unf t f))
+  ... | ok _            = ok (ucons (unf s f))
+  uconsWhnf _ _ e = ok (ucons e)
 
-  dataWhnf : ∀ {n} → ℕ → Sig → Tm n → Tm (suc n) → List (Tm n) → Tm n
+  dataWhnf : ∀ {n} → ℕ → Sig → Tm n → Tm (suc n) → List (Tm n) → Result (Tm n)
   dataWhnf k σ e P bs with ctorSpine e
   ... | just (_ , ci , args) =
     case lookupList bs ci of λ where
       (ok b)  → whnf k σ (appsFrom b args)
-      (fail _) → mData e P bs
-  ... | nothing = mData e P bs
+      (fail _) → ok (mData e P bs)
+  ... | nothing = ok (mData e P bs)
 
+-- Is a (spec) type Data: Nat, Unit, Empty, I64, F32, Tensor, or a data
+-- type whose parameters are Data. Fuel also bounds the descent into the
+-- parameters (a spec definition may be recursive: X : Type := D X).
 mutual
-  {-# TERMINATING #-}
-  allData : ∀ {n} → ℕ → Sig → List (Tm n) → Bool
-  allData _ _ []       = true
-  allData k σ (a ∷ as) = isData k σ a ∧ allData k σ as
+  allData : ∀ {n} → ℕ → Sig → List (Tm n) → Result Bool
+  allData _ _ []       = ok true
+  allData k σ (a ∷ as) = isData k σ a >>= λ b → if b then allData k σ as else ok false
 
-  -- Fuel also bounds the descent into data parameters (a spec
-  -- definition may be recursive: X : Type := D X).
-  isData : ∀ {n} → ℕ → Sig → Tm n → Bool
-  isData zero    _ _ = false
-  isData (suc k) σ t with apps (whnf (suc k) σ t)
-  ... | (nat , [])        = true
-  ... | (unit , [])       = true
-  ... | (empty , [])      = true
-  ... | (i64 , [])        = true
-  ... | (f32ty , [])      = true
-  ... | (tensor _ _ , []) = true
-  ... | (dty i , as)      = dataParamsData k σ i as
-  ... | _                 = false
+  isData : ∀ {n} → ℕ → Sig → Tm n → Result Bool
+  isData zero    _ _ = fail outOfFuel
+  isData (suc k) σ t = whnf (suc k) σ t >>= λ t′ → isDataN k σ (apps t′)
 
-  dataParamsData : ∀ {n} → ℕ → Sig → ℕ → List (Tm n) → Bool
+  isDataN : ∀ {n} → ℕ → Sig → Tm n × List (Tm n) → Result Bool
+  isDataN k σ (nat , [])        = ok true
+  isDataN k σ (unit , [])       = ok true
+  isDataN k σ (empty , [])      = ok true
+  isDataN k σ (i64 , [])        = ok true
+  isDataN k σ (f32ty , [])      = ok true
+  isDataN k σ (tensor _ _ , []) = ok true
+  isDataN k σ (dty i , as)      = dataParamsData k σ i as
+  isDataN k σ _                 = ok false
+
+  dataParamsData : ∀ {n} → ℕ → Sig → ℕ → List (Tm n) → Result Bool
   dataParamsData k σ i as with lookupData σ i
-  ... | fail _ = false
+  ... | fail _ = ok false
   ... | ok d   = allData k σ (take (nparams d) as)
 
-{-# TERMINATING #-}
+-- Shape of a run type: Nat, Unit, Empty, I64, F32, Tensor, a data type,
+-- a Π whose codomain is one, a product of two, ν F. Under ν the body is
+-- read as it is, the bound variable counting as a run type: substituting
+-- Unit for it (as the older definition did) gives the same answer, since
+-- runTy accepts every variable and every leaf alike.
 runTy : ∀ {n} → Tm n → Bool
 runTy (var _)        = true
 runTy nat            = true
@@ -166,14 +183,14 @@ runTy i64            = true
 runTy f32ty          = true
 runTy (tensor _ _)   = true
 runTy (pi _ _ B)     = runTy B
-runTy (nu F)         = runTy (inst F unit)
+runTy (nu F)         = runTy F
 runTy (prod A B)     = runTy A ∧ runTy B
 runTy (dty _)        = true
 runTy (app f _)      = runTy f
 runTy _              = false
 
-isRunType : ∀ {n} → ℕ → Sig → Tm n → Bool
-isRunType k σ t = runTy (whnf k σ t)
+isRunType : ∀ {n} → ℕ → Sig → Tm n → Result Bool
+isRunType k σ t = runTy <$> whnf k σ t
 
 ------------------------------------------------------------------------
 -- Conversion on weak-head normal forms.
@@ -243,15 +260,13 @@ ctorHead t with proj₁ (apps t)
 ... | _        = false
 
 mutual
-  {-# TERMINATING #-}
   convArgs : ∀ {n} → ℕ → Sig → List (Tm n) → List (Tm n) → Result ⊤
   convArgs k σ []       []       = ok tt
   convArgs k σ (a ∷ as) (b ∷ bs) = conv k σ a b >> convArgs k σ as bs
   convArgs _ _ _        _        = fail "conv: spine length mismatch"
 
-  {-# TERMINATING #-}
   conv : ∀ {n} → ℕ → Sig → Tm n → Tm n → Result ⊤
-  conv zero    _ _ _ = fail "conv: out of fuel"
+  conv zero    _ _ _ = fail outOfFuel
   conv (suc k) σ u v =
     if synEq u v then ok tt
     else convStuck k σ u v (defArgs u) (defArgs v)
@@ -265,8 +280,11 @@ mutual
   convStuck k σ u v (just (i , a , as)) (just (j , b , bs)) =
     if (i ≡ᵇ j) ∧ not (ctorHead a) ∧ not (ctorHead b)
     then (conv k σ a b >> convArgs k σ as bs)
-    else convN k σ (whnf k σ u) (whnf k σ v)
-  convStuck k σ u v _ _ = convN k σ (whnf k σ u) (whnf k σ v)
+    else convWhnf k σ u v
+  convStuck k σ u v _ _ = convWhnf k σ u v
+
+  convWhnf : ∀ {n} → ℕ → Sig → Tm n → Tm n → Result ⊤
+  convWhnf k σ u v = whnf k σ u >>= λ u′ → whnf k σ v >>= λ v′ → convN k σ u′ v′
 
   -- Tags are compared first (Muro.Tag); convND only has to handle terms
   -- of the same shape.
@@ -275,7 +293,6 @@ mutual
     if tmTag u ≡ᵇ tmTag v then convND k σ u v
     else fail ("cannot convert " ++ showTm u ++ " ≁ " ++ showTm v)
 
-  {-# TERMINATING #-}
   convND : ∀ {n} → ℕ → Sig → Tm n → Tm n → Result ⊤
   convND k σ typ           typ           = ok tt
   convND k σ nat           nat           = ok tt
@@ -567,45 +584,57 @@ data _,_⊢[_]_⇐_ σ Γ where
 
 viewPi : ∀ {n} → ℕ → Sig → Tm n → Result (Qty × Tm n × Tm (suc n))
 viewPi k σ t with whnf k σ t
-... | pi q A B = ok (q , A , B)
-... | t′       = fail ("expected Π, got " ++ showTm t′)
+... | fail m          = fail m
+... | ok (pi q A B)   = ok (q , A , B)
+... | ok t′           = fail ("expected Π, got " ++ showTm t′)
 
 viewId : ∀ {n} → ℕ → Sig → Tm n → Result (Tm n × Tm n × Tm n)
 viewId k σ t with whnf k σ t
-... | idt A a b = ok (A , a , b)
-... | t′        = fail ("expected Id, got " ++ showTm t′)
+... | fail m          = fail m
+... | ok (idt A a b)  = ok (A , a , b)
+... | ok t′           = fail ("expected Id, got " ++ showTm t′)
 
 -- Dtype of Tensor: I64 or F32 after WHNF.
-isNxDtype : ∀ {n} → ℕ → Sig → Tm n → Bool
+isNxDtype : ∀ {n} → ℕ → Sig → Tm n → Result Bool
 isNxDtype k σ t with whnf k σ t
-... | i64   = true
-... | f32ty = true
-... | _     = false
+... | fail m    = fail m
+... | ok i64    = ok true
+... | ok f32ty  = ok true
+... | ok _      = ok false
 
-isF32 : ∀ {n} → ℕ → Sig → Tm n → Bool
+isF32 : ∀ {n} → ℕ → Sig → Tm n → Result Bool
 isF32 k σ t with whnf k σ t
-... | f32ty = true
-... | _     = false
+... | fail m    = fail m
+... | ok f32ty  = ok true
+... | ok _      = ok false
 
 -- Kernel ≡ is refused on F32 and on Tensor F32 S.
-floatIdForbidden : ∀ {n} → ℕ → Sig → Tm n → Bool
+floatIdForbidden : ∀ {n} → ℕ → Sig → Tm n → Result Bool
 floatIdForbidden k σ A with whnf k σ A
-... | f32ty      = true
-... | tensor d _ = isF32 k σ d
-... | _          = false
+... | fail m            = fail m
+... | ok f32ty          = ok true
+... | ok (tensor d _)   = isF32 k σ d
+... | ok _              = ok false
+
+floatIdOk : ∀ {n} → ℕ → Sig → Tm n → Result ⊤
+floatIdOk k σ A =
+  floatIdForbidden k σ A >>= λ b →
+  guard "kernel identity is not defined on F32" (not b)
 
 i64two : ∀ {n} → Tm n
 i64two = toi64 (su (su ze))
 
 viewProd : ∀ {n} → ℕ → Sig → Tm n → Result (Tm n × Tm n)
 viewProd k σ t with whnf k σ t
-... | prod A B = ok (A , B)
-... | t′       = fail ("expected ×, got " ++ showTm t′)
+... | fail m          = fail m
+... | ok (prod A B)   = ok (A , B)
+... | ok t′           = fail ("expected ×, got " ++ showTm t′)
 
 viewNu : ∀ {n} → ℕ → Sig → Tm n → Result (Tm (suc n))
 viewNu k σ t with whnf k σ t
-... | nu F = ok F
-... | t′   = fail ("expected ν, got " ++ showTm t′)
+... | fail m      = fail m
+... | ok (nu F)   = ok F
+... | ok t′       = fail ("expected ν, got " ++ showTm t′)
 
 splitData : ∀ {n} → Sig → ℕ → List (Tm n) → Result (ℕ × List (Tm n) × List (Tm n))
 splitData σ i args =
@@ -617,9 +646,11 @@ splitData σ i args =
   ok (i , take np args , drop np args)
 
 viewData : ∀ {n} → ℕ → Sig → Tm n → Result (ℕ × List (Tm n) × List (Tm n))
-viewData k σ t with dtyArgs (whnf k σ t)
-... | just (i , args) = splitData σ i args
-... | nothing         = fail ("expected data type, got " ++ showTm (whnf k σ t))
+viewData k σ t with whnf k σ t
+... | fail m = fail m
+... | ok t′ with dtyArgs t′
+...   | just (i , args) = splitData σ i args
+...   | nothing         = fail ("expected data type, got " ++ showTm t′)
 
 isDType : ∀ {n} → ℕ → Tm n → Bool
 isDType i t with dtyArgs t
@@ -665,7 +696,7 @@ mutual
 -- contain a self-call. spec skips the test.
 checkUnfold : ∀ {n} → ℕ → Sig → Mode → RecSt n → Tm n → Result ⊤
 checkUnfold _ _ spec _ _ = ok tt
-checkUnfold k σ _ rs f = go (whnf k σ f)
+checkUnfold k σ _ rs f = whnf k σ f >>= go
   where
     go : ∀ {n} → Tm n → Result ⊤
     go (lam _ _ t) = go t
@@ -770,8 +801,9 @@ posArg i A = isDType i A ∨ not (occursD i A)
 instParams : ∀ {n} → ℕ → Sig → Tm n → List (Tm n) → Result (Tm n)
 instParams k σ t [] = ok t
 instParams k σ t (p ∷ ps) with whnf k σ t
-... | pi _ _ B = instParams k σ (inst B p) ps
-... | _        = fail "constructor type has too few parameter binders"
+... | fail m          = fail m
+... | ok (pi _ _ B)   = instParams k σ (inst B p) ps
+... | ok _            = fail "constructor type has too few parameter binders"
 
 checkTelPos : ∀ {n} → ℕ → ℕ → ℕ → Tm n → Result ⊤
 checkTelPos i np ni (pi _ A B) =
@@ -823,26 +855,35 @@ checkRec {n} k σ m rs t = go (apps t)
 
 -- Index clash / forcing. Expected indices live at n; the constructor
 -- target may mention ctor-argument variables (depth d). No metavars:
--- suc is inverted, a rigid mismatch is impossible, a variable is free.
-{-# TERMINATING #-}
-matchIdx : ∀ {n m} → ℕ → Sig → ℕ → Tm n → Tm m → Result (List (ℕ × Tm n))
-matchIdx k σ d e t with whnf k σ e | whnf k σ t
-... | su e′ | su t′ = matchIdx k σ d e′ t′
-... | ze    | ze    = ok []
-... | su _  | ze    = fail "impossible constructor"
-... | ze    | su _  = fail "impossible constructor"
-... | e′    | var j =
-      if toℕ j <ᵇ d
-      then ok ((d ∸ suc (toℕ j) , e′) ∷ [])
-      else ok []
-... | _ | _ = ok []
+-- suc is inverted, a rigid mismatch is a clash (`nothing`: the
+-- constructor cannot produce these indices and its branch is skipped),
+-- a variable is forced. Each inversion of suc reduces both sides, so it
+-- spends a unit of fuel.
+mutual
+  matchIdx : ∀ {n m} → ℕ → Sig → ℕ → Tm n → Tm m → Result (Maybe (List (ℕ × Tm n)))
+  matchIdx zero    _ _ _ _ = fail outOfFuel
+  matchIdx (suc k) σ d e t =
+    whnf k σ e >>= λ e′ → whnf k σ t >>= λ t′ → matchIdxN k σ d e′ t′
 
-matchIdxs : ∀ {n m} → ℕ → Sig → ℕ → List (Tm n) → List (Tm m) → Result (List (ℕ × Tm n))
-matchIdxs _ _ _ []       []       = ok []
+  matchIdxN : ∀ {n m} → ℕ → Sig → ℕ → Tm n → Tm m → Result (Maybe (List (ℕ × Tm n)))
+  matchIdxN k σ d (su e′) (su t′) = matchIdx k σ d e′ t′
+  matchIdxN k σ d ze      ze      = ok (just [])
+  matchIdxN k σ d (su _)  ze      = ok nothing
+  matchIdxN k σ d ze      (su _)  = ok nothing
+  matchIdxN k σ d e′      (var j) =
+    if toℕ j <ᵇ d
+    then ok (just ((d ∸ suc (toℕ j) , e′) ∷ []))
+    else ok (just [])
+  matchIdxN k σ d _       _       = ok (just [])
+
+matchIdxs : ∀ {n m} → ℕ → Sig → ℕ → List (Tm n) → List (Tm m) → Result (Maybe (List (ℕ × Tm n)))
+matchIdxs _ _ _ []       []       = ok (just [])
 matchIdxs k σ d (e ∷ es) (t ∷ ts) =
-  matchIdx k σ d e t >>= λ fs →
-  matchIdxs k σ d es ts >>= λ gs →
-  ok (List._++_ fs gs)
+  matchIdx k σ d e t >>= λ where
+    nothing   → ok nothing
+    (just fs) → matchIdxs k σ d es ts >>= λ where
+      nothing   → ok nothing
+      (just gs) → ok (just (List._++_ fs gs))
 matchIdxs _ _ _ _ _ = fail "index telescope length mismatch"
 
 countPis : ∀ {n} → Tm n → ℕ
@@ -866,14 +907,18 @@ forcesFor (suc k) fs = lookupForce fs 0 ∷ forcesFor k (shift fs)
 
 -- Walk the constructor telescope to its target and match the target's
 -- indices against the expected ones (d = number of binders passed).
-forcePairs : ∀ {n m} → ℕ → Sig → ℕ → List (Tm n) → ℕ → Tm m → Result (List (ℕ × Tm n))
+forcePairs : ∀ {n m} → ℕ → Sig → ℕ → List (Tm n) → ℕ → Tm m → Result (Maybe (List (ℕ × Tm n)))
 forcePairs k σ np expected d (pi _ _ B) = forcePairs k σ np expected (suc d) B
 forcePairs k σ np expected d t =
-  matchIdxs k σ d expected (drop np (proj₂ (apps (whnf k σ t))))
+  whnf k σ t >>= λ t′ →
+  matchIdxs k σ d expected (drop np (proj₂ (apps t′)))
 
-analyzeForces : ∀ {n} → ℕ → Sig → ℕ → List (Tm n) → Tm n → Result (List (Maybe (Tm n)))
+-- `nothing` is a clash; `just forces` has one entry per binder of tel.
+analyzeForces : ∀ {n} → ℕ → Sig → ℕ → List (Tm n) → Tm n → Result (Maybe (List (Maybe (Tm n))))
 analyzeForces k σ np expected tel =
-  forcePairs k σ np expected 0 tel >>= λ pairs → ok (forcesFor (countPis tel) pairs)
+  forcePairs k σ np expected 0 tel >>= λ where
+    nothing      → ok nothing
+    (just pairs) → ok (just (forcesFor (countPis tel) pairs))
 
 wkForce : ∀ {n} → Maybe (Tm n) → Maybe (Tm (suc n))
 wkForce (just t) = just (wk t)
@@ -883,16 +928,19 @@ wkForces : ∀ {n} → List (Maybe (Tm n)) → List (Maybe (Tm (suc n)))
 wkForces []       = []
 wkForces (x ∷ xs) = wkForce x ∷ wkForces xs
 
+-- The block is structurally recursive on the term being checked, with
+-- one exception: instantiating a forced constructor argument in a
+-- match branch (forceBr) substitutes into the branch, so it spends a
+-- unit of fuel instead. Types are never recursed on except by checkTy,
+-- which recurses on the type as a term. A constructor spine is walked
+-- from its head (inferCtorSpine), as an application is.
 mutual
-  {-# TERMINATING #-}
   infer : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Result (Tm n × UseVec n)
   infer k σ rs Γ m t = infer′ k σ rs Γ t m
 
-  {-# TERMINATING #-}
   check : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Result (UseVec n)
   check k σ rs Γ m e A = check′ k σ rs Γ m e A
 
-  {-# TERMINATING #-}
   -- A type is Type, a kind Π (x : A) → K, or a small type (⇒ Type).
   -- Kinds are not small: Π (x : A) → Type is wf but has no type.
   -- Syntax-directed, as ⊢ wf: a kind is recognised by its shape, anything
@@ -906,89 +954,105 @@ mutual
     checkTy k σ (extRec rs false false) (ext Γ q A₁) B
   checkTy k σ rs Γ A = infer′ k σ rs Γ A spec >>= λ (T , _) → conv k σ T typ   -- type-el
 
-  {-# TERMINATING #-}
   -- The term comes before the mode so that the case tree splits on the
   -- term first: infer′ … t m reduces for a known t and an unknown m.
   infer′ : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Tm n → Mode → Result (Tm n × UseVec n)
-  {-# TERMINATING #-}
   check′ : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Result (UseVec n)
 
   headTailU : ∀ {n} → UseVec (suc n) → Use × UseVec n
   headTailU (u ∷ us) = u , us
 
-  {-# TERMINATING #-}
-  checkCtorArgs : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → List (Tm n) → Tm n → Result (UseVec n)
-  checkCtorArgs k σ rs Γ m ty [] expected with whnf k σ ty
-  ... | pi _ _ _ = fail "too few constructor arguments"
-  ... | ty′      = conv k σ ty′ expected >> ok u0s
-  checkCtorArgs k σ rs Γ m ty (a ∷ as) expected with whnf k σ ty
-  ... | pi q A B =
-    let am = if eqQty q erased then spec else m
-    in check k σ rs Γ am a A >>= λ au →
-    checkCtorArgs k σ rs Γ m (inst B a) as expected >>= λ asu →
-    if eqQty q erased
-    then (if eqMode m spec then ok u0s else ok asu)
-    else combine m au asu
-  ... | _ = fail "too many constructor arguments"
-
-  {-# TERMINATING #-}
-  checkCtorApp : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → List (Tm n) → List (Tm n) → Tm n → Result (UseVec n)
-  checkCtorApp k σ rs Γ m di ci params args expected =
+  -- ⇐-ctor: a constructor spine against the data type di at params. The
+  -- spine is walked from the head: the constructor's type instantiated at
+  -- the parameters, then one Π per argument; an erased field is checked
+  -- in spec and contributes no uses (Env.fieldMode, Env.combineArg).
+  inferCtorSpine : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → List (Tm n) → Tm n → Result (Tm n × UseVec n)
+  inferCtorSpine k σ rs Γ m di params (ctor di′ ci) =
+    guard "constructor of another data type" (di ≡ᵇ di′) >>
     lookupData σ di >>= λ d →
     lookupCtor d ci >>= λ c →
     instParams k σ (closed (Ctor.ctype c)) params >>= λ rest →
-    checkCtorArgs k σ rs Γ m rest args expected
+    ok (rest , u0s)
+  inferCtorSpine k σ rs Γ m di params (app f a) =
+    inferCtorSpine k σ rs Γ m di params f >>= λ (ty , fu) →
+    whnf k σ ty >>= λ where
+      (pi q A B) →
+        check k σ rs Γ (fieldMode q m) a A >>= λ au →
+        combineArg q m au fu >>= λ uses →
+        ok (inst B a , uses)
+      _ → fail "too many constructor arguments"
+  inferCtorSpine _ _ _ _ _ _ _ _ = fail "not a constructor spine"
 
-  {-# TERMINATING #-}
+  -- After the arguments, the residual telescope must be exhausted and
+  -- be the expected data type.
+  checkCtorApp : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → List (Tm n) → Tm n → Tm n → Result (UseVec n)
+  checkCtorApp k σ rs Γ m di params e expected =
+    inferCtorSpine k σ rs Γ m di params e >>= λ (R , u) →
+    whnf k σ R >>= λ where
+      (pi _ _ _) → fail "too few constructor arguments"
+      R′         → conv k σ R′ expected >> ok u
+
+  -- A branch of match against the constructor's telescope ty: one λ per
+  -- remaining Π (a forced argument is instantiated instead of bound),
+  -- then the body against the motive at the constructor applied to the
+  -- arguments.
   checkBr : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Tm n → Tm n → Tm n → List (Tm n) → List (Maybe (Tm n)) → Result (UseVec n)
   checkBr k σ rs Γ m di ci ty br mot args forces with whnf k σ ty
-  ... | pi q A B =
-    case (forces , lamView br) of λ where
-      (just u ∷ fs , just (q′ , A′ , t)) →
-        guard "λ/Π quantity mismatch" (eqQty q q′) >>
-        checkTy k σ rs Γ A′ >>
-        conv k σ A′ A >>
-        checkBr k σ rs Γ m di ci (inst B u) (inst t u) mot
-          (List._++_ args (u ∷ [])) fs
-      (nothing ∷ fs , just (q′ , A′ , t)) →
-        guard "λ/Π quantity mismatch" (eqQty q q′) >>
-        checkTy k σ rs Γ A′ >>
-        conv k σ A′ A >>
-        (if eqQty q reuse then guard "+ requires a Data type" (isData k σ A) else ok tt) >>
-        let rec? = isDType di A
-            rs1  = extRec rs rec? rec?
-            rs′  = if eqQty q erased then keepNext rs rs1 else rs1
-            args′ = List._++_ (renList suc args) (var zero ∷ [])
-        in checkBr k σ rs′ (ext Γ q A) m di ci B t (wk mot) args′ (wkForces fs) >>= λ uses →
-        let (u₀ , us) = headTailU uses
-        in checkBound m q u₀ >> ok us
-      (_ ∷ _ , nothing) → fail "match branch expected a λ for a constructor argument"
-      ([] , _)    → fail "constructor telescope / force list mismatch"
-  ... | ty′ =
+  ... | fail msg          = fail msg
+  ... | ok (pi q A B)     = checkBrPi k σ rs Γ m di ci q A B br mot args forces
+  ... | ok ty′            =
     check k σ rs Γ m br
       (appsFrom mot
         (List._++_ (drop (nparamsOf σ di) (proj₂ (apps ty′)))
           (appsFrom (ctor di ci) args ∷ [])))
+
+  checkBrPi : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Qty → Tm n → Tm (suc n) → Tm n → Tm n → List (Tm n) → List (Maybe (Tm n)) → Result (UseVec n)
+  checkBrPi k σ rs Γ m di ci q A B (lam q′ A′ t) mot args (just u ∷ fs) =
+    guard "λ/Π quantity mismatch" (eqQty q q′) >>
+    checkTy k σ rs Γ A′ >>
+    conv k σ A′ A >>
+    forceBr k σ rs Γ m di ci (inst B u) (inst t u) mot (List._++_ args (u ∷ [])) fs
+  checkBrPi k σ rs Γ m di ci q A B (lam q′ A′ t) mot args (nothing ∷ fs) =
+    guard "λ/Π quantity mismatch" (eqQty q q′) >>
+    checkTy k σ rs Γ A′ >>
+    conv k σ A′ A >>
+    (if eqQty q reuse then isData k σ A >>= guard "+ requires a Data type" else ok tt) >>
+    let rec? = isDType di A
+        rs1  = extRec rs rec? rec?
+        rs′  = if eqQty q erased then keepNext rs rs1 else rs1
+        args′ = List._++_ (renList suc args) (var zero ∷ [])
+    in checkBr k σ rs′ (ext Γ q A) m di ci B t (wk mot) args′ (wkForces fs) >>= λ uses →
+    let (u₀ , us) = headTailU uses
+    in checkBound m q u₀ >> ok us
+  checkBrPi k σ rs Γ m di ci q A B _ mot args (_ ∷ _) =
+    fail "match branch expected a λ for a constructor argument"
+  checkBrPi k σ rs Γ m di ci q A B _ mot args [] =
+    fail "constructor telescope / force list mismatch"
+
+  -- A forced argument is substituted into the branch; the result is not a
+  -- subterm, so the step spends a unit of fuel.
+  forceBr : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Tm n → Tm n → Tm n → List (Tm n) → List (Maybe (Tm n)) → Result (UseVec n)
+  forceBr zero    _ _  _ _ _  _  _  _  _   _    _      = fail outOfFuel
+  forceBr (suc k) σ rs Γ m di ci ty br mot args forces = checkBr k σ rs Γ m di ci ty br mot args forces
 
   nparamsOf : Sig → ℕ → ℕ
   nparamsOf σ i with lookupData σ i
   ... | ok d   = nparams d
   ... | fail _ = 0
 
-  {-# TERMINATING #-}
   checkBranches : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → List (Tm n) → List (Tm n) → Tm n → ℕ → List Ctor → List (Tm n) → Result (UseVec n)
   checkBranches _ _ _ _ _ _ _ _ _ _ [] [] = ok u0s
   checkBranches k σ rs Γ m di params idxs mot ci (c ∷ cs) bs =
     instParams k σ (closed (Ctor.ctype c)) params >>= λ rest →
-    case analyzeForces k σ (nparamsOf σ di) idxs rest of λ where
-      (fail e) →
-        if clashMsg e
-        then (case bs of λ where
+    analyzeForces k σ (nparamsOf σ di) idxs rest >>= λ where
+      -- a clash: the constructor cannot produce the expected indices,
+      -- its branch is skipped
+      nothing →
+        case bs of λ where
           []        → fail ("missing branch for " ++ Ctor.cname c)
           (_ ∷ bs′) →
-            checkBranches k σ rs Γ m di params idxs mot (suc ci) cs bs′)
-        else fail e
-      (ok forces) →
+            checkBranches k σ rs Γ m di params idxs mot (suc ci) cs bs′
+      (just forces) →
         case bs of λ where
           []        → fail ("missing branch for " ++ Ctor.cname c)
           (b ∷ bs′) →
@@ -997,9 +1061,6 @@ mutual
             ok (combineAlt m u v)
   checkBranches _ _ _ _ _ _ _ _ _ _ [] (_ ∷ _) =
     fail "match branch count does not match constructors"
-
-  clashMsg : String → Bool
-  clashMsg e = primStringEquality e "impossible constructor"
 
   firstMotLam : ∀ {n} → ℕ → DataDecl → List (Tm n) → Tm (suc n) → Tm n
   firstMotLam di d params P with DataDecl.idxs d
@@ -1011,7 +1072,6 @@ mutual
   motiveTail di args ((q , T) ∷ is) =
     pi q (closed T) (motiveTail di (List._++_ (renList suc args) (var zero ∷ [])) is)
 
-  {-# TERMINATING #-}
   checkMotive : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → ℕ → List (Tm n) → List (Tm n) → Tm (suc n) → Result ⊤
   checkMotive k σ rs Γ di params idxs P =
     lookupData σ di >>= λ d →
@@ -1024,12 +1084,23 @@ mutual
             tail = motiveTail di (List._++_ (renList suc params) (var zero ∷ [])) rest
         in check k σ (extRec rs false false) Γ1 spec P tail >>= λ _ → ok tt
 
+  -- The argument of an application (⇒-app-*), by the quantity of the Π.
+  inferArg : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Qty → Tm n → UseVec n → Result (UseVec n)
+  inferArg k σ rs Γ m f a erased A fu =
+    check k σ rs Γ spec a A >>= λ _ →
+    (if eqMode m spec then ok u0s else ok fu)
+  inferArg k σ rs Γ m f a affine A fu =
+    check k σ rs Γ m a A >>= λ au → appUses σ m f fu au
+  inferArg k σ rs Γ m f a reuse A fu =
+    isData k σ A >>= guard "+ argument is not Data" >>
+    check k σ rs Γ m a A >>= λ au → appUses σ m f fu au
 
   -- ⇒-var-run / ⇒-var-evid / ⇒-var-spec
   infer′ k σ rs Γ (var x) run with qtyOf Γ x
   ... | erased = fail "no promotion: erased variable in run mode"
   ... | q      =
-    if isRunType k σ (typOf Γ x)
+    isRunType k σ (typOf Γ x) >>= λ b →
+    if b
     then ok (typOf Γ x , oneHot x (if eqQty q reuse then Uω else U1))
     else fail ("no promotion: variable has a spec type " ++ showTm (typOf Γ x))
   infer′ k σ rs Γ (var x) evid with qtyOf Γ x
@@ -1075,44 +1146,31 @@ mutual
   infer′ k σ rs Γ (lam q A t) m =
     checkTy k σ rs Γ A >>
     (if eqQty q reuse
-     then guard "+ requires a Data type" (isData k σ A)
+     then isData k σ A >>= guard "+ requires a Data type"
      else ok tt) >>
     let rs1 = extRec rs false (RecSt.nextOk rs)
         rs′ = if eqQty q erased then keepNext rs rs1 else rs1
     in infer k σ rs′ (ext Γ q A) m t >>= λ (B , uses) →
-    let (u₀ , us) = headTail uses
+    let (u₀ , us) = headTailU uses
     in checkBound m q u₀ >> ok (pi q A B , us)
-    where
-      headTail : ∀ {n} → UseVec (suc n) → Use × UseVec n
-      headTail (u ∷ us) = u , us
 
   -- ⇒-app-aff / ⇒-app-era / ⇒-app-reuse
   -- The argument is checked in the mode of the application; at a call
   -- site of an evidence definition in evid mode its uses are discarded
   -- (Env.appUses: instantiating a theorem does not consume resources).
-  infer′ {n} k σ rs Γ (app f a) m =
+  infer′ k σ rs Γ (app f a) m =
     infer k σ rs Γ m f >>= λ (ft , fu) →
     viewPi k σ ft >>= λ (q , A , B) →
-    inferArg q A fu >>= λ uses →
+    inferArg k σ rs Γ m f a q A fu >>= λ uses →
     checkRec k σ m rs (app f a) >>
     ok (inst B a , uses)
-    where
-      inferArg : Qty → Tm n → UseVec n → Result (UseVec n)
-      inferArg erased A fu =
-        check k σ rs Γ spec a A >>= λ _ →
-        (if eqMode m spec then ok u0s else ok fu)
-      inferArg affine A fu =
-        check k σ rs Γ m a A >>= λ au → appUses σ m f fu au
-      inferArg reuse A fu =
-        guard "+ argument is not Data" (isData k σ A) >>
-        check k σ rs Γ m a A >>= λ au → appUses σ m f fu au
 
   -- ⇒-idt
   infer′ k σ rs Γ (idt _ _ _) run = fail "no promotion: identity type is an erased term"
   infer′ k σ rs Γ (idt _ _ _) evid = fail "no promotion: identity type is an erased term"
   infer′ k σ rs Γ (idt A a b) spec =
     checkTy k σ rs Γ A >>
-    guard "kernel identity is not defined on F32" (not (floatIdForbidden k σ A)) >>
+    floatIdOk k σ A >>
     check k σ rs Γ spec a A >>
     check k σ rs Γ spec b A >>
     ok (typ , u0s)
@@ -1158,13 +1216,10 @@ mutual
         rs′ = extRec rs ok? ok?
         Γ′  = ext Γ affine nat
     in check k σ rs′ Γ′ m s (motSuc P) >>= λ su-uses →
-    let (u₀ , sus) = headTail su-uses
+    let (u₀ , sus) = headTailU su-uses
     in checkBound m affine u₀ >>
        let bu = combineAlt m zu sus
        in combine m eu bu >>= λ uses → ok (inst P e , uses)
-    where
-      headTail : ∀ {n} → UseVec (suc n) → Use × UseVec n
-      headTail (u ∷ us) = u , us
 
   -- ⇒-mEmp
   infer′ k σ rs Γ (mEmp e P) m =
@@ -1185,8 +1240,9 @@ mutual
     (if allowedDef (Def.dmode d) m
      then ok tt
      else fail ("no promotion: " ++ showMode (Def.dmode d) ++ " definition " ++ Def.dname d ++ " in " ++ showMode m ++ " mode")) >>
-    (if eqMode m run ∧ not (isRunType k σ (closed {n} (Def.dtype d)))
-     then fail ("no promotion: definition " ++ Def.dname d ++ " has a spec type")
+    (if eqMode m run
+     then (isRunType k σ (closed {n} (Def.dtype d)) >>= λ b →
+           guard ("no promotion: definition " ++ Def.dname d ++ " has a spec type") b)
      else ok tt) >>
     ok (closed {n} (Def.dtype d) , u0s)
 
@@ -1259,7 +1315,7 @@ mutual
   infer′ k σ rs Γ (tensor _ _) evid = fail "no promotion: Tensor is an erased term"
   infer′ k σ rs Γ (tensor D S) spec =
     checkTy k σ rs Γ D >>
-    guard "Tensor dtype must be I64 or F32" (isNxDtype k σ D) >>
+    isNxDtype k σ D >>= guard "Tensor dtype must be I64 or F32" >>
     check k σ rs Γ spec S i64 >>= λ _ →
     ok (typ , u0s)
 
@@ -1278,12 +1334,12 @@ mutual
   -- ⇒-addt
   infer′ k σ rs Γ (addt t u) m =
     infer k σ rs Γ m t >>= λ (T , tu) →
-    (case whnf k σ T of λ where
+    whnf k σ T >>= λ where
       (tensor D S) →
         check k σ rs Γ m u (tensor D S) >>= λ uu →
         combine m tu uu >>= λ uses →
         ok (tensor D S , uses)
-      T′ → fail ("addt expected a Tensor, got " ++ showTm T′))
+      T′ → fail ("addt expected a Tensor, got " ++ showTm T′)
 
   -- ⇒-toi64
   infer′ k σ rs Γ (toi64 n) m =
@@ -1297,27 +1353,13 @@ mutual
     combine m xu yu >>= λ uses →
     ok (tensor i64 i64two , uses)
 
-  -- ⇐-lam
-  check′ k σ rs Γ m (lam q A t) T with viewPi k σ T
-  ... | fail _ = infer k σ rs Γ m (lam q A t) >>= λ (B , u) → conv k σ B T >> ok u
-  ... | ok (q′ , A′ , B) =
-    guard "λ/Π quantity mismatch" (eqQty q q′) >>
-    checkTy k σ rs Γ A >>
-    conv k σ A A′ >>
-    (if eqQty q reuse then guard "+ requires a Data type" (isData k σ A′) else ok tt) >>
-    let rs1 = extRec rs false (RecSt.nextOk rs)
-        rs′ = if eqQty q erased then keepNext rs rs1 else rs1
-    in check k σ rs′ (ext Γ q A′) m t B >>= λ uses →
-    let (u₀ , us) = headTail uses
-    in checkBound m q u₀ >> ok us
-    where
-      headTail : ∀ {n} → UseVec (suc n) → Use × UseVec n
-      headTail (u ∷ us) = u , us
+  -- ⇐-lam: against a Π after whnf; otherwise inferred and converted.
+  check′ k σ rs Γ m (lam q A t) T = checkLam k σ rs Γ m (lam q A t) T (viewPi k σ T)
 
   -- ⇐-refl
   check′ k σ rs Γ m rfl T =
     viewId k σ T >>= λ (A , a , b) →
-    guard "kernel identity is not defined on F32" (not (floatIdForbidden k σ A)) >>
+    floatIdOk k σ A >>
     conv k σ a b >> ok u0s
 
   -- ⇐-pair
@@ -1333,13 +1375,10 @@ mutual
     infer k σ rs Γ m seed >>= λ (S , seedU) →
     conv k σ A S >>
     check k σ (extRec rs false (RecSt.nextOk rs)) (ext Γ q S) m t (wk (inst F S)) >>= λ uses →
-    let (u₀ , us) = headTail uses
+    let (u₀ , us) = headTailU uses
     in checkBound m q u₀ >>
        checkUnfold k σ m rs (lam q A t) >>
        combine m seedU us
-    where
-      headTail : ∀ {n} → UseVec (suc n) → Use × UseVec n
-      headTail (u ∷ us) = u , us
 
   check′ k σ rs Γ m (unf seed f) T =
     viewNu k σ T >>= λ F →
@@ -1351,17 +1390,34 @@ mutual
   -- ⇐-ctor / ⇐-conv (default)
   check′ k σ rs Γ m e A = checkAgainst k σ rs Γ m e A (viewData k σ A) (ctorSpine e)
 
+  checkLam : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Result (Qty × Tm n × Tm (suc n)) → Result (UseVec n)
+  checkLam k σ rs Γ m e T (fail _) = inferConv k σ rs Γ m e T
+  checkLam k σ rs Γ m (lam q A t) T (ok (q′ , A′ , B)) =
+    guard "λ/Π quantity mismatch" (eqQty q q′) >>
+    checkTy k σ rs Γ A >>
+    conv k σ A A′ >>
+    (if eqQty q reuse then isData k σ A′ >>= guard "+ requires a Data type" else ok tt) >>
+    let rs1 = extRec rs false (RecSt.nextOk rs)
+        rs′ = if eqQty q erased then keepNext rs rs1 else rs1
+    in check k σ rs′ (ext Γ q A′) m t B >>= λ uses →
+    let (u₀ , us) = headTailU uses
+    in checkBound m q u₀ >> ok us
+  checkLam k σ rs Γ m _ T (ok _) = fail "checkLam: not a λ"
+
+  -- ⇐-conv: infer, then convert to the expected type.
+  inferConv : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Result (UseVec n)
+  inferConv k σ rs Γ m e A = infer k σ rs Γ m e >>= λ (B , u) → conv k σ B A >> ok u
+
   -- A constructor spine against a data type is checked along the
   -- constructor's telescope; anything else is inferred and converted.
   checkAgainst : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n
     → Result (ℕ × List (Tm n) × List (Tm n)) → Maybe (ℕ × ℕ × List (Tm n)) → Result (UseVec n)
-  checkAgainst k σ rs Γ m e A (ok (di , params , idxs)) (just (di′ , ci , args)) =
+  checkAgainst k σ rs Γ m e A (ok (di , params , idxs)) (just (di′ , _ , _)) =
     if di ≡ᵇ di′
-    then checkCtorApp k σ rs Γ m di ci params args
+    then checkCtorApp k σ rs Γ m di params e
            (appsFrom (dty di) (List._++_ params idxs))
-    else (infer k σ rs Γ m e >>= λ (B , u) → conv k σ B A >> ok u)
-  checkAgainst k σ rs Γ m e A _ _ =
-    infer k σ rs Γ m e >>= λ (B , u) → conv k σ B A >> ok u
+    else inferConv k σ rs Γ m e A
+  checkAgainst k σ rs Γ m e A _ _ = inferConv k σ rs Γ m e A
 
 ------------------------------------------------------------------------
 -- Check a whole signature. Each def is its own recursion group.

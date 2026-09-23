@@ -6,7 +6,15 @@ defmodule Muro.Check do
 
   alias Muro.{Ast, Subst}
 
+  # Default fuel. Fuel bounds reduction (whnf, conversion, isData, index
+  # matching) and the substitution of a forced match argument; everything
+  # else is structural recursion on the term, as in Agda's Muro.Check.
+  # Running out is reported as an error, never as a silently unreduced term.
   @fuel 2000
+  @out_of_fuel "out of fuel (the checker gave up reducing; raise the fuel)"
+
+  @doc "The default fuel of `check_sig/2` and `check_def/3`."
+  def default_fuel, do: @fuel
 
   # -- lookup ----------------------------------------------------------------
 
@@ -143,14 +151,16 @@ defmodule Muro.Check do
 
       q ->
         ty = typ_of(gamma, x)
+        u = if q == :reuse, do: :uw, else: :u1
 
-        cond do
-          mode == :run and not run_ty?(k, book, ty) ->
-            {:error, "no promotion: variable has a spec type"}
-
-          true ->
-            u = if q == :reuse, do: :uw, else: :u1
-            {:ok, {ty, one_hot(n, x, u)}}
+        if mode == :run do
+          case run_ty(k, book, ty) do
+            {:ok, true} -> {:ok, {ty, one_hot(n, x, u)}}
+            {:ok, false} -> {:error, "no promotion: variable has a spec type"}
+            err -> err
+          end
+        else
+          {:ok, {ty, one_hot(n, x, u)}}
         end
     end
   end
@@ -229,51 +239,58 @@ defmodule Muro.Check do
 
   # -- whnf ------------------------------------------------------------------
 
-  defp whnf(0, _book, t), do: t
+  # Weak-head normalisation, fuelled. `{:ok, t}` is a weak-head normal form
+  # (or a stuck term); `{:error, msg}` is out of fuel.
+  defp whnf(0, _book, _t), do: {:error, @out_of_fuel}
 
   defp whnf(k, book, {:app, f, a}) do
     case whnf(k - 1, book, f) do
-      {:lam, _, _, t} -> whnf(k - 1, book, Subst.inst(t, a))
-      f1 -> {:app, f1, a}
+      {:ok, {:lam, _, _, t}} -> whnf(k - 1, book, Subst.inst(t, a))
+      {:ok, f1} -> {:ok, {:app, f1, a}}
+      err -> err
     end
   end
 
   defp whnf(k, book, {:mnat, e, p, z, s}) do
     case whnf(k - 1, book, e) do
-      :ze -> whnf(k - 1, book, z)
-      {:su, u} -> whnf(k - 1, book, Subst.inst(s, u))
-      e1 -> {:mnat, e1, p, z, s}
+      {:ok, :ze} -> whnf(k - 1, book, z)
+      {:ok, {:su, u}} -> whnf(k - 1, book, Subst.inst(s, u))
+      {:ok, e1} -> {:ok, {:mnat, e1, p, z, s}}
+      err -> err
     end
   end
 
   defp whnf(k, book, {:mdata, e, p, bs}) do
-    e1 = whnf(k - 1, book, e)
+    with {:ok, e1} <- whnf(k - 1, book, e) do
+      case ctor_spine(book, e1) do
+        {:ok, {_dname, ci, args}} ->
+          case Enum.at(bs, ci) do
+            {_n, _ar, b} -> whnf(k - 1, book, Subst.inst_n(b, args))
+            nil -> {:ok, {:mdata, e1, p, bs}}
+          end
 
-    case ctor_spine(book, e1) do
-      {:ok, {_dname, ci, args}} ->
-        case Enum.at(bs, ci) do
-          {_n, _ar, b} -> whnf(k - 1, book, Subst.inst_n(b, args))
-          nil -> {:mdata, e1, p, bs}
-        end
-
-      :error ->
-        {:mdata, e1, p, bs}
+        :error ->
+          {:ok, {:mdata, e1, p, bs}}
+      end
     end
   end
 
   defp whnf(k, book, {:munit, e, p, u}) do
     case whnf(k - 1, book, e) do
-      :one -> whnf(k - 1, book, u)
-      e1 -> {:munit, e1, p, u}
+      {:ok, :one} -> whnf(k - 1, book, u)
+      {:ok, e1} -> {:ok, {:munit, e1, p, u}}
+      err -> err
     end
   end
 
-  defp whnf(k, book, {:memp, e, p}), do: {:memp, whnf(k - 1, book, e), p}
+  defp whnf(k, book, {:memp, e, p}) do
+    with {:ok, e1} <- whnf(k - 1, book, e), do: {:ok, {:memp, e1, p}}
+  end
 
   defp whnf(k, book, {:def, name}) do
     case lookup_def(book, name) do
       {:ok, d} -> whnf(k - 1, book, d.body)
-      _ -> {:def, name}
+      _ -> {:ok, {:def, name}}
     end
   end
 
@@ -281,98 +298,125 @@ defmodule Muro.Check do
 
   defp whnf(k, book, {:fst, e}) do
     case whnf(k - 1, book, e) do
-      {:pair, a, _} -> whnf(k - 1, book, a)
-      e1 -> {:fst, e1}
+      {:ok, {:pair, a, _}} -> whnf(k - 1, book, a)
+      {:ok, e1} -> {:ok, {:fst, e1}}
+      err -> err
     end
   end
 
   defp whnf(k, book, {:snd, e}) do
     case whnf(k - 1, book, e) do
-      {:pair, _, b} -> whnf(k - 1, book, b)
-      e1 -> {:snd, e1}
+      {:ok, {:pair, _, b}} -> whnf(k - 1, book, b)
+      {:ok, e1} -> {:ok, {:snd, e1}}
+      err -> err
     end
   end
 
   defp whnf(k, book, {:ucons, e}) do
     case whnf(k - 1, book, e) do
-      {:unf, s, f} ->
+      {:ok, {:unf, s, f}} ->
         case whnf(k - 1, book, {:app, f, s}) do
-          {:pair, h, t} -> {:pair, h, {:unf, t, f}}
-          _ -> {:ucons, {:unf, s, f}}
+          {:ok, {:pair, h, t}} -> {:ok, {:pair, h, {:unf, t, f}}}
+          {:ok, _} -> {:ok, {:ucons, {:unf, s, f}}}
+          err -> err
         end
 
-      e1 ->
-        {:ucons, e1}
+      {:ok, e1} ->
+        {:ok, {:ucons, e1}}
+
+      err ->
+        err
     end
   end
 
-  defp whnf(_, _, t), do: t
+  defp whnf(_, _, t), do: {:ok, t}
 
   # Fuelled, as Agda's isData: fuel also bounds the descent into data
   # parameters (a spec definition may be recursive: X : Type := D X).
-  defp is_data?(0, _book, _t), do: false
+  defp is_data(0, _book, _t), do: {:error, @out_of_fuel}
 
-  defp is_data?(k, book, t) do
-    {h, as} = apps(whnf(k, book, t))
-    k = k - 1
+  defp is_data(k, book, t) do
+    with {:ok, t1} <- whnf(k, book, t) do
+      {h, as} = apps(t1)
+      k = k - 1
 
-    case h do
-      :nat ->
-        as == []
+      case h do
+        :nat ->
+          {:ok, as == []}
 
-      :unit ->
-        as == []
+        :unit ->
+          {:ok, as == []}
 
-      :empty ->
-        as == []
+        :empty ->
+          {:ok, as == []}
 
-      :i64 ->
-        as == []
+        :i64 ->
+          {:ok, as == []}
 
-      :f32ty ->
-        as == []
+        :f32ty ->
+          {:ok, as == []}
 
-      {:tensor, _, _} ->
-        as == []
+        {:tensor, _, _} ->
+          {:ok, as == []}
 
-      {:def, n} ->
-        case lookup_data(book, n) do
-          {:ok, d} ->
-            np = length(d.params)
-            Enum.all?(Enum.take(as, np), &is_data?(k, book, &1))
+        {:def, n} ->
+          case lookup_data(book, n) do
+            {:ok, d} -> all_data(k, book, Enum.take(as, length(d.params)))
+            _ -> {:ok, false}
+          end
 
-          _ ->
-            false
-        end
-
-      _ ->
-        false
+        _ ->
+          {:ok, false}
+      end
     end
   end
 
-  defp run_ty?(k, book, t) do
-    case whnf(k, book, t) do
-      {:var, _} -> true
-      :nat -> true
-      :unit -> true
-      :empty -> true
-      :i64 -> true
-      :f32ty -> true
-      {:tensor, _, _} -> true
-      {:pi, _, _, b} -> run_ty?(k, book, b)
-      {:nu, f} -> run_ty?(k, book, Subst.inst(f, :unit))
-      {:prod, a, b} -> run_ty?(k, book, a) and run_ty?(k, book, b)
-      {:app, f, _} -> run_ty?(k, book, f)
-      {:def, n} -> data_name?(book, n)
-      _ -> false
+  defp all_data(_k, _book, []), do: {:ok, true}
+
+  defp all_data(k, book, [a | as]) do
+    case is_data(k, book, a) do
+      {:ok, true} -> all_data(k, book, as)
+      other -> other
     end
   end
+
+  # `:ok` when `a` is a Data type, `{:error, msg}` when it is not or the
+  # fuel ran out.
+  defp guard_data(k, book, a, msg) do
+    case is_data(k, book, a) do
+      {:ok, true} -> :ok
+      {:ok, false} -> {:error, msg}
+      err -> err
+    end
+  end
+
+  # Shape of a run type after one whnf, read syntactically as Agda's
+  # runTy: a variable, a leaf type, a Π whose codomain is one, a product
+  # of two, ν F with F one (the bound variable counts as a run type), a
+  # data type or an application of one.
+  defp run_ty(k, book, t) do
+    with {:ok, t1} <- whnf(k, book, t), do: {:ok, run_ty_n(book, t1)}
+  end
+
+  defp run_ty_n(_book, {:var, _}), do: true
+  defp run_ty_n(_book, :nat), do: true
+  defp run_ty_n(_book, :unit), do: true
+  defp run_ty_n(_book, :empty), do: true
+  defp run_ty_n(_book, :i64), do: true
+  defp run_ty_n(_book, :f32ty), do: true
+  defp run_ty_n(_book, {:tensor, _, _}), do: true
+  defp run_ty_n(book, {:pi, _, _, b}), do: run_ty_n(book, b)
+  defp run_ty_n(book, {:nu, f}), do: run_ty_n(book, f)
+  defp run_ty_n(book, {:prod, a, b}), do: run_ty_n(book, a) and run_ty_n(book, b)
+  defp run_ty_n(book, {:app, f, _}), do: run_ty_n(book, f)
+  defp run_ty_n(book, {:def, n}), do: data_name?(book, n)
+  defp run_ty_n(_book, _), do: false
 
   # -- conversion ------------------------------------------------------------
 
   defp syn_eq(a, b), do: a == b
 
-  defp conv(0, _, _, _), do: {:error, "conv: out of fuel"}
+  defp conv(0, _, _, _), do: {:error, @out_of_fuel}
 
   defp conv(k, book, u, v) do
     if syn_eq(u, v) do
@@ -388,12 +432,18 @@ defmodule Muro.Check do
         if i == j and not ctor_head_book?(book, a) and not ctor_head_book?(book, b) do
           with :ok <- conv(k - 1, book, a, b), do: conv_args(k - 1, book, as, bs)
         else
-          conv_n(k - 1, book, whnf(k - 1, book, u), whnf(k - 1, book, v))
+          conv_whnf(k - 1, book, u, v)
         end
 
       _ ->
-        conv_n(k - 1, book, whnf(k - 1, book, u), whnf(k - 1, book, v))
+        conv_whnf(k - 1, book, u, v)
     end
+  end
+
+  defp conv_whnf(k, book, u, v) do
+    with {:ok, u1} <- whnf(k, book, u),
+         {:ok, v1} <- whnf(k, book, v),
+         do: conv_n(k, book, u1, v1)
   end
 
   defp conv_args(_k, _book, [], []), do: :ok
@@ -513,39 +563,48 @@ defmodule Muro.Check do
 
   defp view_pi(k, book, t) do
     case whnf(k, book, t) do
-      {:pi, q, a, b} -> {:ok, {q, a, b}}
-      t1 -> {:error, "expected Π, got #{inspect(t1)}"}
+      {:ok, {:pi, q, a, b}} -> {:ok, {q, a, b}}
+      {:ok, t1} -> {:error, "expected Π, got #{inspect(t1)}"}
+      err -> err
     end
   end
 
   defp view_id(k, book, t) do
     case whnf(k, book, t) do
-      {:idt, a, x, y} -> {:ok, {a, x, y}}
-      t1 -> {:error, "expected Id, got #{inspect(t1)}"}
+      {:ok, {:idt, a, x, y}} -> {:ok, {a, x, y}}
+      {:ok, t1} -> {:error, "expected Id, got #{inspect(t1)}"}
+      err -> err
     end
   end
 
-  defp nx_dtype?(k, book, t) do
+  defp nx_dtype_ok(k, book, t) do
     case whnf(k, book, t) do
-      :i64 -> true
-      :f32ty -> true
-      _ -> false
+      {:ok, :i64} -> :ok
+      {:ok, :f32ty} -> :ok
+      {:ok, _} -> {:error, "Tensor dtype must be I64 or F32"}
+      err -> err
     end
   end
 
-  defp float_id_forbidden?(k, book, a) do
-    case whnf(k, book, a) do
-      :f32ty ->
-        true
+  defp float_id_ok(k, book, a) do
+    forbidden = {:error, "kernel identity is not defined on F32"}
 
-      {:tensor, d, _} ->
+    case whnf(k, book, a) do
+      {:ok, :f32ty} ->
+        forbidden
+
+      {:ok, {:tensor, d, _}} ->
         case whnf(k, book, d) do
-          :f32ty -> true
-          _ -> false
+          {:ok, :f32ty} -> forbidden
+          {:ok, _} -> :ok
+          err -> err
         end
 
-      _ ->
-        false
+      {:ok, _} ->
+        :ok
+
+      err ->
+        err
     end
   end
 
@@ -554,15 +613,17 @@ defmodule Muro.Check do
 
   defp view_prod(k, book, t) do
     case whnf(k, book, t) do
-      {:prod, a, b} -> {:ok, {a, b}}
-      t1 -> {:error, "expected ×, got #{inspect(t1)}"}
+      {:ok, {:prod, a, b}} -> {:ok, {a, b}}
+      {:ok, t1} -> {:error, "expected ×, got #{inspect(t1)}"}
+      err -> err
     end
   end
 
   defp view_nu(k, book, t) do
     case whnf(k, book, t) do
-      {:nu, f} -> {:ok, f}
-      t1 -> {:error, "expected ν, got #{inspect(t1)}"}
+      {:ok, {:nu, f}} -> {:ok, f}
+      {:ok, t1} -> {:error, "expected ν, got #{inspect(t1)}"}
+      err -> err
     end
   end
 
@@ -587,39 +648,44 @@ defmodule Muro.Check do
 
   defp as_nu(k, book, rs, gamma, t) do
     case whnf(k, book, t) do
-      {:nu, f} ->
+      {:ok, {:nu, f}} ->
         {:ok, f}
 
-      {:bisim, s, u} ->
+      {:ok, {:bisim, s, u}} ->
         with {:ok, {:nu, f}} <- expand_bisim(k, book, rs, gamma, s, u), do: {:ok, f}
 
-      t1 ->
+      {:ok, t1} ->
         {:error, "expected ν, got #{inspect(t1)}"}
+
+      err ->
+        err
     end
   end
 
   defp view_data(k, book, t) do
-    {h, args} = apps(whnf(k, book, t))
+    with {:ok, t1} <- whnf(k, book, t) do
+      {h, args} = apps(t1)
 
-    case h do
-      {:def, n} ->
-        case lookup_data(book, n) do
-          {:ok, d} ->
-            np = length(d.params)
-            ni = length(Map.get(d, :indices, []))
+      case h do
+        {:def, n} ->
+          case lookup_data(book, n) do
+            {:ok, d} ->
+              np = length(d.params)
+              ni = length(Map.get(d, :indices, []))
 
-            if length(args) == np + ni do
-              {:ok, {d, n, Enum.take(args, np), Enum.drop(args, np)}}
-            else
-              {:error, "data applied to the wrong number of arguments"}
-            end
+              if length(args) == np + ni do
+                {:ok, {d, n, Enum.take(args, np), Enum.drop(args, np)}}
+              else
+                {:error, "data applied to the wrong number of arguments"}
+              end
 
-          _ ->
-            {:error, "expected data type, got #{inspect(h)}"}
-        end
+            _ ->
+              {:error, "expected data type, got #{inspect(h)}"}
+          end
 
-      _ ->
-        {:error, "expected data type, got #{inspect(h)}"}
+        _ ->
+          {:error, "expected data type, got #{inspect(h)}"}
+      end
     end
   end
 
@@ -712,7 +778,7 @@ defmodule Muro.Check do
   defp check_unfold(_k, _book, :spec, _rs, _f), do: :ok
 
   defp check_unfold(k, book, _m, rs, f) do
-    go_unfold(whnf(k, book, f), rs.self)
+    with {:ok, f1} <- whnf(k, book, f), do: go_unfold(f1, rs.self)
   end
 
   defp go_unfold({:lam, _, _, t}, self), do: go_unfold(t, self)
@@ -834,7 +900,7 @@ defmodule Muro.Check do
         with :ok <- check_ty(k, book, rs, gamma, a),
              :ok <-
                if(q == :reuse,
-                 do: if(is_data?(k, book, a), do: :ok, else: {:error, "+ requires a Data type"}),
+                 do: guard_data(k, book, a, "+ requires a Data type"),
                  else: :ok
                ),
              {:ok, {b, [u0 | us]}} <-
@@ -858,11 +924,7 @@ defmodule Muro.Check do
       # ⇒-idt
       {:spec, {:idt, a, x, y}} ->
         with :ok <- check_ty(k, book, rs, gamma, a),
-             :ok <-
-               if(float_id_forbidden?(k, book, a),
-                 do: {:error, "kernel identity is not defined on F32"},
-                 else: :ok
-               ),
+             :ok <- float_id_ok(k, book, a),
              {:ok, _} <- check(k, book, rs, gamma, :spec, x, a),
              {:ok, _} <- check(k, book, rs, gamma, :spec, y, a),
              do: {:ok, {:typ, u0s(n)}}
@@ -924,8 +986,12 @@ defmodule Muro.Check do
               not allowed_def?(d.mode, m) ->
                 {:error, "no promotion: #{d.mode} definition #{name} in #{m} mode"}
 
-              m == :run and not run_ty?(k, book, d.type) ->
-                {:error, "no promotion: definition #{name} has a spec type"}
+              m == :run ->
+                case run_ty(k, book, d.type) do
+                  {:ok, true} -> {:ok, {d.type, u0s(n)}}
+                  {:ok, false} -> {:error, "no promotion: definition #{name} has a spec type"}
+                  err -> err
+                end
 
               true ->
                 {:ok, {d.type, u0s(n)}}
@@ -1056,11 +1122,7 @@ defmodule Muro.Check do
 
       {:spec, {:tensor, d, s}} ->
         with :ok <- check_ty(k, book, rs, gamma, d),
-             :ok <-
-               if(nx_dtype?(k, book, d),
-                 do: :ok,
-                 else: {:error, "Tensor dtype must be I64 or F32"}
-               ),
+             :ok <- nx_dtype_ok(k, book, d),
              {:ok, _} <- check(k, book, rs, gamma, :spec, s, :i64) do
           {:ok, {:typ, u0s(n)}}
         end
@@ -1082,8 +1144,9 @@ defmodule Muro.Check do
 
       # ⇒-addt
       {m, {:addt, t, u}} ->
-        with {:ok, {tt, tu}} <- infer(k, book, rs, gamma, m, t) do
-          case whnf(k, book, tt) do
+        with {:ok, {tt, tu}} <- infer(k, book, rs, gamma, m, t),
+             {:ok, tt1} <- whnf(k, book, tt) do
+          case tt1 do
             {:tensor, d, s} ->
               with {:ok, uu} <- check(k, book, rs, gamma, m, u, {:tensor, d, s}),
                    {:ok, uses} <- combine(m, tu, uu) do
@@ -1148,12 +1211,9 @@ defmodule Muro.Check do
   end
 
   defp infer_arg(k, book, rs, gamma, m, :reuse, a, fu, arg, f) do
-    if is_data?(k, book, a) do
-      with {:ok, au} <- check(k, book, rs, gamma, m, arg, a),
-           do: app_uses(book, m, f, fu, au)
-    else
-      {:error, "+ argument is not Data"}
-    end
+    with :ok <- guard_data(k, book, a, "+ argument is not Data"),
+         {:ok, au} <- check(k, book, rs, gamma, m, arg, a),
+         do: app_uses(book, m, f, fu, au)
   end
 
   # A type is Type, a kind Π (x : A) → K, or a small type (⇒ Type).
@@ -1191,11 +1251,7 @@ defmodule Muro.Check do
                  :ok <- conv(k, book, a_ann, a1),
                  :ok <-
                    if(q == :reuse,
-                     do:
-                       if(is_data?(k, book, a1),
-                         do: :ok,
-                         else: {:error, "+ requires a Data type"}
-                       ),
+                     do: guard_data(k, book, a1, "+ requires a Data type"),
                      else: :ok
                    ),
                  {:ok, [u0 | us]} <-
@@ -1213,19 +1269,13 @@ defmodule Muro.Check do
             end
 
           {:error, _} ->
-            with {:ok, {b, u}} <- infer(k, book, rs, gamma, mode, e),
-                 :ok <- conv(k, book, b, a),
-                 do: {:ok, u}
+            infer_conv(k, book, rs, gamma, mode, e, a)
         end
 
       # ⇐-refl
       :rfl ->
         with {:ok, {sort, x, y}} <- view_id(k, book, a),
-             :ok <-
-               if(float_id_forbidden?(k, book, sort),
-                 do: {:error, "kernel identity is not defined on F32"},
-                 else: :ok
-               ),
+             :ok <- float_id_ok(k, book, sort),
              :ok <- conv(k, book, x, y),
              do: {:ok, u0s(nctx(gamma))}
 
@@ -1274,17 +1324,22 @@ defmodule Muro.Check do
       # ⇐-ctor / ⇐-conv
       _ ->
         case {view_data(k, book, a), ctor_spine(book, e)} do
-          {{:ok, {_d, dname, params, idxs}}, {:ok, {dname2, _ci, args}}}
+          {{:ok, {_d, dname, params, idxs}}, {:ok, {dname2, _ci, _args}}}
           when dname == dname2 ->
             expected = Subst.apps_from({:def, dname}, params ++ idxs)
-            check_ctor_app(k, book, rs, gamma, mode, dname, e, params, args, expected)
+            check_ctor_app(k, book, rs, gamma, mode, dname, params, e, expected)
 
           _ ->
-            with {:ok, {b, u}} <- infer(k, book, rs, gamma, mode, e),
-                 :ok <- conv(k, book, b, a),
-                 do: {:ok, u}
+            infer_conv(k, book, rs, gamma, mode, e, a)
         end
     end
+  end
+
+  # ⇐-conv: infer, then convert to the expected type.
+  defp infer_conv(k, book, rs, gamma, mode, e, a) do
+    with {:ok, {b, u}} <- infer(k, book, rs, gamma, mode, e),
+         :ok <- conv(k, book, b, a),
+         do: {:ok, u}
   end
 
   # -- signature -------------------------------------------------------------
@@ -1296,11 +1351,15 @@ defmodule Muro.Check do
     end
   end
 
-  def check_def(book, %{kind: :data} = d), do: check_data(book, d)
+  @doc """
+  Check one definition of a de Bruijn book. `fuel` bounds reduction; running
+  out is an error (`out of fuel …`), not a verdict.
+  """
+  def check_def(book, d, fuel \\ @fuel)
 
-  def check_def(book, %{name: name, mode: mode, type: ty, body: body}) do
-    k = @fuel
+  def check_def(book, %{kind: :data} = d, fuel), do: check_data(book, d, fuel)
 
+  def check_def(book, %{name: name, mode: mode, type: ty, body: body}, k) do
     with :ok <- tag("#{name} type", check_ty(k, book, empty_rec(), [], ty)),
          {:ok, _} <-
            tag("#{name} body", check(k, book, def_rec(name), [], mode, body, ty)),
@@ -1309,10 +1368,15 @@ defmodule Muro.Check do
     end
   end
 
-  def check_sig(named_book) do
+  @doc """
+  Check a named book. Options: `fuel: n` (default `default_fuel/0`).
+  """
+  def check_sig(named_book, opts \\ []) do
+    fuel = Keyword.get(opts, :fuel, @fuel)
+
     with {:ok, book} <- Ast.book_to_db(named_book) do
       Enum.reduce_while(book, :ok, fn d, :ok ->
-        case check_def(book, d) do
+        case check_def(book, d, fuel) do
           :ok -> {:cont, :ok}
           err -> {:halt, err}
         end
@@ -1343,47 +1407,64 @@ defmodule Muro.Check do
 
   defp inst_params(k, book, t, [p | ps]) do
     case whnf(k, book, t) do
-      {:pi, _, _, b} -> inst_params(k, book, Subst.inst(b, p), ps)
-      _ -> {:error, "constructor type has too few parameter binders"}
+      {:ok, {:pi, _, _, b}} -> inst_params(k, book, Subst.inst(b, p), ps)
+      {:ok, _} -> {:error, "constructor type has too few parameter binders"}
+      err -> err
     end
   end
 
-  defp check_ctor_app(k, book, rs, gamma, m, _dname, e, params, args, expected) do
-    {h, _} = apps(e)
+  # ⇐-ctor: a constructor spine against the data type dname at params. The
+  # spine is walked from the head (Agda: inferCtorSpine): the constructor's
+  # type instantiated at the parameters, then one Π per argument; an erased
+  # field is checked in spec and contributes no uses.
+  defp infer_ctor_spine(k, book, _rs, gamma, _m, dname, params, {:def, cname}) do
+    case lookup_ctor(book, cname) do
+      {:ok, {_d, dn, _ci, c}} when dn == dname ->
+        with {:ok, rest} <- inst_params(k, book, c.type, params),
+             do: {:ok, {rest, u0s(nctx(gamma))}}
 
-    with {:def, cname} <- h,
-         {:ok, {_d, _dn, _ci, c}} <- lookup_ctor(book, cname),
-         {:ok, rest} <- inst_params(k, book, c.type, params) do
-      check_ctor_args(k, book, rs, gamma, m, rest, args, expected)
-    else
-      _ -> {:error, "ill-formed constructor application"}
+      {:ok, _} ->
+        {:error, "constructor of another data type"}
+
+      err ->
+        err
     end
   end
 
-  defp check_ctor_args(k, book, _rs, gamma, _m, ty, [], expected) do
-    case whnf(k, book, ty) do
-      {:pi, _, _, _} -> {:error, "too few constructor arguments"}
-      ty1 -> with :ok <- conv(k, book, ty1, expected), do: {:ok, u0s(nctx(gamma))}
+  defp infer_ctor_spine(k, book, rs, gamma, m, dname, params, {:app, f, a}) do
+    with {:ok, {ty, fu}} <- infer_ctor_spine(k, book, rs, gamma, m, dname, params, f),
+         {:ok, ty1} <- whnf(k, book, ty) do
+      case ty1 do
+        {:pi, q, a_ty, b} ->
+          with {:ok, au} <- check(k, book, rs, gamma, field_mode(q, m), a, a_ty),
+               {:ok, uses} <- combine_arg(q, m, au, fu),
+               do: {:ok, {Subst.inst(b, a), uses}}
+
+        _ ->
+          {:error, "too many constructor arguments"}
+      end
     end
   end
 
-  defp check_ctor_args(k, book, rs, gamma, m, ty, [a | as], expected) do
-    case whnf(k, book, ty) do
-      {:pi, q, a_ty, b} ->
-        am = if q == :erased, do: :spec, else: m
+  defp infer_ctor_spine(_k, _book, _rs, _gamma, _m, _dname, _params, _e),
+    do: {:error, "not a constructor spine"}
 
-        with {:ok, au} <- check(k, book, rs, gamma, am, a, a_ty),
-             {:ok, asu} <-
-               check_ctor_args(k, book, rs, gamma, m, Subst.inst(b, a), as, expected) do
-          if q == :erased do
-            if m == :spec, do: {:ok, u0s(nctx(gamma))}, else: {:ok, asu}
-          else
-            combine(m, au, asu)
-          end
-        end
+  defp field_mode(:erased, _m), do: :spec
+  defp field_mode(_q, m), do: m
 
-      _ ->
-        {:error, "too many constructor arguments"}
+  defp combine_arg(:erased, :spec, _au, fu), do: {:ok, u0s(length(fu))}
+  defp combine_arg(:erased, _m, _au, fu), do: {:ok, fu}
+  defp combine_arg(_q, m, au, fu), do: combine(m, au, fu)
+
+  # After the arguments, the residual telescope must be exhausted and be
+  # the expected data type.
+  defp check_ctor_app(k, book, rs, gamma, m, dname, params, e, expected) do
+    with {:ok, {r, u}} <- infer_ctor_spine(k, book, rs, gamma, m, dname, params, e),
+         {:ok, r1} <- whnf(k, book, r) do
+      case r1 do
+        {:pi, _, _, _} -> {:error, "too few constructor arguments"}
+        _ -> with :ok <- conv(k, book, r1, expected), do: {:ok, u}
+      end
     end
   end
 
@@ -1396,14 +1477,16 @@ defmodule Muro.Check do
       np = nparams_of(book, dname)
 
       case analyze_forces(k, book, np, idxs, rest) do
-        {:error, "impossible constructor"} ->
+        {:error, e} ->
+          {:error, e}
+
+        # a clash: the constructor cannot produce the expected indices,
+        # its branch is skipped
+        {:ok, :clash} ->
           case bs do
             [] -> {:error, "missing branch for #{c.name}"}
             [_ | bs1] -> check_branches(k, book, rs, gamma, m, dname, params, idxs, mot, cs, bs1)
           end
-
-        {:error, e} ->
-          {:error, e}
 
         {:ok, forces} ->
           case bs do
@@ -1454,15 +1537,24 @@ defmodule Muro.Check do
     end
   end
 
+  # A branch of match against the constructor's telescope ty: one λ per
+  # remaining Π (a forced argument is instantiated instead of bound), then
+  # the body against the motive at the constructor applied to the arguments.
   defp check_br(k, book, rs, gamma, m, dname, cname, ty, br, mot, args, forces) do
-    case whnf(k, book, ty) do
+    with {:ok, ty1} <- whnf(k, book, ty) do
+      check_br_n(k, book, rs, gamma, m, dname, cname, ty1, br, mot, args, forces)
+    end
+  end
+
+  defp check_br_n(k, book, rs, gamma, m, dname, cname, ty1, br, mot, args, forces) do
+    case ty1 do
       {:pi, q, a, b} ->
         case {forces, br} do
           {[u | fs], {:lam, q1, a1, t}} when not is_nil(u) ->
             with :ok <- if(q == q1, do: :ok, else: {:error, "λ/Π quantity mismatch"}),
                  :ok <- check_ty(k, book, rs, gamma, a1),
                  :ok <- conv(k, book, a1, a) do
-              check_br(
+              force_br(
                 k,
                 book,
                 rs,
@@ -1513,7 +1605,7 @@ defmodule Muro.Check do
             {:error, "constructor telescope / force list mismatch"}
         end
 
-      ty1 ->
+      _ ->
         np = nparams_of(book, dname)
         {_, targs} = apps(ty1)
         idxs = Enum.drop(targs, np)
@@ -1521,6 +1613,14 @@ defmodule Muro.Check do
         check(k, book, rs, gamma, m, br, Subst.apps_from(mot, idxs ++ [ctor_tm]))
     end
   end
+
+  # A forced argument is substituted into the branch; the result is not a
+  # subterm, so the step spends a unit of fuel (Agda: forceBr).
+  defp force_br(0, _book, _rs, _gamma, _m, _dname, _cname, _ty, _br, _mot, _args, _forces),
+    do: {:error, @out_of_fuel}
+
+  defp force_br(k, book, rs, gamma, m, dname, cname, ty, br, mot, args, forces),
+    do: check_br(k - 1, book, rs, gamma, m, dname, cname, ty, br, mot, args, forces)
 
   defp wk_forces(fs) do
     Enum.map(fs, fn
@@ -1559,11 +1659,16 @@ defmodule Muro.Check do
     {:pi, q, t, motive_tail(dname, Enum.map(args, &Subst.wk/1) ++ [{:var, 0}], rest)}
   end
 
+  # Index clash / forcing. `{:ok, :clash}`: the constructor cannot produce
+  # the expected indices (its branch is skipped); `{:ok, forces}`: one entry
+  # per binder of tel, a forced term or nil.
   defp analyze_forces(k, book, np, expected, tel) do
     d = count_pis(tel)
 
-    with {:ok, pairs} <- walk_forces(k, book, np, expected, tel, 0) do
-      {:ok, forces_for(d, pairs)}
+    case walk_forces(k, book, np, expected, tel, 0) do
+      {:ok, :clash} -> {:ok, :clash}
+      {:ok, pairs} -> {:ok, forces_for(d, pairs)}
+      err -> err
     end
   end
 
@@ -1571,8 +1676,10 @@ defmodule Muro.Check do
     do: walk_forces(k, book, np, expected, b, d + 1)
 
   defp walk_forces(k, book, np, expected, t, d) do
-    {_h, args} = apps(whnf(k, book, t))
-    match_idxs(k, book, d, expected, Enum.drop(args, np))
+    with {:ok, t1} <- whnf(k, book, t) do
+      {_h, args} = apps(t1)
+      match_idxs(k, book, d, expected, Enum.drop(args, np))
+    end
   end
 
   defp count_pis({:pi, _, _, b}), do: 1 + count_pis(b)
@@ -1581,22 +1688,40 @@ defmodule Muro.Check do
   defp match_idxs(_k, _book, _d, [], []), do: {:ok, []}
 
   defp match_idxs(k, book, d, [e | es], [t | ts]) do
-    with {:ok, fs} <- match_idx(k, book, d, e, t),
-         {:ok, gs} <- match_idxs(k, book, d, es, ts) do
-      {:ok, fs ++ gs}
+    case match_idx(k, book, d, e, t) do
+      {:ok, :clash} ->
+        {:ok, :clash}
+
+      {:ok, fs} ->
+        case match_idxs(k, book, d, es, ts) do
+          {:ok, :clash} -> {:ok, :clash}
+          {:ok, gs} -> {:ok, fs ++ gs}
+          err -> err
+        end
+
+      err ->
+        err
     end
   end
 
   defp match_idxs(_, _, _, _, _), do: {:error, "index telescope length mismatch"}
 
+  # No metavariables: suc is inverted, a rigid mismatch is a clash, a
+  # variable is forced. Each inversion reduces both sides, so it spends a
+  # unit of fuel (Agda: matchIdx).
+  defp match_idx(0, _book, _d, _e, _t), do: {:error, @out_of_fuel}
+
   defp match_idx(k, book, d, e, t) do
-    case {whnf(k, book, e), whnf(k, book, t)} do
-      {{:su, e1}, {:su, t1}} -> match_idx(k, book, d, e1, t1)
-      {:ze, :ze} -> {:ok, []}
-      {{:su, _}, :ze} -> {:error, "impossible constructor"}
-      {:ze, {:su, _}} -> {:error, "impossible constructor"}
-      {e1, {:var, j}} when j < d -> {:ok, [{d - 1 - j, e1}]}
-      {_, _} -> {:ok, []}
+    with {:ok, e1} <- whnf(k - 1, book, e),
+         {:ok, t1} <- whnf(k - 1, book, t) do
+      case {e1, t1} do
+        {{:su, e2}, {:su, t2}} -> match_idx(k - 1, book, d, e2, t2)
+        {:ze, :ze} -> {:ok, []}
+        {{:su, _}, :ze} -> {:ok, :clash}
+        {:ze, {:su, _}} -> {:ok, :clash}
+        {e2, {:var, j}} when j < d -> {:ok, [{d - 1 - j, e2}]}
+        {_, _} -> {:ok, []}
+      end
     end
   end
 
@@ -1690,10 +1815,9 @@ defmodule Muro.Check do
   defp skip_params(_, _, _, _, k, _) when k > 0,
     do: {:error, "constructor type has too few parameter binders"}
 
-  defp check_data(book, %{name: name, params: params, ctors: ctors} = d) do
+  defp check_data(book, %{name: name, params: params, ctors: ctors} = d, k) do
     np = length(params)
     ni = length(Map.get(d, :indices, []))
-    k = @fuel
 
     Enum.reduce_while(ctors, :ok, fn c, :ok ->
       result =

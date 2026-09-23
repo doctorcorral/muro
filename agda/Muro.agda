@@ -22,6 +22,8 @@ import Muro.Wall
 import Muro.Consistency
 import Muro.Frag
 import Muro.Tag
+import Muro.Soundness.Conv
+import Muro.Soundness.Views
 import Muro.Soundness
 open import Muro.Example public
 open import Muro.ExampleStream public

@@ -8,19 +8,20 @@ defmodule Muro do
 
   alias Muro.{Check, Emit, Parser}
 
-  def check_file(path) do
+  @doc "Parse and check a `.muro` file. Options: `fuel: n` (see `Muro.Check.check_sig/2`)."
+  def check_file(path, opts \\ []) do
     path
     |> File.read!()
     |> Parser.parse()
     |> case do
-      {:ok, book} -> Check.check_sig(book)
+      {:ok, book} -> Check.check_sig(book, opts)
       other -> other
     end
   end
 
-  def emit_file(path, module) when is_atom(module) do
+  def emit_file(path, module, opts \\ []) when is_atom(module) do
     with {:ok, book} <- Parser.parse(File.read!(path)),
-         :ok <- Check.check_sig(book) do
+         :ok <- Check.check_sig(book, opts) do
       {:ok, Emit.emit_module(module, book)}
     end
   end

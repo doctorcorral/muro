@@ -15,7 +15,7 @@ In brief: two jobs. Do not mix them. This page is the operational contract. Huma
 
 - Write a `.muro` file against [Grammar](grammar.md).
 - Put new programs in `examples/` unless asked otherwise.
-- Check with `mix muro.check path.muro`.
+- Check with `mix muro.check path.muro`. If the answer is `out of fuel`, the checker gave up reducing; it is not a type error. Retry with `mix muro.check --fuel 20000 path.muro`.
 - Copy syntax from `examples/`, not from memory.
 - Keep every binder typed. Write every motive.
 - Use only tags `run`, `run internal`, `spec`, `evidence`.
@@ -89,7 +89,7 @@ agda/Muro/Subst.agda    wk, sub, inst
 agda/Muro/Unembed.agda  PHOAS → de Bruijn (TERMINATING, not --safe)
 agda/Muro/SubstLemmas.agda  renaming / substitution algebra
 agda/Muro/Env.agda      Sig, Ctx, uses, mode order (shared by Check and ⊢)
-agda/Muro/Check.agda    fuelled decision procedure (TERMINATING, not --safe)
+agda/Muro/Check.agda    the decision procedure: structural on the term, fuel only where it reduces
 agda/Muro/Tag.agda      constructor tags (Check compares tags before structure)
 agda/Muro/Spine.agda    application spines (constructor / dty applications), spine views
 agda/Muro/Frag.agda     the ⊢ fragment as a predicate on terms, signatures, contexts
@@ -100,7 +100,9 @@ agda/Muro/Judgement.agda  inductive ⊢ with uses (core fragment, with data / ma
 agda/Muro/Typing.agda   declarative ⊨ (no uses); substitution, preservation
 agda/Muro/Wall.agda     mode wall lemmas
 agda/Muro/Consistency.agda  Empty-nf, progress, preservation at Empty; Empty-evid is not proved
-agda/Muro/Soundness.agda  Check says yes → ⊢ derives it, on the fragment (imports Check, not --safe)
+agda/Muro/Soundness.agda  Check says yes → ⊢ derives it, on the fragment
+agda/Muro/Soundness/Conv.agda   whnf-sound, conv-sound
+agda/Muro/Soundness/Views.agda  views, isData-sound, GoodSig, instParams / forces on a telescope
 test/muro_check_test.exs
 ```
 
@@ -120,7 +122,7 @@ Success line from `mix muro.check`:
 All terms check. Evidence never becomes a run.
 ```
 
-`Muro.Check.check_sig/1` returns `:ok` on a well-typed book.
+`Muro.Check.check_sig/2` returns `:ok` on a well-typed book; `check_sig(book, fuel: n)` sets the fuel.
 
 ## Representations (do not add a fourth)
 

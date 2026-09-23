@@ -376,11 +376,3 @@ defArgs-just () | ((muli _ _) , _)
 defArgs-just () | ((addt _ _) , _)
 defArgs-just () | ((toi64 _) , _)
 defArgs-just () | ((packi _ _) , _)
-
--- A λ, with its parts.
-lamView : ∀ {n} → Tm n → Maybe (Qty × Tm n × Tm (suc n))
-lamView (lam q A t) = just (q , A , t)
-lamView _ = nothing
-
-lamView-just : ∀ {n} {t : Tm n} {q A b} → lamView t ≡ just (q , A , b) → t ≡ lam q A b
-lamView-just {t = lam _ _ _} refl = refl

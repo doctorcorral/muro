@@ -173,9 +173,9 @@ spec-⇐-uses (⇐-ctor _ _ _ _ _ _ _ Ar _) = spec-args-uses Ar
 -- combineArg at spec: an erased argument gives u0s outright; the others
 -- go through combine spec, which forgets.
 spec-args-uses args-[] = refl
-spec-args-uses (args-∷ {q = erased} _ _ _ eq) = sym (ok-inj eq)
-spec-args-uses (args-∷ {q = affine} _ _ _ eq) = sym (ok-inj eq)
-spec-args-uses (args-∷ {q = reuse}  _ _ _ eq) = sym (ok-inj eq)
+spec-args-uses (args-snoc {q = erased} _ _ _ eq) = sym (ok-inj eq)
+spec-args-uses (args-snoc {q = affine} _ _ _ eq) = sym (ok-inj eq)
+spec-args-uses (args-snoc {q = reuse}  _ _ _ eq) = sym (ok-inj eq)
 
 spec-brs-uses brs-[] = refl
 spec-brs-uses (brs-∷ _ _ _ _) = refl

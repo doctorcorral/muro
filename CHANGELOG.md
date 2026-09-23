@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.4.0
+
+The checker is total and the soundness proof is `--safe`. `Muro.Check` carries no `TERMINATING` pragma: it is structurally recursive on the term, and fuel is spent only where a term is reduced. Running out of fuel is an error, never an unreduced term. All shipped examples check as before.
+
+### Checker (`Muro.Check`, `mix muro.check`)
+
+- Out of fuel is reported. `whnf` returns a `Result`; at fuel zero it fails with `out of fuel (the checker gave up reducing; raise the fuel)` instead of returning the term unreduced, so a term that needs more fuel is refused with that message rather than with a misleading type error (before: `cannot convert …`, `expected Π, got …`). Everything that reduces (`conv`, `isData`, the Π / identity / data / product / ν views, `instParams`, index matching, `checkUnfold`, `addT`) propagates it.
+- `mix muro.check --fuel N path.muro` sets the fuel (default `2000`). `Muro.Check.check_sig/2` and `Muro.check_file/2` take `fuel: n`; `Muro.Check.default_fuel/0` is the default. There is no resumption: raise the fuel and check again.
+- Fuel is spent only where a term is reduced (`whnf`, `conv`, `isData`, `matchIdx`) and where a forced index argument is substituted into a `match` branch (`forceBr`). `infer`, `check`, `checkTy`, the constructor spine, and the branches of a `match` are structural on the term.
+- A constructor application is checked from the head of the spine (`inferCtorSpine`: the constructor's type at the parameters, then one Π per argument, an erased field in spec), then the residual telescope must be the expected type (`checkCtorApp`). Error texts: `constructor of another data type`, `not a constructor spine`, `too many constructor arguments`, `too few constructor arguments`.
+- A run type is read syntactically after one `whnf` (`runTy`); under ν the body is read as it is, the bound variable counting as a run type (same answer as substituting `Unit`, without the substitution).
+- An index clash in `match` is a value (`nothing` / `{:ok, :clash}`), not an error message that is matched by text.
+
+### Agda (`agda/Muro`)
+
+- `Muro.Check` is `--safe`. `whnf`, `dataWhnf`, `isData`, `isRunType`, `conv`, the views, `instParams`, `matchIdx`, `analyzeForces` return `Result`. `runTy` is structural. `checkBr` splits into `checkBr` (reduce the telescope) / `checkBrPi` (one λ against one Π) / `forceBr` (a forced argument, one unit of fuel). `checkLam`, `inferConv`, `inferArg` are named so that the case tree splits on the term.
+- `Muro.Soundness` is `--safe` and split: `Muro.Soundness.Conv` (`whnf-sound`: when `whnf k σ t ≡ ok u` then `t ⟶* u` in spec and `u` is in the fragment; `synEq-sound`; `conv-sound`), `Muro.Soundness.Views` (`viewPi-sound`, `viewId-sound`, `viewData-sound`, `isData-sound`, `Tel`, `GoodSig`, `instParams-sound`, `analyzeForces-tel`), `Muro.Soundness` (`infer-sound`, `check-sound`, `checkTy-sound`, `checkAgainst-sound`, `inferConv-sound`, `inferCtorSpine-sound`, `checkCtorApp-sound`, `checkBr-sound`, `checkBrPi-sound`, `checkBranches-sound`, `checkDef-sound`, `checkSig-sound`). The proof is by structural recursion on the fragment witness `Frag e`; the depth-indexed copy `FragD` is gone. Statements are the same as in 0.3.0.
+- `Muro.Judgement`: the list judgment `T ▹ as ⇝ R ⊣ u` is built from the head outwards (`args-[]`, `args-snoc`), as `Check.inferCtorSpine` walks a spine; `⇐-ctor` is unchanged. `Muro.Wall.spec-args-uses` and `Muro.Typing.forget-args` follow. `Muro.Spine.lamView` is removed.
+- `Makefile`: `agda-safe` also checks `Muro.Check` and `Muro.Soundness`; `agda-soundness` and `agda-check` pass `--safe`. `agda/Muro.agda` imports the two new modules.
+
+### Manual
+
+- `limits.md`: what fuel bounds, what running out means, that removing the cap waits on normalisation; the soundness modules are `--safe`. `extending.md`, `for-agents.md`, `identity.md`, `index.md`, README: the module list, the fuel discipline for kernel changes, `inferCtorSpine`, `▹` from the head.
+
+### Package
+
+- Version 0.4.0.
+
 ## 0.3.0
 
 The checker changes. Each change makes `Muro.Check` agree with ⊢ where they disagreed; the disagreements were found by proving the checker sound. All shipped examples check as before.
