@@ -86,7 +86,7 @@ With `match … motive (λ _ → Type)` such a `Box` would project a type back o
 
 ## Recursion
 
-A self-call in run or evidence must use a constructor argument whose type is `D …`. For lists, that is the tail. For trees, either child.
+A self-call in run or evidence must use a constructor argument whose type is `D …`, from a `match` on the argument being descended on. For lists, that is the tail. For trees, either child. Fields of a `match` on a computed value are not smaller.
 
 ```
 def length : run Π (- A : Type) → Π (xs : List A) → Nat :=

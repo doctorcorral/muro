@@ -113,7 +113,7 @@ Motives are written in parentheses. Nested λ in the motive cover index binders 
 
 ## Recursion and descent
 
-A self-call in `run` or `evidence` must descend on a non-erased argument: a variable marked smaller because it came from a `match` (the `suc` predecessor, a constructor argument whose type is `D …`, the tail of a list, …).
+A self-call in `run` or `evidence` must descend on a non-erased argument: a variable marked smaller because it came from a `match` (the `suc` predecessor, a constructor argument whose type is `D …`, the tail of a list, …). The scrutinee of that `match` must itself be the first non-erased argument of the definition or a variable already marked smaller. `match (f x) …` and `match ys …` on a λ-bound `ys` are fine, but their fields are not smaller: a computed value, or a variable that is not an argument, exposes nothing a self-call may descend on.
 
 Spec does not check descent. `IsEven` may recurse on `p` after two `suc` matches because it is a spec.
 

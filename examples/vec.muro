@@ -7,8 +7,8 @@ data Vec (A : Type) : Nat → Type where
   vnil  : Vec A 0
   vcons : Π (n : Nat) → A → Vec A n → Vec A suc(n)
 
-def lookup : run Π (-A : Type) → Π (n : Nat) → Π (i : Fin n) → Π (xs : Vec A n) → A :=
-  λ (-A : Type) → λ (n : Nat) → λ (i : Fin n) → λ (xs : Vec A n) →
+def lookup : run Π (-A : Type) → Π (-n : Nat) → Π (i : Fin n) → Π (xs : Vec A n) → A :=
+  λ (-A : Type) → λ (-n : Nat) → λ (i : Fin n) → λ (xs : Vec A n) →
     (match i motive (λ (k : Nat) → λ (_ : Fin k) → Vec A k → A)
       | fzero m =>
           λ (ys : Vec A suc(m)) →
