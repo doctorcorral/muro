@@ -54,7 +54,7 @@ open import Muro.Data
 -- Bidirectional ⊢. Uses sit in the conclusion (⊣). Two auxiliary
 -- judgments for data: the arguments of a constructor application along
 -- its telescope (T ▹ as ⇝ R: after the arguments as, the remaining
--- telescope is R; Check.checkCtorArgs), and the branches of a match,
+-- telescope is R; Check.inferCtorSpine), and the branches of a match,
 -- one per constructor in declaration order.
 ------------------------------------------------------------------------
 
@@ -259,18 +259,20 @@ data _,_⊢[_]_⇐_⊣_ σ Γ where
     → σ ⊢[ spec ] R ≈ appsFrom (dty di) (ps ++ idxs)
     → σ , Γ ⊢[ m ] e ⇐ A ⊣ u
 
--- Arguments along a telescope, left to right (Check.checkCtorArgs): an
--- erased field is checked in spec and contributes no uses.
+-- Arguments along a telescope, from the head of the spine outwards
+-- (Check.inferCtorSpine, as the spine is built): after as the remaining
+-- telescope R is a Π, the next argument is checked against its domain,
+-- an erased field in spec contributing no uses.
 data _,_⊢[_]_▹_⇝_⊣_ σ Γ where
   args-[] : ∀ {m T}
     → σ , Γ ⊢[ m ] T ▹ [] ⇝ T ⊣ u0s
 
-  args-∷ : ∀ {m T q A B a as R au asu uses}
-    → σ ⊢[ spec ] T ≈ pi q A B
+  args-snoc : ∀ {m T q A B a as R asu au uses}
+    → σ , Γ ⊢[ m ] T ▹ as ⇝ R ⊣ asu
+    → σ ⊢[ spec ] R ≈ pi q A B
     → σ , Γ ⊢[ fieldMode q m ] a ⇐ A ⊣ au
-    → σ , Γ ⊢[ m ] inst B a ▹ as ⇝ R ⊣ asu
     → combineArg q m au asu ≡ ok uses
-    → σ , Γ ⊢[ m ] T ▹ (a ∷ as) ⇝ R ⊣ uses
+    → σ , Γ ⊢[ m ] T ▹ (as ++ (a ∷ [])) ⇝ inst B a ⊣ uses
 
 data _,_⊢[_]_brs⟨_,_,_,_⟩_⊣_ σ Γ where
   brs-[] : ∀ {m di ps P ci}

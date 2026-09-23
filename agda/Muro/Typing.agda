@@ -353,7 +353,7 @@ forget-⇐ (⇐-ctor sp c lk lps lidx lkc ip Ar cR) =
   conv (t-ctor sp (ca lk lkc lps lidx ip (▹-R cR (forget-args Ar)))) (≈-sym c)
 
 forget-args args-[] = a-[] ≈-refl
-forget-args (args-∷ c Da Ar _) = a-∷ c (forget-⇐ Da) (forget-args Ar)
+forget-args (args-snoc Ar c Da _) = ▹-snoc (forget-args Ar) c (forget-⇐ Da)
 
 forget-brs brs-[] = b-[]
 forget-brs (brs-∷ ip bt Db Bs) = b-∷ ip bt (forget-⇐ Db) (forget-brs Bs)

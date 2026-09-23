@@ -31,7 +31,7 @@ Conversion, in order:
 2. Stuck-definition congruence, when the first argument is not constructor-headed.
 3. Weak head normal form, then compare again.
 
-Fuel is for conversion only (`@fuel 2000` in Elixir). Infer and check recurse on the term; they do not spend that fuel.
+Fuel bounds reduction (`@fuel 2000` in Elixir, `mix muro.check --fuel N` to change it). Infer and check recurse on the term; they do not spend that fuel. Running out is the error `out of fuel`, not a failed conversion.
 
 So this evidence checks, after `zeros` is a productive unfold whose head is `0`:
 

@@ -605,4 +605,25 @@ defmodule Muro.CheckTest do
     assert {:error, msg} = Check.check_sig(book)
     assert msg =~ "F32"
   end
+
+  test "running out of fuel is reported, not a verdict" do
+    assert {:error, msg} = Check.check_sig(Example.book(), fuel: 1)
+    assert msg =~ "out of fuel"
+    refute msg =~ "cannot convert"
+    assert Check.check_sig(Example.book(), fuel: Check.default_fuel()) == :ok
+    assert Muro.check_file("examples/vec.muro", fuel: 10 * Check.default_fuel()) == :ok
+  end
+
+  test "mix muro.check --fuel" do
+    assert {:error, msg} = Muro.check_file("examples/half_ok.muro", fuel: 2)
+    assert msg =~ "out of fuel"
+
+    assert_raise Mix.Error, ~r/out of fuel/, fn ->
+      Mix.Tasks.Muro.Check.run(["--fuel", "2", "examples/half_ok.muro"])
+    end
+
+    assert_raise Mix.Error, ~r/positive/, fn ->
+      Mix.Tasks.Muro.Check.run(["--fuel", "0"])
+    end
+  end
 end

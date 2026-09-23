@@ -3,19 +3,44 @@ defmodule Mix.Tasks.Muro.Check do
 
   @shortdoc "Type-check a .muro file or the built-in half_ok book"
 
-  def run([]) do
+  @moduledoc """
+  Type-check a `.muro` file, or the built-in `half_ok` book when no path is
+  given.
+
+      mix muro.check
+      mix muro.check path.muro
+      mix muro.check --fuel 10000 path.muro
+
+  `--fuel` bounds how far the checker reduces (default
+  `Muro.Check.default_fuel/0`). Running out is reported as an error, not
+  as a type error; raise the fuel and check again.
+  """
+
+  @switches [fuel: :integer]
+
+  def run(args) do
     Mix.Task.run("app.start")
 
-    case Muro.Check.check_sig(Muro.Example.book()) do
-      :ok -> Mix.shell().info("All terms check. Evidence never becomes a run.")
-      {:error, e} -> Mix.raise(e)
+    {opts, paths, invalid} = OptionParser.parse(args, strict: @switches)
+
+    if invalid != [] do
+      Mix.raise("unknown option: #{inspect(invalid)}")
     end
-  end
 
-  def run([path]) do
-    Mix.Task.run("app.start")
+    fuel = Keyword.get(opts, :fuel, Muro.Check.default_fuel())
 
-    case Muro.check_file(path) do
+    if fuel <= 0 do
+      Mix.raise("--fuel must be a positive integer")
+    end
+
+    result =
+      case paths do
+        [] -> Muro.Check.check_sig(Muro.Example.book(), fuel: fuel)
+        [path] -> Muro.check_file(path, fuel: fuel)
+        _ -> Mix.raise("expected at most one path")
+      end
+
+    case result do
       :ok -> Mix.shell().info("All terms check. Evidence never becomes a run.")
       {:error, e} -> Mix.raise(e)
     end
