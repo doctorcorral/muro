@@ -31,6 +31,8 @@ open import Muro.Base
 open import Muro.Syntax
 open import Muro.Subst
 open import Muro.Env public
+open import Muro.Tag using (tmTag)
+open import Muro.Spine using (unspine; ctorSpine; dtyArgs; defArgs; lamView)
 
 ------------------------------------------------------------------------
 -- Recursion state: run and evid structural descent (not spec).
@@ -76,11 +78,7 @@ eqFin {suc _} zero    (suc _) = false
 eqFin {suc _} (suc _) zero    = false
 
 apps : ∀ {n} → Tm n → Tm n × List (Tm n)
-apps t = go t []
-  where
-    go : ∀ {n} → Tm n → List (Tm n) → Tm n × List (Tm n)
-    go (app f a) acc = go f (a ∷ acc)
-    go f         acc = f , acc
+apps = unspine
 
 nthQty : ∀ {n} → Tm n → ℕ → Result Qty
 nthQty (pi q _ _) zero    = ok q
@@ -125,23 +123,10 @@ mutual
   ... | _        = ucons (unf s f)
   uconsWhnf _ _ e = ucons e
 
-  nthList : ∀ {A : Set} → List A → ℕ → Result A
-  nthList []       _       = fail "unknown index"
-  nthList (x ∷ _)  zero    = ok x
-  nthList (_ ∷ xs) (suc i) = nthList xs i
-
-  ctorSpine : ∀ {n} → Tm n → Maybe (ℕ × ℕ × List (Tm n))
-  ctorSpine t = go t []
-    where
-      go : ∀ {n} → Tm n → List (Tm n) → Maybe (ℕ × ℕ × List (Tm n))
-      go (app f a) acc = go f (a ∷ acc)
-      go (ctor i j) acc = just (i , j , acc)
-      go _ _ = nothing
-
   dataWhnf : ∀ {n} → ℕ → Sig → Tm n → Tm (suc n) → List (Tm n) → Tm n
   dataWhnf k σ e P bs with ctorSpine e
   ... | just (_ , ci , args) =
-    case nthList bs ci of λ where
+    case lookupList bs ci of λ where
       (ok b)  → whnf k σ (appsFrom b args)
       (fail _) → mData e P bs
   ... | nothing = mData e P bs
@@ -152,9 +137,11 @@ mutual
   allData _ _ []       = true
   allData k σ (a ∷ as) = isData k σ a ∧ allData k σ as
 
-  {-# TERMINATING #-}
+  -- Fuel also bounds the descent into data parameters (a spec
+  -- definition may be recursive: X : Type := D X).
   isData : ∀ {n} → ℕ → Sig → Tm n → Bool
-  isData k σ t with apps (whnf k σ t)
+  isData zero    _ _ = false
+  isData (suc k) σ t with apps (whnf (suc k) σ t)
   ... | (nat , [])        = true
   ... | (unit , [])       = true
   ... | (empty , [])      = true
@@ -164,7 +151,6 @@ mutual
   ... | (dty i , as)      = dataParamsData k σ i as
   ... | _                 = false
 
-  {-# TERMINATING #-}
   dataParamsData : ∀ {n} → ℕ → Sig → ℕ → List (Tm n) → Bool
   dataParamsData k σ i as with lookupData σ i
   ... | fail _ = false
@@ -201,47 +187,52 @@ mutual
   synEqList (x ∷ xs) (y ∷ ys) = synEq x y ∧ synEqList xs ys
   synEqList _        _        = false
 
+  -- Tags are compared first (Muro.Tag); synEqD only has to handle terms
+  -- of the same shape.
   synEq : ∀ {n} → Tm n → Tm n → Bool
-  synEq (var i)        (var j)        = eqFin i j
-  synEq typ            typ            = true
-  synEq (pi q A B)     (pi q′ A′ B′)  = eqQty q q′ ∧ synEq A A′ ∧ synEq B B′
-  synEq (lam q A t)    (lam q′ A′ t′) = eqQty q q′ ∧ synEq A A′ ∧ synEq t t′
-  synEq (app f a)      (app g b)      = synEq f g ∧ synEq a b
-  synEq nat            nat            = true
-  synEq ze             ze             = true
-  synEq (su a)         (su b)         = synEq a b
-  synEq unit           unit           = true
-  synEq one            one            = true
-  synEq empty          empty          = true
-  synEq (dty i)        (dty j)        = i ≡ᵇ j
-  synEq (ctor i j)     (ctor i′ j′)   = (i ≡ᵇ i′) ∧ (j ≡ᵇ j′)
-  synEq (mData e P bs) (mData e′ P′ bs′) =
+  synEq u v = (tmTag u ≡ᵇ tmTag v) ∧ synEqD u v
+
+  synEqD : ∀ {n} → Tm n → Tm n → Bool
+  synEqD (var i)        (var j)        = eqFin i j
+  synEqD typ            typ            = true
+  synEqD (pi q A B)     (pi q′ A′ B′)  = eqQty q q′ ∧ synEq A A′ ∧ synEq B B′
+  synEqD (lam q A t)    (lam q′ A′ t′) = eqQty q q′ ∧ synEq A A′ ∧ synEq t t′
+  synEqD (app f a)      (app g b)      = synEq f g ∧ synEq a b
+  synEqD nat            nat            = true
+  synEqD ze             ze             = true
+  synEqD (su a)         (su b)         = synEq a b
+  synEqD unit           unit           = true
+  synEqD one            one            = true
+  synEqD empty          empty          = true
+  synEqD (dty i)        (dty j)        = i ≡ᵇ j
+  synEqD (ctor i j)     (ctor i′ j′)   = (i ≡ᵇ i′) ∧ (j ≡ᵇ j′)
+  synEqD (mData e P bs) (mData e′ P′ bs′) =
     synEq e e′ ∧ synEq P P′ ∧ synEqList bs bs′
-  synEq (mNat e P z s) (mNat e′ P′ z′ s′) =
+  synEqD (mNat e P z s) (mNat e′ P′ z′ s′) =
     synEq e e′ ∧ synEq P P′ ∧ synEq z z′ ∧ synEq s s′
-  synEq (mEmp e P)     (mEmp e′ P′)   = synEq e e′ ∧ synEq P P′
-  synEq (mUnit e P u)  (mUnit e′ P′ u′) = synEq e e′ ∧ synEq P P′ ∧ synEq u u′
-  synEq (idt A a b)    (idt A′ a′ b′) = synEq A A′ ∧ synEq a a′ ∧ synEq b b′
-  synEq rfl            rfl            = true
-  synEq (rwt e P t)    (rwt e′ P′ t′) = synEq e e′ ∧ synEq P P′ ∧ synEq t t′
-  synEq (def i)        (def j)        = i ≡ᵇ j
-  synEq (ann e A)      (ann e′ A′)    = synEq e e′ ∧ synEq A A′
-  synEq (prod A B)     (prod A′ B′)   = synEq A A′ ∧ synEq B B′
-  synEq (pair a b)     (pair a′ b′)   = synEq a a′ ∧ synEq b b′
-  synEq (fst t)        (fst t′)       = synEq t t′
-  synEq (snd t)        (snd t′)       = synEq t t′
-  synEq (nu F)         (nu F′)        = synEq F F′
-  synEq (unf s f)      (unf s′ f′)    = synEq s s′ ∧ synEq f f′
-  synEq (ucons s)      (ucons s′)     = synEq s s′
-  synEq i64            i64            = true
-  synEq f32ty          f32ty          = true
-  synEq (tensor d s)   (tensor d′ s′) = synEq d d′ ∧ synEq s s′
-  synEq (addi x y)     (addi x′ y′)   = synEq x x′ ∧ synEq y y′
-  synEq (muli x y)     (muli x′ y′)   = synEq x x′ ∧ synEq y y′
-  synEq (addt t u)     (addt t′ u′)   = synEq t t′ ∧ synEq u u′
-  synEq (toi64 t)      (toi64 t′)     = synEq t t′
-  synEq (packi x y)    (packi x′ y′)  = synEq x x′ ∧ synEq y y′
-  synEq _              _              = false
+  synEqD (mEmp e P)     (mEmp e′ P′)   = synEq e e′ ∧ synEq P P′
+  synEqD (mUnit e P u)  (mUnit e′ P′ u′) = synEq e e′ ∧ synEq P P′ ∧ synEq u u′
+  synEqD (idt A a b)    (idt A′ a′ b′) = synEq A A′ ∧ synEq a a′ ∧ synEq b b′
+  synEqD rfl            rfl            = true
+  synEqD (rwt e P t)    (rwt e′ P′ t′) = synEq e e′ ∧ synEq P P′ ∧ synEq t t′
+  synEqD (def i)        (def j)        = i ≡ᵇ j
+  synEqD (ann e A)      (ann e′ A′)    = synEq e e′ ∧ synEq A A′
+  synEqD (prod A B)     (prod A′ B′)   = synEq A A′ ∧ synEq B B′
+  synEqD (pair a b)     (pair a′ b′)   = synEq a a′ ∧ synEq b b′
+  synEqD (fst t)        (fst t′)       = synEq t t′
+  synEqD (snd t)        (snd t′)       = synEq t t′
+  synEqD (nu F)         (nu F′)        = synEq F F′
+  synEqD (unf s f)      (unf s′ f′)    = synEq s s′ ∧ synEq f f′
+  synEqD (ucons s)      (ucons s′)     = synEq s s′
+  synEqD i64            i64            = true
+  synEqD f32ty          f32ty          = true
+  synEqD (tensor d s)   (tensor d′ s′) = synEq d d′ ∧ synEq s s′
+  synEqD (addi x y)     (addi x′ y′)   = synEq x x′ ∧ synEq y y′
+  synEqD (muli x y)     (muli x′ y′)   = synEq x x′ ∧ synEq y y′
+  synEqD (addt t u)     (addt t′ u′)   = synEq t t′ ∧ synEq u u′
+  synEqD (toi64 t)      (toi64 t′)     = synEq t t′
+  synEqD (packi x y)    (packi x′ y′)  = synEq x x′ ∧ synEq y y′
+  synEqD _              _              = false
 
 ctorHead : ∀ {n} → Tm n → Bool
 ctorHead t with proj₁ (apps t)
@@ -261,65 +252,76 @@ mutual
   {-# TERMINATING #-}
   conv : ∀ {n} → ℕ → Sig → Tm n → Tm n → Result ⊤
   conv zero    _ _ _ = fail "conv: out of fuel"
-  conv {n} (suc k) σ u v =
+  conv (suc k) σ u v =
     if synEq u v then ok tt
-    else stuckCong u v
-    where
-      stuckCong : Tm n → Tm n → Result ⊤
-      stuckCong u′ v′ with apps u′ | apps v′
-      ... | (def i , a ∷ as) | (def j , b ∷ bs) =
-        if (i ≡ᵇ j) ∧ not (ctorHead a) ∧ not (ctorHead b)
-        then (conv k σ a b >> convArgs k σ as bs)
-        else convN k σ (whnf k σ u′) (whnf k σ v′)
-      ... | _ | _ = convN k σ (whnf k σ u′) (whnf k σ v′)
+    else convStuck k σ u v (defArgs u) (defArgs v)
+
+  -- Two applications of the same def to arguments that are not
+  -- constructor-headed are compared argumentwise before unfolding
+  -- (otherwise a recursive def is unfolded just to compare a call with
+  -- itself).
+  convStuck : ∀ {n} → ℕ → Sig → Tm n → Tm n
+    → Maybe (ℕ × Tm n × List (Tm n)) → Maybe (ℕ × Tm n × List (Tm n)) → Result ⊤
+  convStuck k σ u v (just (i , a , as)) (just (j , b , bs)) =
+    if (i ≡ᵇ j) ∧ not (ctorHead a) ∧ not (ctorHead b)
+    then (conv k σ a b >> convArgs k σ as bs)
+    else convN k σ (whnf k σ u) (whnf k σ v)
+  convStuck k σ u v _ _ = convN k σ (whnf k σ u) (whnf k σ v)
+
+  -- Tags are compared first (Muro.Tag); convND only has to handle terms
+  -- of the same shape.
+  convN : ∀ {n} → ℕ → Sig → Tm n → Tm n → Result ⊤
+  convN k σ u v =
+    if tmTag u ≡ᵇ tmTag v then convND k σ u v
+    else fail ("cannot convert " ++ showTm u ++ " ≁ " ++ showTm v)
 
   {-# TERMINATING #-}
-  convN : ∀ {n} → ℕ → Sig → Tm n → Tm n → Result ⊤
-  convN k σ typ           typ           = ok tt
-  convN k σ nat           nat           = ok tt
-  convN k σ unit          unit          = ok tt
-  convN k σ empty         empty         = ok tt
-  convN k σ (dty i)       (dty j)       = guard "data index mismatch" (i ≡ᵇ j)
-  convN k σ (ctor i j)    (ctor i′ j′)  =
+  convND : ∀ {n} → ℕ → Sig → Tm n → Tm n → Result ⊤
+  convND k σ typ           typ           = ok tt
+  convND k σ nat           nat           = ok tt
+  convND k σ unit          unit          = ok tt
+  convND k σ empty         empty         = ok tt
+  convND k σ (dty i)       (dty j)       = guard "data index mismatch" (i ≡ᵇ j)
+  convND k σ (ctor i j)    (ctor i′ j′)  =
     guard "constructor mismatch" ((i ≡ᵇ i′) ∧ (j ≡ᵇ j′))
-  convN k σ (mData e P bs) (mData e′ P′ bs′) =
+  convND k σ (mData e P bs) (mData e′ P′ bs′) =
     conv k σ e e′ >> conv k σ P P′ >> convArgs k σ bs bs′
-  convN k σ ze            ze            = ok tt
-  convN k σ one           one           = ok tt
-  convN k σ rfl           rfl           = ok tt
-  convN k σ (su a)        (su b)        = conv k σ a b
-  convN k σ (var i)       (var j)       = guard ("var " ++ showTm (var i) ++ " ≠ " ++ showTm (var j)) (eqFin i j)
-  convN k σ (def i)       (def j)       = guard ("def " ++ showDef i ++ " ≠ " ++ showDef j) (i ≡ᵇ j)
-  convN k σ (pi q A B)    (pi q′ A′ B′) =
+  convND k σ ze            ze            = ok tt
+  convND k σ one           one           = ok tt
+  convND k σ rfl           rfl           = ok tt
+  convND k σ (su a)        (su b)        = conv k σ a b
+  convND k σ (var i)       (var j)       = guard ("var " ++ showTm (var i) ++ " ≠ " ++ showTm (var j)) (eqFin i j)
+  convND k σ (def i)       (def j)       = guard ("def " ++ showDef i ++ " ≠ " ++ showDef j) (i ≡ᵇ j)
+  convND k σ (pi q A B)    (pi q′ A′ B′) =
     guard "Π quantity mismatch" (eqQty q q′) >> conv k σ A A′ >> conv k σ B B′
-  convN k σ (lam q A t)   (lam q′ A′ t′) =
+  convND k σ (lam q A t)   (lam q′ A′ t′) =
     guard "λ quantity mismatch" (eqQty q q′) >> conv k σ A A′ >> conv k σ t t′
-  convN k σ (app f a)     (app g b)     = conv k σ f g >> conv k σ a b
-  convN k σ (idt A a b)   (idt A′ a′ b′) = conv k σ A A′ >> conv k σ a a′ >> conv k σ b b′
-  convN k σ (mNat e P z s) (mNat e′ P′ z′ s′) =
+  convND k σ (app f a)     (app g b)     = conv k σ f g >> conv k σ a b
+  convND k σ (idt A a b)   (idt A′ a′ b′) = conv k σ A A′ >> conv k σ a a′ >> conv k σ b b′
+  convND k σ (mNat e P z s) (mNat e′ P′ z′ s′) =
     conv k σ e e′ >> conv k σ P P′ >> conv k σ z z′ >> conv k σ s s′
-  convN k σ (mEmp e P)    (mEmp e′ P′)  = conv k σ e e′ >> conv k σ P P′
-  convN k σ (mUnit e P u) (mUnit e′ P′ u′) =
+  convND k σ (mEmp e P)    (mEmp e′ P′)  = conv k σ e e′ >> conv k σ P P′
+  convND k σ (mUnit e P u) (mUnit e′ P′ u′) =
     conv k σ e e′ >> conv k σ P P′ >> conv k σ u u′
-  convN k σ (rwt e P t)   (rwt e′ P′ t′) =
+  convND k σ (rwt e P t)   (rwt e′ P′ t′) =
     conv k σ e e′ >> conv k σ P P′ >> conv k σ t t′
-  convN k σ (ann e A)     (ann e′ A′)   = conv k σ e e′ >> conv k σ A A′
-  convN k σ (prod A B)    (prod A′ B′)  = conv k σ A A′ >> conv k σ B B′
-  convN k σ (pair a b)    (pair a′ b′)  = conv k σ a a′ >> conv k σ b b′
-  convN k σ (fst t)       (fst t′)      = conv k σ t t′
-  convN k σ (snd t)       (snd t′)      = conv k σ t t′
-  convN k σ (nu F)        (nu F′)       = conv k σ F F′
-  convN k σ (unf s f)     (unf s′ f′)   = conv k σ s s′ >> conv k σ f f′
-  convN k σ (ucons s)     (ucons s′)    = conv k σ s s′
-  convN k σ i64           i64           = ok tt
-  convN k σ f32ty         f32ty         = ok tt
-  convN k σ (tensor d s)  (tensor d′ s′) = conv k σ d d′ >> conv k σ s s′
-  convN k σ (addi x y)    (addi x′ y′)  = conv k σ x x′ >> conv k σ y y′
-  convN k σ (muli x y)    (muli x′ y′)  = conv k σ x x′ >> conv k σ y y′
-  convN k σ (addt t u)    (addt t′ u′)  = conv k σ t t′ >> conv k σ u u′
-  convN k σ (toi64 t)     (toi64 t′)    = conv k σ t t′
-  convN k σ (packi x y)   (packi x′ y′) = conv k σ x x′ >> conv k σ y y′
-  convN _ _ u             v             =
+  convND k σ (ann e A)     (ann e′ A′)   = conv k σ e e′ >> conv k σ A A′
+  convND k σ (prod A B)    (prod A′ B′)  = conv k σ A A′ >> conv k σ B B′
+  convND k σ (pair a b)    (pair a′ b′)  = conv k σ a a′ >> conv k σ b b′
+  convND k σ (fst t)       (fst t′)      = conv k σ t t′
+  convND k σ (snd t)       (snd t′)      = conv k σ t t′
+  convND k σ (nu F)        (nu F′)       = conv k σ F F′
+  convND k σ (unf s f)     (unf s′ f′)   = conv k σ s s′ >> conv k σ f f′
+  convND k σ (ucons s)     (ucons s′)    = conv k σ s s′
+  convND k σ i64           i64           = ok tt
+  convND k σ f32ty         f32ty         = ok tt
+  convND k σ (tensor d s)  (tensor d′ s′) = conv k σ d d′ >> conv k σ s s′
+  convND k σ (addi x y)    (addi x′ y′)  = conv k σ x x′ >> conv k σ y y′
+  convND k σ (muli x y)    (muli x′ y′)  = conv k σ x x′ >> conv k σ y y′
+  convND k σ (addt t u)    (addt t′ u′)  = conv k σ t t′ >> conv k σ u u′
+  convND k σ (toi64 t)     (toi64 t′)    = conv k σ t t′
+  convND k σ (packi x y)   (packi x′ y′) = conv k σ x x′ >> conv k σ y y′
+  convND _ _ u            v             =
     fail ("cannot convert " ++ showTm u ++ " ≁ " ++ showTm v)
 
 ------------------------------------------------------------------------
@@ -615,14 +617,14 @@ splitData σ i args =
   ok (i , take np args , drop np args)
 
 viewData : ∀ {n} → ℕ → Sig → Tm n → Result (ℕ × List (Tm n) × List (Tm n))
-viewData k σ t with apps (whnf k σ t)
-... | (dty i , args) = splitData σ i args
-... | t′             = fail ("expected data type, got " ++ showTm (proj₁ t′))
+viewData k σ t with dtyArgs (whnf k σ t)
+... | just (i , args) = splitData σ i args
+... | nothing         = fail ("expected data type, got " ++ showTm (whnf k σ t))
 
 isDType : ∀ {n} → ℕ → Tm n → Bool
-isDType i t with proj₁ (apps t)
-... | dty j = i ≡ᵇ j
-... | _     = false
+isDType i t with dtyArgs t
+... | just (j , _) = i ≡ᵇ j
+... | nothing      = false
 
 mutual
   hasSelf : ∀ {n} → Maybe ℕ → Tm n → Bool
@@ -862,13 +864,16 @@ forcesFor (suc k) fs = lookupForce fs 0 ∷ forcesFor k (shift fs)
     shift ((zero  , _) ∷ rest) = shift rest
     shift ((suc j , u) ∷ rest) = (j , u) ∷ shift rest
 
+-- Walk the constructor telescope to its target and match the target's
+-- indices against the expected ones (d = number of binders passed).
+forcePairs : ∀ {n m} → ℕ → Sig → ℕ → List (Tm n) → ℕ → Tm m → Result (List (ℕ × Tm n))
+forcePairs k σ np expected d (pi _ _ B) = forcePairs k σ np expected (suc d) B
+forcePairs k σ np expected d t =
+  matchIdxs k σ d expected (drop np (proj₂ (apps (whnf k σ t))))
+
 analyzeForces : ∀ {n} → ℕ → Sig → ℕ → List (Tm n) → Tm n → Result (List (Maybe (Tm n)))
-analyzeForces {n} k σ np expected tel =
-  walk 0 tel >>= λ pairs → ok (forcesFor (countPis tel) pairs)
-  where
-    walk : ∀ {m} → ℕ → Tm m → Result (List (ℕ × Tm n))
-    walk d (pi _ _ B) = walk (suc d) B
-    walk d t          = matchIdxs k σ d expected (drop np (proj₂ (apps (whnf k σ t))))
+analyzeForces k σ np expected tel =
+  forcePairs k σ np expected 0 tel >>= λ pairs → ok (forcesFor (countPis tel) pairs)
 
 wkForce : ∀ {n} → Maybe (Tm n) → Maybe (Tm (suc n))
 wkForce (just t) = just (wk t)
@@ -881,7 +886,7 @@ wkForces (x ∷ xs) = wkForce x ∷ wkForces xs
 mutual
   {-# TERMINATING #-}
   infer : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Result (Tm n × UseVec n)
-  infer k σ rs Γ m t = infer′ k σ rs Γ m t
+  infer k σ rs Γ m t = infer′ k σ rs Γ t m
 
   {-# TERMINATING #-}
   check : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Result (UseVec n)
@@ -890,16 +895,21 @@ mutual
   {-# TERMINATING #-}
   -- A type is Type, a kind Π (x : A) → K, or a small type (⇒ Type).
   -- Kinds are not small: Π (x : A) → Type is wf but has no type.
+  -- Syntax-directed, as ⊢ wf: a kind is recognised by its shape, anything
+  -- else must infer a type convertible to Type. (Reducing first would
+  -- accept terms that merely reduce to Type or to a kind, such as
+  -- (λ (x : Nat) → Type) 0, which have no derivation.)
   checkTy : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Tm n → Result ⊤
-  checkTy k σ rs Γ A with whnf k σ A
-  ... | typ = ok tt                                          -- type-Type
-  ... | pi q A₁ B =                                          -- type-pi
+  checkTy k σ rs Γ typ = ok tt                               -- type-Type
+  checkTy k σ rs Γ (pi q A₁ B) =                             -- type-pi
     checkTy k σ rs Γ A₁ >>
     checkTy k σ (extRec rs false false) (ext Γ q A₁) B
-  ... | A′  = infer′ k σ rs Γ spec A′ >>= λ (T , _) → conv k σ T typ   -- type-el
+  checkTy k σ rs Γ A = infer′ k σ rs Γ A spec >>= λ (T , _) → conv k σ T typ   -- type-el
 
   {-# TERMINATING #-}
-  infer′ : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Result (Tm n × UseVec n)
+  -- The term comes before the mode so that the case tree splits on the
+  -- term first: infer′ … t m reduces for a known t and an unknown m.
+  infer′ : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Tm n → Mode → Result (Tm n × UseVec n)
   {-# TERMINATING #-}
   check′ : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Result (UseVec n)
 
@@ -933,14 +943,14 @@ mutual
   checkBr : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Tm n → Tm n → Tm n → List (Tm n) → List (Maybe (Tm n)) → Result (UseVec n)
   checkBr k σ rs Γ m di ci ty br mot args forces with whnf k σ ty
   ... | pi q A B =
-    case (forces , br) of λ where
-      (just u ∷ fs , lam q′ A′ t) →
+    case (forces , lamView br) of λ where
+      (just u ∷ fs , just (q′ , A′ , t)) →
         guard "λ/Π quantity mismatch" (eqQty q q′) >>
         checkTy k σ rs Γ A′ >>
         conv k σ A′ A >>
         checkBr k σ rs Γ m di ci (inst B u) (inst t u) mot
           (List._++_ args (u ∷ [])) fs
-      (nothing ∷ fs , lam q′ A′ t) →
+      (nothing ∷ fs , just (q′ , A′ , t)) →
         guard "λ/Π quantity mismatch" (eqQty q q′) >>
         checkTy k σ rs Γ A′ >>
         conv k σ A′ A >>
@@ -952,7 +962,7 @@ mutual
         in checkBr k σ rs′ (ext Γ q A) m di ci B t (wk mot) args′ (wkForces fs) >>= λ uses →
         let (u₀ , us) = headTailU uses
         in checkBound m q u₀ >> ok us
-      (_ ∷ _ , _) → fail "match branch expected a λ for a constructor argument"
+      (_ ∷ _ , nothing) → fail "match branch expected a λ for a constructor argument"
       ([] , _)    → fail "constructor telescope / force list mismatch"
   ... | ty′ =
     check k σ rs Γ m br
@@ -1016,53 +1026,53 @@ mutual
 
 
   -- ⇒-var-run / ⇒-var-evid / ⇒-var-spec
-  infer′ k σ rs Γ run (var x) with qtyOf Γ x
+  infer′ k σ rs Γ (var x) run with qtyOf Γ x
   ... | erased = fail "no promotion: erased variable in run mode"
   ... | q      =
     if isRunType k σ (typOf Γ x)
     then ok (typOf Γ x , oneHot x (if eqQty q reuse then Uω else U1))
     else fail ("no promotion: variable has a spec type " ++ showTm (typOf Γ x))
-  infer′ k σ rs Γ evid (var x) with qtyOf Γ x
+  infer′ k σ rs Γ (var x) evid with qtyOf Γ x
   ... | erased = fail "no promotion: erased variable in evidence mode"
   ... | q      = ok (typOf Γ x , oneHot x (if eqQty q reuse then Uω else U1))
-  infer′ k σ rs Γ spec (var x) = ok (typOf Γ x , u0s)
+  infer′ k σ rs Γ (var x) spec = ok (typOf Γ x , u0s)
 
   -- ⇒-ze
-  infer′ k σ rs Γ m ze = ok (nat , u0s)
+  infer′ k σ rs Γ ze m = ok (nat , u0s)
 
   -- ⇒-su
-  infer′ k σ rs Γ m (su t) =
+  infer′ k σ rs Γ (su t) m =
     check k σ rs Γ m t nat >>= λ u → ok (nat , u)
 
   -- ⇒-tt
-  infer′ k σ rs Γ m one = ok (unit , u0s)
+  infer′ k σ rs Γ one m = ok (unit , u0s)
 
   -- ⇒-nat / ⇒-unit / ⇒-empty  (spec only: these are types)
-  infer′ k σ rs Γ run  nat   = fail "no promotion: Nat is an erased term"
-  infer′ k σ rs Γ evid nat   = fail "no promotion: Nat is an erased term"
-  infer′ k σ rs Γ run  unit  = fail "no promotion: Unit is an erased term"
-  infer′ k σ rs Γ evid unit  = fail "no promotion: Unit is an erased term"
-  infer′ k σ rs Γ run  empty = fail "no promotion: Empty is an erased term"
-  infer′ k σ rs Γ evid empty = fail "no promotion: Empty is an erased term"
-  infer′ k σ rs Γ run  typ   = fail "no promotion: Type is an erased term"
-  infer′ k σ rs Γ evid typ   = fail "no promotion: Type is an erased term"
-  infer′ k σ rs Γ spec nat   = ok (typ , u0s)
-  infer′ k σ rs Γ spec unit  = ok (typ , u0s)
-  infer′ k σ rs Γ spec empty = ok (typ , u0s)
-  infer′ k σ rs Γ spec typ   = fail "Type has no type (no Type : Type)"
+  infer′ k σ rs Γ nat run = fail "no promotion: Nat is an erased term"
+  infer′ k σ rs Γ nat evid = fail "no promotion: Nat is an erased term"
+  infer′ k σ rs Γ unit run = fail "no promotion: Unit is an erased term"
+  infer′ k σ rs Γ unit evid = fail "no promotion: Unit is an erased term"
+  infer′ k σ rs Γ empty run = fail "no promotion: Empty is an erased term"
+  infer′ k σ rs Γ empty evid = fail "no promotion: Empty is an erased term"
+  infer′ k σ rs Γ typ run = fail "no promotion: Type is an erased term"
+  infer′ k σ rs Γ typ evid = fail "no promotion: Type is an erased term"
+  infer′ k σ rs Γ nat spec = ok (typ , u0s)
+  infer′ k σ rs Γ unit spec = ok (typ , u0s)
+  infer′ k σ rs Γ empty spec = ok (typ , u0s)
+  infer′ k σ rs Γ typ spec = fail "Type has no type (no Type : Type)"
 
   -- ⇒-pi
-  infer′ k σ rs Γ run  (pi _ _ _) = fail "no promotion: Π is an erased term"
-  infer′ k σ rs Γ evid (pi _ _ _) = fail "no promotion: Π is an erased term"
+  infer′ k σ rs Γ (pi _ _ _) run = fail "no promotion: Π is an erased term"
+  infer′ k σ rs Γ (pi _ _ _) evid = fail "no promotion: Π is an erased term"
   -- The codomain must be small. With B wf instead, Π (x : A) → Type : Type
   -- and Type is a retract of a small type (Girard's paradox).
-  infer′ k σ rs Γ spec (pi q A B) =
+  infer′ k σ rs Γ (pi q A B) spec =
     checkTy k σ rs Γ A >>
     check k σ (extRec rs false false) (ext Γ q A) spec B typ >>
     ok (typ , u0s)
 
   -- ⇒-lam
-  infer′ k σ rs Γ m (lam q A t) =
+  infer′ k σ rs Γ (lam q A t) m =
     checkTy k σ rs Γ A >>
     (if eqQty q reuse
      then guard "+ requires a Data type" (isData k σ A)
@@ -1077,35 +1087,30 @@ mutual
       headTail (u ∷ us) = u , us
 
   -- ⇒-app-aff / ⇒-app-era / ⇒-app-reuse
-  infer′ {n} k σ rs Γ m (app f a) =
+  -- The argument is checked in the mode of the application; at a call
+  -- site of an evidence definition in evid mode its uses are discarded
+  -- (Env.appUses: instantiating a theorem does not consume resources).
+  infer′ {n} k σ rs Γ (app f a) m =
     infer k σ rs Γ m f >>= λ (ft , fu) →
     viewPi k σ ft >>= λ (q , A , B) →
     inferArg q A fu >>= λ uses →
     checkRec k σ m rs (app f a) >>
     ok (inst B a , uses)
     where
-      argMode : Tm n → Mode
-      argMode f with proj₁ (apps f)
-      ... | def i =
-        case lookupDef σ i of λ where
-          (ok d) → if eqMode m evid ∧ eqMode (Def.dmode d) evid then spec else m
-          (fail _) → m
-      ... | _ = m
-
       inferArg : Qty → Tm n → UseVec n → Result (UseVec n)
       inferArg erased A fu =
         check k σ rs Γ spec a A >>= λ _ →
         (if eqMode m spec then ok u0s else ok fu)
       inferArg affine A fu =
-        check k σ rs Γ (argMode f) a A >>= λ au → combine m fu au
+        check k σ rs Γ m a A >>= λ au → appUses σ m f fu au
       inferArg reuse A fu =
         guard "+ argument is not Data" (isData k σ A) >>
-        check k σ rs Γ (argMode f) a A >>= λ au → combine m fu au
+        check k σ rs Γ m a A >>= λ au → appUses σ m f fu au
 
   -- ⇒-idt
-  infer′ k σ rs Γ run  (idt _ _ _) = fail "no promotion: identity type is an erased term"
-  infer′ k σ rs Γ evid (idt _ _ _) = fail "no promotion: identity type is an erased term"
-  infer′ k σ rs Γ spec (idt A a b) =
+  infer′ k σ rs Γ (idt _ _ _) run = fail "no promotion: identity type is an erased term"
+  infer′ k σ rs Γ (idt _ _ _) evid = fail "no promotion: identity type is an erased term"
+  infer′ k σ rs Γ (idt A a b) spec =
     checkTy k σ rs Γ A >>
     guard "kernel identity is not defined on F32" (not (floatIdForbidden k σ A)) >>
     check k σ rs Γ spec a A >>
@@ -1113,10 +1118,10 @@ mutual
     ok (typ , u0s)
 
   -- rfl must be checked (⇐-refl)
-  infer′ k σ rs Γ m rfl = fail "refl requires an expected identity type"
+  infer′ k σ rs Γ rfl m = fail "refl requires an expected identity type"
 
   -- ⇒-rwt
-  infer′ k σ rs Γ m (rwt eq P t) =
+  infer′ k σ rs Γ (rwt eq P t) m =
     infer k σ rs Γ evid eq >>= λ (et , _) →
     viewId k σ et >>= λ (A , l , r) →
     checkTy k σ (extRec rs false false) (ext Γ affine A) P >>
@@ -1124,17 +1129,17 @@ mutual
     ok (inst P l , tu)
 
   -- ⇒-dty
-  infer′ k σ rs Γ run  (dty _) = fail "no promotion: a data former is an erased term"
-  infer′ k σ rs Γ evid (dty _) = fail "no promotion: a data former is an erased term"
-  infer′ k σ rs Γ spec (dty i) =
+  infer′ k σ rs Γ (dty _) run = fail "no promotion: a data former is an erased term"
+  infer′ k σ rs Γ (dty _) evid = fail "no promotion: a data former is an erased term"
+  infer′ k σ rs Γ (dty i) spec =
     lookupData σ i >>= λ d →
     ok (dtyType (DataDecl.pqtys d) (DataDecl.idxs d) , u0s)
 
   -- constructors are checked (⇐-ctor)
-  infer′ k σ rs Γ m (ctor _ _) = fail "constructor requires an expected data type"
+  infer′ k σ rs Γ (ctor _ _) m = fail "constructor requires an expected data type"
 
   -- ⇒-mData
-  infer′ k σ rs Γ m (mData e P bs) =
+  infer′ k σ rs Γ (mData e P bs) m =
     infer k σ rs Γ m e >>= λ (et , eu) →
     viewData k σ et >>= λ (di , params , idxs) →
     lookupData σ di >>= λ d →
@@ -1145,7 +1150,7 @@ mutual
     ok (appsFrom motFun (List._++_ idxs (e ∷ [])) , uses)
 
   -- ⇒-mNat
-  infer′ k σ rs Γ m (mNat e P z s) =
+  infer′ k σ rs Γ (mNat e P z s) m =
     check k σ rs Γ m e nat >>= λ eu →
     checkTy k σ (extRec rs false false) (ext Γ affine nat) P >>
     check k σ rs Γ m z (inst P ze) >>= λ zu →
@@ -1162,20 +1167,20 @@ mutual
       headTail (u ∷ us) = u , us
 
   -- ⇒-mEmp
-  infer′ k σ rs Γ m (mEmp e P) =
+  infer′ k σ rs Γ (mEmp e P) m =
     check k σ rs Γ m e empty >>= λ eu →
     checkTy k σ (extRec rs false false) (ext Γ affine empty) P >>
     ok (inst P e , eu)
 
   -- ⇒-mUnit
-  infer′ k σ rs Γ m (mUnit e P u) =
+  infer′ k σ rs Γ (mUnit e P u) m =
     check k σ rs Γ m e unit >>= λ eu →
     checkTy k σ (extRec rs false false) (ext Γ affine unit) P >>
     check k σ rs Γ m u (inst P one) >>= λ uu →
     combine m eu uu >>= λ uses → ok (inst P e , uses)
 
   -- ⇒-def
-  infer′ {n} k σ rs Γ m (def i) =
+  infer′ {n} k σ rs Γ (def i) m =
     lookupDef σ i >>= λ d →
     (if allowedDef (Def.dmode d) m
      then ok tt
@@ -1186,47 +1191,47 @@ mutual
     ok (closed {n} (Def.dtype d) , u0s)
 
   -- ⇒-ann
-  infer′ k σ rs Γ m (ann e A) =
+  infer′ k σ rs Γ (ann e A) m =
     checkTy k σ rs Γ A >>
     check k σ rs Γ m e A >>= λ u → ok (A , u)
 
   -- ⇒-prod
-  infer′ k σ rs Γ run  (prod _ _) = fail "no promotion: × is an erased term"
-  infer′ k σ rs Γ evid (prod _ _) = fail "no promotion: × is an erased term"
-  infer′ k σ rs Γ spec (prod A B) =                        -- components small
+  infer′ k σ rs Γ (prod _ _) run = fail "no promotion: × is an erased term"
+  infer′ k σ rs Γ (prod _ _) evid = fail "no promotion: × is an erased term"
+  infer′ k σ rs Γ (prod A B) spec =                        -- components small
     check k σ rs Γ spec A typ >>
     check k σ rs Γ spec B typ >>
     ok (typ , u0s)
 
   -- ⇒-nu
-  infer′ k σ rs Γ run  (nu _) = fail "no promotion: ν is an erased term"
-  infer′ k σ rs Γ evid (nu _) = fail "no promotion: ν is an erased term"
-  infer′ k σ rs Γ spec (nu F) =                            -- body small
+  infer′ k σ rs Γ (nu _) run = fail "no promotion: ν is an erased term"
+  infer′ k σ rs Γ (nu _) evid = fail "no promotion: ν is an erased term"
+  infer′ k σ rs Γ (nu F) spec =                            -- body small
     check k σ (extRec rs false false) (ext Γ affine typ) spec F typ >>
     guard "ν body is not strictly positive" (strictPos F) >>
     ok (typ , u0s)
 
   -- ⇒-pair
-  infer′ k σ rs Γ m (pair a b) =
+  infer′ k σ rs Γ (pair a b) m =
     infer k σ rs Γ m a >>= λ (A , au) →
     infer k σ rs Γ m b >>= λ (B , bu) →
     combine m au bu >>= λ uses →
     ok (prod A B , uses)
 
   -- ⇒-fst
-  infer′ k σ rs Γ m (fst t) =
+  infer′ k σ rs Γ (fst t) m =
     infer k σ rs Γ m t >>= λ (T , u) →
     viewProd k σ T >>= λ (A , _) →
     ok (A , u)
 
   -- ⇒-snd
-  infer′ k σ rs Γ m (snd t) =
+  infer′ k σ rs Γ (snd t) m =
     infer k σ rs Γ m t >>= λ (T , u) →
     viewProd k σ T >>= λ (_ , B) →
     ok (B , u)
 
   -- ⇒-unf
-  infer′ k σ rs Γ m (unf seed f) =
+  infer′ k σ rs Γ (unf seed f) m =
     infer k σ rs Γ m seed >>= λ (S , seedU) →
     infer k σ rs Γ m f >>= λ (ft , fu) →
     viewPi k σ ft >>= λ (_ , S′ , Body) →
@@ -1238,40 +1243,40 @@ mutual
     ok (nu (prod (wk A) (var zero)) , uses)
 
   -- ⇒-ucons
-  infer′ k σ rs Γ m (ucons s) =
+  infer′ k σ rs Γ (ucons s) m =
     infer k σ rs Γ m s >>= λ (T , u) →
     viewNu k σ T >>= λ F →
     ok (inst F T , u)
 
   -- ⇒-i64 / ⇒-f32ty / ⇒-tensor  (spec formers)
-  infer′ k σ rs Γ run  i64   = fail "no promotion: I64 is an erased term"
-  infer′ k σ rs Γ evid i64   = fail "no promotion: I64 is an erased term"
-  infer′ k σ rs Γ run  f32ty = fail "no promotion: F32 is an erased term"
-  infer′ k σ rs Γ evid f32ty = fail "no promotion: F32 is an erased term"
-  infer′ k σ rs Γ spec i64   = ok (typ , u0s)
-  infer′ k σ rs Γ spec f32ty = ok (typ , u0s)
-  infer′ k σ rs Γ run  (tensor _ _) = fail "no promotion: Tensor is an erased term"
-  infer′ k σ rs Γ evid (tensor _ _) = fail "no promotion: Tensor is an erased term"
-  infer′ k σ rs Γ spec (tensor D S) =
+  infer′ k σ rs Γ i64 run = fail "no promotion: I64 is an erased term"
+  infer′ k σ rs Γ i64 evid = fail "no promotion: I64 is an erased term"
+  infer′ k σ rs Γ f32ty run = fail "no promotion: F32 is an erased term"
+  infer′ k σ rs Γ f32ty evid = fail "no promotion: F32 is an erased term"
+  infer′ k σ rs Γ i64 spec = ok (typ , u0s)
+  infer′ k σ rs Γ f32ty spec = ok (typ , u0s)
+  infer′ k σ rs Γ (tensor _ _) run = fail "no promotion: Tensor is an erased term"
+  infer′ k σ rs Γ (tensor _ _) evid = fail "no promotion: Tensor is an erased term"
+  infer′ k σ rs Γ (tensor D S) spec =
     checkTy k σ rs Γ D >>
     guard "Tensor dtype must be I64 or F32" (isNxDtype k σ D) >>
     check k σ rs Γ spec S i64 >>= λ _ →
     ok (typ , u0s)
 
   -- ⇒-addi / ⇒-muli
-  infer′ k σ rs Γ m (addi x y) =
+  infer′ k σ rs Γ (addi x y) m =
     check k σ rs Γ m x i64 >>= λ xu →
     check k σ rs Γ m y i64 >>= λ yu →
     combine m xu yu >>= λ uses →
     ok (i64 , uses)
-  infer′ k σ rs Γ m (muli x y) =
+  infer′ k σ rs Γ (muli x y) m =
     check k σ rs Γ m x i64 >>= λ xu →
     check k σ rs Γ m y i64 >>= λ yu →
     combine m xu yu >>= λ uses →
     ok (i64 , uses)
 
   -- ⇒-addt
-  infer′ k σ rs Γ m (addt t u) =
+  infer′ k σ rs Γ (addt t u) m =
     infer k σ rs Γ m t >>= λ (T , tu) →
     (case whnf k σ T of λ where
       (tensor D S) →
@@ -1281,12 +1286,12 @@ mutual
       T′ → fail ("addt expected a Tensor, got " ++ showTm T′))
 
   -- ⇒-toi64
-  infer′ k σ rs Γ m (toi64 n) =
+  infer′ k σ rs Γ (toi64 n) m =
     check k σ rs Γ m n nat >>= λ u →
     ok (i64 , u)
 
   -- ⇒-packi
-  infer′ k σ rs Γ m (packi x y) =
+  infer′ k σ rs Γ (packi x y) m =
     check k σ rs Γ m x i64 >>= λ xu →
     check k σ rs Γ m y i64 >>= λ yu →
     combine m xu yu >>= λ uses →
@@ -1344,13 +1349,18 @@ mutual
     combine m seedU fu
 
   -- ⇐-ctor / ⇐-conv (default)
-  check′ k σ rs Γ m e A with viewData k σ A | ctorSpine e
-  ... | ok (di , params , idxs) | just (di′ , ci , args) =
+  check′ k σ rs Γ m e A = checkAgainst k σ rs Γ m e A (viewData k σ A) (ctorSpine e)
+
+  -- A constructor spine against a data type is checked along the
+  -- constructor's telescope; anything else is inferred and converted.
+  checkAgainst : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n
+    → Result (ℕ × List (Tm n) × List (Tm n)) → Maybe (ℕ × ℕ × List (Tm n)) → Result (UseVec n)
+  checkAgainst k σ rs Γ m e A (ok (di , params , idxs)) (just (di′ , ci , args)) =
     if di ≡ᵇ di′
     then checkCtorApp k σ rs Γ m di ci params args
            (appsFrom (dty di) (List._++_ params idxs))
     else (infer k σ rs Γ m e >>= λ (B , u) → conv k σ B A >> ok u)
-  ... | _ | _ =
+  checkAgainst k σ rs Γ m e A _ _ =
     infer k σ rs Γ m e >>= λ (B , u) → conv k σ B A >> ok u
 
 ------------------------------------------------------------------------
@@ -1409,12 +1419,12 @@ checkDef k σ i =
       (checkNu (Def.dmode d) (Def.dtype d) (Def.dbody d)) >>
   ok tt
 
+checkDefs : ℕ → Sig → ℕ → List Def → Result ⊤
+checkDefs _ _ _ []       = ok tt
+checkDefs k σ i (_ ∷ ds) = checkDef k σ i >> checkDefs k σ (suc i) ds
+
 checkSig : ℕ → Sig → Result ⊤
-checkSig k σ = checkDatas k σ >> go 0 (Sig.defs σ)
-  where
-    go : ℕ → List Def → Result ⊤
-    go _ []       = ok tt
-    go i (_ ∷ ds) = checkDef k σ i >> go (suc i) ds
+checkSig k σ = checkDatas k σ >> checkDefs k σ 0 (Sig.defs σ)
 
 -- Default fuel for closed examples.
 fuel : ℕ

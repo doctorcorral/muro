@@ -62,9 +62,9 @@ ctor-no-⇒ (sp-snoc sp) (⇒-app-reuse D _ _ _ _) = ctor-no-⇒ sp D
 ctor-no-⇐ : ∀ {n} {Γ : Ctx n} {m i j as e A u}
   → Spine (ctor i j) as e → σ-empty , Γ ⊢[ m ] e ⇐ A ⊣ u → ⊥
 ctor-no-⇐ sp (⇐-conv D _) = ctor-no-⇒ sp D
-ctor-no-⇐ _ (⇐-ctor _ lk _ _ _ _) = fail≢ok lk
-ctor-no-⇐ () (⇐-lam _ _ _ _ _)
-ctor-no-⇐ () (⇐-refl _)
+ctor-no-⇐ _ (⇐-ctor _ _ lk _ _ _ _ _ _) = fail≢ok lk
+ctor-no-⇐ () (⇐-lam _ _ _ _ _ _)
+ctor-no-⇐ () (⇐-refl _ _)
 
 dty-no-⇒ : ∀ {n} {Γ : Ctx n} {m i as e B u}
   → Spine (dty i) as e → σ-empty , Γ ⊢[ m ] e ⇒ B ⊣ u → ⊥
@@ -76,9 +76,9 @@ dty-no-⇒ (sp-snoc sp) (⇒-app-reuse D _ _ _ _) = dty-no-⇒ sp D
 dty-no-⇐ : ∀ {n} {Γ : Ctx n} {m i as e A u}
   → Spine (dty i) as e → σ-empty , Γ ⊢[ m ] e ⇐ A ⊣ u → ⊥
 dty-no-⇐ sp (⇐-conv D _) = dty-no-⇒ sp D
-dty-no-⇐ _ (⇐-ctor _ lk _ _ _ _) = fail≢ok lk
-dty-no-⇐ () (⇐-lam _ _ _ _ _)
-dty-no-⇐ () (⇐-refl _)
+dty-no-⇐ _ (⇐-ctor _ _ lk _ _ _ _ _ _) = fail≢ok lk
+dty-no-⇐ () (⇐-lam _ _ _ _ _ _)
+dty-no-⇐ () (⇐-refl _ _)
 
 ctor-no⊨ : ∀ {n} {Γ : Ctx n} {m i j as e A}
   → Spine (ctor i j) as e → σ-empty , Γ ⊨⁰[ m ] e ∶ A → ⊥
@@ -105,7 +105,7 @@ no-evid-empty-⇒ ()
 no-evid-empty-⇐ : ∀ {σ n} {Γ : Ctx n} {A u} →
   σ , Γ ⊢[ evid ] empty ⇐ A ⊣ u → ⊥
 no-evid-empty-⇐ (⇐-conv D _) = no-evid-empty-⇒ D
-no-evid-empty-⇐ (⇐-ctor _ _ _ _ () _)
+no-evid-empty-⇐ (⇐-ctor () _ _ _ _ _ _ _ _)
 
 ------------------------------------------------------------------------
 -- Introduction forms are never evidence of Empty: they infer a canonical
@@ -134,11 +134,15 @@ Empty-intro-⇒ i-rfl () _
 Empty-intro : ∀ {σ n} {Γ : Ctx n} {m e u} →
   Intro e → σ , Γ ⊢[ m ] e ⇐ empty ⊣ u → ⊥
 Empty-intro i (⇐-conv D c) = Empty-intro-⇒ i D c
-Empty-intro i-ze (⇐-ctor _ _ _ _ () _)
-Empty-intro i-su (⇐-ctor _ _ _ _ () _)
-Empty-intro i-one (⇐-ctor _ _ _ _ () _)
-Empty-intro i-lam (⇐-ctor _ _ _ _ () _)
-Empty-intro i-rfl (⇐-ctor _ _ _ _ () _)
+Empty-intro i-lam (⇐-lam _ c _ _ _ _) with ≈-shape h-empty h-pi c
+... | ()
+Empty-intro i-rfl (⇐-refl c _) with ≈-shape h-empty h-idt c
+... | ()
+Empty-intro i-ze (⇐-ctor () _ _ _ _ _ _ _ _)
+Empty-intro i-su (⇐-ctor () _ _ _ _ _ _ _ _)
+Empty-intro i-one (⇐-ctor () _ _ _ _ _ _ _ _)
+Empty-intro i-lam (⇐-ctor () _ _ _ _ _ _ _ _)
+Empty-intro i-rfl (⇐-ctor () _ _ _ _ _ _ _ _)
 
 ------------------------------------------------------------------------
 -- Closed neutral terms are not evidence: there is no variable, no
@@ -177,9 +181,9 @@ ne-untyped-⇒ (ne-foreign f-toi64) ()
 ne-untyped-⇒ (ne-foreign f-packi) ()
 
 ne-untyped-⇐ ne (⇐-conv D _) = ne-untyped-⇒ ne D
-ne-untyped-⇐ _ (⇐-ctor _ lk _ _ _ _) = fail≢ok lk
-ne-untyped-⇐ (ne-foreign ()) (⇐-lam _ _ _ _ _)
-ne-untyped-⇐ (ne-foreign ()) (⇐-refl _)
+ne-untyped-⇐ _ (⇐-ctor _ _ lk _ _ _ _ _ _) = fail≢ok lk
+ne-untyped-⇐ (ne-foreign ()) (⇐-lam _ _ _ _ _ _)
+ne-untyped-⇐ (ne-foreign ()) (⇐-refl _ _)
 
 ------------------------------------------------------------------------
 -- No closed normal evidence of Empty.
@@ -187,7 +191,7 @@ ne-untyped-⇐ (ne-foreign ()) (⇐-refl _)
 
 Empty-nf : ∀ {e u} →
   Nf σ-empty evid e → σ-empty , ε ⊢[ evid ] e ⇐ empty ⊣ u → ⊥
-Empty-nf _ (⇐-ctor _ lk _ _ _ _) = fail≢ok lk
+Empty-nf _ (⇐-ctor _ _ lk _ _ _ _ _ _) = fail≢ok lk
 Empty-nf (nf-ne ne) D = ne-untyped-⇐ ne D
 Empty-nf (nf-ctor sp) D = ctor-no-⇐ sp D
 Empty-nf (nf-dty sp) D = dty-no-⇐ sp D
@@ -242,13 +246,17 @@ nf-fun nf-rfl () _
 nf-nat-prog : ∀ {e P z s u} →
   Nf σ-empty evid e → σ-empty , ε ⊢[ evid ] e ⇐ nat ⊣ u →
   Prog (mNat e P z s)
-nf-nat-prog _ (⇐-ctor _ lk _ _ _ _) = ⊥-elim (fail≢ok lk)
+nf-nat-prog _ (⇐-ctor _ _ lk _ _ _ _ _ _) = ⊥-elim (fail≢ok lk)
 nf-nat-prog (nf-ne ne) D = ⊥-elim (ne-untyped-⇐ ne D)
 nf-nat-prog (nf-ctor sp) D = ⊥-elim (ctor-no-⇐ sp D)
 nf-nat-prog (nf-dty sp) D = ⊥-elim (dty-no-⇐ sp D)
 nf-nat-prog nf-ze _ = inj₂ (_ , ιz)
 nf-nat-prog nf-su _ = inj₂ (_ , ιs)
 nf-nat-prog nf-lam (⇐-conv (⇒-lam _ _ _ _) c) with ≈-shape h-pi h-nat c
+... | ()
+nf-nat-prog nf-lam (⇐-lam _ c _ _ _ _) with ≈-shape h-nat h-pi c
+... | ()
+nf-nat-prog nf-rfl (⇐-refl c _) with ≈-shape h-nat h-idt c
 ... | ()
 nf-nat-prog nf-one (⇐-conv ⇒-one c) with ≈-shape h-unit h-nat c
 ... | ()
@@ -263,7 +271,7 @@ nf-nat-prog nf-rfl (⇐-conv () _)
 nf-unit-prog : ∀ {e P t u} →
   Nf σ-empty evid e → σ-empty , ε ⊢[ evid ] e ⇐ unit ⊣ u →
   Prog (mUnit e P t)
-nf-unit-prog _ (⇐-ctor _ lk _ _ _ _) = ⊥-elim (fail≢ok lk)
+nf-unit-prog _ (⇐-ctor _ _ lk _ _ _ _ _ _) = ⊥-elim (fail≢ok lk)
 nf-unit-prog (nf-ne ne) D = ⊥-elim (ne-untyped-⇐ ne D)
 nf-unit-prog (nf-ctor sp) D = ⊥-elim (ctor-no-⇐ sp D)
 nf-unit-prog (nf-dty sp) D = ⊥-elim (dty-no-⇐ sp D)
@@ -273,6 +281,10 @@ nf-unit-prog nf-ze (⇐-conv ⇒-ze c) with ≈-shape h-nat h-unit c
 nf-unit-prog nf-su (⇐-conv (⇒-su _) c) with ≈-shape h-nat h-unit c
 ... | ()
 nf-unit-prog nf-lam (⇐-conv (⇒-lam _ _ _ _) c) with ≈-shape h-pi h-unit c
+... | ()
+nf-unit-prog nf-lam (⇐-lam _ c _ _ _ _) with ≈-shape h-unit h-pi c
+... | ()
+nf-unit-prog nf-rfl (⇐-refl c _) with ≈-shape h-unit h-idt c
 ... | ()
 nf-unit-prog nf-typ (⇐-conv () _)
 nf-unit-prog nf-pi (⇐-conv () _)
@@ -308,9 +320,9 @@ progress-⇒ : ∀ {e B u} → σ-empty , ε ⊢[ evid ] e ⇒ B ⊣ u → Prog 
 progress-⇐ : ∀ {e A u} → σ-empty , ε ⊢[ evid ] e ⇐ A ⊣ u → Prog e
 
 progress-⇐ (⇐-conv D _) = progress-⇒ D
-progress-⇐ (⇐-ctor _ lk _ _ _ _) = ⊥-elim (fail≢ok lk)
-progress-⇐ (⇐-lam _ _ _ _ _) = inj₁ nf-lam
-progress-⇐ (⇐-refl _) = inj₁ nf-rfl
+progress-⇐ (⇐-ctor _ _ lk _ _ _ _ _ _) = ⊥-elim (fail≢ok lk)
+progress-⇐ (⇐-lam _ _ _ _ _ _) = inj₁ nf-lam
+progress-⇐ (⇐-refl _ _) = inj₁ nf-rfl
 
 progress-⇒ (⇒-var-evid {x = ()} _)
 progress-⇒ ⇒-ze = inj₁ nf-ze

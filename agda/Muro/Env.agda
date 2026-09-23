@@ -5,7 +5,8 @@
 {-# OPTIONS --safe #-}
 module Muro.Env where
 
-open import Data.Bool.Base using (Bool; true; false)
+open import Data.Bool.Base using (Bool; true; false; if_then_else_)
+open import Data.Maybe.Base using (Maybe; just; nothing)
 open import Data.Fin.Base using (Fin; zero; suc)
 open import Data.List.Base as List using (List; []; _∷_; length)
 open import Data.Nat.Base using (ℕ; zero; suc)
@@ -163,6 +164,26 @@ combineArg erased run  _  fu = ok fu
 combineArg erased evid _  fu = ok fu
 combineArg affine m    au fu = combine m au fu
 combineArg reuse  m    au fu = combine m au fu
+
+-- Uses of an application f a (Check.infer′ app): instantiating an
+-- evidence definition in evid mode does not consume the argument's
+-- resources (manual: wall.md). The argument is still checked in the
+-- mode of the application.
+headDef : ∀ {n} → Tm n → Maybe ℕ
+headDef (app f _) = headDef f
+headDef (def i)   = just i
+headDef _         = nothing
+
+evidCall : Sig → Mode → ∀ {n} → Tm n → Bool
+evidCall σ evid f with headDef f
+... | nothing = false
+... | just i with lookupList (Sig.defs σ) i
+...   | ok d   = eqMode (Def.dmode d) evid
+...   | fail _ = false
+evidCall σ _ _ = false
+
+appUses : Sig → Mode → ∀ {n} → Tm n → UseVec n → UseVec n → Result (UseVec n)
+appUses σ m f fu au = if evidCall σ m f then ok fu else combine m fu au
 
 allowedDef : Mode → Mode → Bool
 allowedDef run  _    = true

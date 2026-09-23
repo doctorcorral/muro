@@ -90,7 +90,9 @@ agda/Muro/Unembed.agda  PHOAS → de Bruijn (TERMINATING, not --safe)
 agda/Muro/SubstLemmas.agda  renaming / substitution algebra
 agda/Muro/Env.agda      Sig, Ctx, uses, mode order (shared by Check and ⊢)
 agda/Muro/Check.agda    fuelled decision procedure (TERMINATING, not --safe)
-agda/Muro/Spine.agda    application spines (constructor / dty applications)
+agda/Muro/Tag.agda      constructor tags (Check compares tags before structure)
+agda/Muro/Spine.agda    application spines (constructor / dty applications), spine views
+agda/Muro/Frag.agda     the ⊢ fragment as a predicate on terms, signatures, contexts
 agda/Muro/Reduction.agda  parallel reduction ⇛, confluence
 agda/Muro/Convert.agda  whnf strategy ⟶ and conversion ≈ for ⊢
 agda/Muro/Data.agda     IsData, InstParams, BrTy: what the data rules are stated with
@@ -98,6 +100,7 @@ agda/Muro/Judgement.agda  inductive ⊢ with uses (core fragment, with data / ma
 agda/Muro/Typing.agda   declarative ⊨ (no uses); substitution, preservation
 agda/Muro/Wall.agda     mode wall lemmas
 agda/Muro/Consistency.agda  Empty-nf, progress, preservation at Empty; Empty-evid is not proved
+agda/Muro/Soundness.agda  Check says yes → ⊢ derives it, on the fragment (imports Check, not --safe)
 test/muro_check_test.exs
 ```
 

@@ -44,7 +44,9 @@ jobs:
   agda:
     name: Agda 2.8.0
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Muro.Soundness alone takes ~20 minutes on a laptop; the cache of
+    # agda/_build makes a rerun with unchanged sources fast.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v5
 

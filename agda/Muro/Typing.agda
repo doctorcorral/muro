@@ -300,27 +300,14 @@ app-q reuse  Df isd Da = conv (t-app-reuse Df isd Da) ≈-refl
 ▹-snoc (a-[] c′) c Da = a-∷ (≈-trans c′ c) Da (a-[] ≈-refl)
 ▹-snoc (a-∷ c′ Db ar) c Da = a-∷ c′ Db (▹-snoc ar c Da)
 
--- Every term with a ctor⟨⟩⇝ derivation is a constructor spine.
-sp-head : ∀ {σ n} {Γ : Ctx n} {m e di ps R u}
-  → σ , Γ ⊢[ m ] e ctor⟨ di , ps ⟩⇝ R ⊣ u
-  → ∃ λ j → ∃ λ as → Spine (ctor di j) as e
-sp-head (sp-ctor {ci = ci} _ _ _) = ci , [] , sp-[]
-sp-head (sp-app S _ _ _) with sp-head S
-... | j , as , sp = j , as ++ (_ ∷ []) , sp-snoc sp
-
 forget-⇒ : ∀ {σ n} {Γ : Ctx n} {m e A u}
   → σ , Γ ⊢[ m ] e ⇒ A ⊣ u → σ , Γ ⊨[ m ] e ∶ A
 forget-⇐ : ∀ {σ n} {Γ : Ctx n} {m e A u}
   → σ , Γ ⊢[ m ] e ⇐ A ⊣ u → σ , Γ ⊨[ m ] e ∶ A
 forget-wf : ∀ {σ n} {Γ : Ctx n} {A}
   → σ , Γ ⊢ A wf → σ , Γ ⊨ A wf
-forget-sp : ∀ {σ n} {Γ : Ctx n} {m e di ps R u}
-  → σ , Γ ⊢[ m ] e ctor⟨ di , ps ⟩⇝ R ⊣ u
-  → ∀ {j as} → Spine (ctor di j) as e
-  → ∃ λ d → ∃ λ c → ∃ λ T
-    → (lookupData σ di ≡ ok d) × (lookupCtor d j ≡ ok c)
-    × InstParams σ (closed (Ctor.ctype c)) ps T
-    × σ , Γ ⊨[ m ] T ▹ as ⇝ R
+forget-args : ∀ {σ n} {Γ : Ctx n} {m T as R u}
+  → σ , Γ ⊢[ m ] T ▹ as ⇝ R ⊣ u → σ , Γ ⊨[ m ] T ▹ as ⇝ R
 forget-brs : ∀ {σ n} {Γ : Ctx n} {m bs di ps P ci cs u}
   → σ , Γ ⊢[ m ] bs brs⟨ di , ps , P , ci ⟩ cs ⊣ u
   → σ , Γ ⊨[ m ] bs brs⟨ di , ps , P , ci ⟩ cs
@@ -359,27 +346,21 @@ forget-⇒ (⇒-def lk al) = conv (t-def lk al) ≈-refl
 forget-⇒ (⇒-ann W D) = conv (t-ann (forget-wf W) (forget-⇐ D)) ≈-refl
 
 forget-⇐ (⇐-conv D c) = conv-≈ (forget-⇒ D) c
-forget-⇐ (⇐-lam W c rok D _) =
-  conv (t-lam (forget-wf W) c rok (forget-⇐ D)) ≈-refl
-forget-⇐ (⇐-refl c) = conv (t-rfl c) ≈-refl
-forget-⇐ (⇐-ctor {e = e} {di = di} {ps} {idxs} c lk lps lidx S cR)
-  with sp-head S
-... | j , as , sp with forget-sp S sp
-...   | d , c′ , T , lk′ , lkc , ip , ar with ok-inj (trans (sym lk) lk′)
-...     | refl =
-  conv (t-ctor sp (ca lk lkc lps lidx ip (▹-R cR ar))) (≈-sym c)
+forget-⇐ (⇐-lam W cT c rok D _) =
+  conv (t-lam (forget-wf W) c rok (forget-⇐ D)) (≈-sym cT)
+forget-⇐ (⇐-refl cT c) = conv (t-rfl c) (≈-sym cT)
+forget-⇐ (⇐-ctor sp c lk lps lidx lkc ip Ar cR) =
+  conv (t-ctor sp (ca lk lkc lps lidx ip (▹-R cR (forget-args Ar)))) (≈-sym c)
 
-forget-sp (sp-ctor lk lkc ip) sp-[] = _ , _ , _ , lk , lkc , ip , a-[] ≈-refl
-forget-sp (sp-app S c Da _) (sp-snoc sp) with forget-sp S sp
-... | d , c′ , T , lk , lkc , ip , ar =
-  d , c′ , T , lk , lkc , ip , ▹-snoc ar c (forget-⇐ Da)
+forget-args args-[] = a-[] ≈-refl
+forget-args (args-∷ c Da Ar _) = a-∷ c (forget-⇐ Da) (forget-args Ar)
 
 forget-brs brs-[] = b-[]
 forget-brs (brs-∷ ip bt Db Bs) = b-∷ ip bt (forget-⇐ Db) (forget-brs Bs)
 
 forget-wf type-Type = wf-typ
 forget-wf (type-pi WA WB) = wf-pi (forget-wf WA) (forget-wf WB)
-forget-wf (type-el D) = wf-el (forget-⇒ D)
+forget-wf (type-el D c) = wf-el (conv-≈ (forget-⇒ D) c)
 
 ------------------------------------------------------------------------
 -- Mode weakening.

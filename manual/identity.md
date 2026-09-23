@@ -73,7 +73,7 @@ The `0` branch converts immediately. The `suc` branch rewrites along the inducti
 
 ## Evidence is an ordinary term
 
-There is no separate proof language. A theorem is a λ-term that uses `match`, `refl`, `rewrite`, and `matchEmpty`. It pays affinity and descent. Instantiating it (`half_ok p e2`) does not consume the callee’s affine resources — those arguments are checked in spec — but the λ-binders you write inside the theorem still do.
+There is no separate proof language. A theorem is a λ-term that uses `match`, `refl`, `rewrite`, and `matchEmpty`. It pays affinity and descent. Instantiating it (`half_ok p e2`) does not consume the caller’s affine resources — those arguments are checked in evidence, and their uses are discarded — but the λ-binders you write inside the theorem still do.
 
 Emit drops the whole definition. See [Emit](emit.md).
 

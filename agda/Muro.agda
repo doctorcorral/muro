@@ -20,6 +20,9 @@ import Muro.Judgement
 import Muro.Typing
 import Muro.Wall
 import Muro.Consistency
+import Muro.Frag
+import Muro.Tag
+import Muro.Soundness
 open import Muro.Example public
 open import Muro.ExampleStream public
 import Muro.ExampleEither

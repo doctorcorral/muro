@@ -136,8 +136,8 @@ spec-⇒-uses : ∀ {σ n} {Γ : Ctx n} {e A u} →
   σ , Γ ⊢[ spec ] e ⇒ A ⊣ u → u ≡ u0s
 spec-⇐-uses : ∀ {σ n} {Γ : Ctx n} {e A u} →
   σ , Γ ⊢[ spec ] e ⇐ A ⊣ u → u ≡ u0s
-spec-sp-uses : ∀ {σ n} {Γ : Ctx n} {e di ps R u} →
-  σ , Γ ⊢[ spec ] e ctor⟨ di , ps ⟩⇝ R ⊣ u → u ≡ u0s
+spec-args-uses : ∀ {σ n} {Γ : Ctx n} {T as R u} →
+  σ , Γ ⊢[ spec ] T ▹ as ⇝ R ⊣ u → u ≡ u0s
 spec-brs-uses : ∀ {σ n} {Γ : Ctx n} {bs di ps P ci cs u} →
   σ , Γ ⊢[ spec ] bs brs⟨ di , ps , P , ci ⟩ cs ⊣ u → u ≡ u0s
 
@@ -165,17 +165,17 @@ spec-⇒-uses (⇒-def _ _) = refl
 spec-⇒-uses (⇒-ann _ D) = spec-⇐-uses D
 
 spec-⇐-uses (⇐-conv D _) = spec-⇒-uses D
-spec-⇐-uses (⇐-lam _ _ _ D _) with spec-⇐-uses D
+spec-⇐-uses (⇐-lam _ _ _ _ D _) with spec-⇐-uses D
 ... | refl = refl
-spec-⇐-uses (⇐-refl _) = refl
-spec-⇐-uses (⇐-ctor _ _ _ _ S _) = spec-sp-uses S
+spec-⇐-uses (⇐-refl _ _) = refl
+spec-⇐-uses (⇐-ctor _ _ _ _ _ _ _ Ar _) = spec-args-uses Ar
 
 -- combineArg at spec: an erased argument gives u0s outright; the others
 -- go through combine spec, which forgets.
-spec-sp-uses (sp-ctor _ _ _) = refl
-spec-sp-uses (sp-app {q = erased} _ _ _ eq) = sym (ok-inj eq)
-spec-sp-uses (sp-app {q = affine} _ _ _ eq) = sym (ok-inj eq)
-spec-sp-uses (sp-app {q = reuse}  _ _ _ eq) = sym (ok-inj eq)
+spec-args-uses args-[] = refl
+spec-args-uses (args-∷ {q = erased} _ _ _ eq) = sym (ok-inj eq)
+spec-args-uses (args-∷ {q = affine} _ _ _ eq) = sym (ok-inj eq)
+spec-args-uses (args-∷ {q = reuse}  _ _ _ eq) = sym (ok-inj eq)
 
 spec-brs-uses brs-[] = refl
 spec-brs-uses (brs-∷ _ _ _ _) = refl

@@ -226,3 +226,161 @@ lookupList-sub τ (b ∷ bs) zero refl = refl
 lookupList-sub τ (b ∷ bs) (suc k) eq = lookupList-sub τ bs k eq
 lookupList-sub τ [] zero ()
 lookupList-sub τ [] (suc k) ()
+
+------------------------------------------------------------------------
+-- Views used by the checker: the head of a spine tested for a specific
+-- constructor. Each comes with its inversion lemma; the lemmas list the
+-- other heads once so that no proof about the checker has to.
+------------------------------------------------------------------------
+
+open import Data.Maybe.Base using (Maybe; just; nothing)
+
+-- Constructor applications ctor i j a₁ … aₙ.
+ctorSpine : ∀ {n} → Tm n → Maybe (ℕ × ℕ × List (Tm n))
+ctorSpine t with unspine t
+... | (ctor i j , as) = just (i , j , as)
+... | _ = nothing
+
+ctorSpine-just : ∀ {n} {t : Tm n} {i j as}
+  → ctorSpine t ≡ just (i , j , as) → Spine (ctor i j) as t
+ctorSpine-just {t = t} eq with unspine t in ueq
+ctorSpine-just refl | (ctor _ _ , _) = unspine→Spine′ ueq
+ctorSpine-just () | ((var _) , _)
+ctorSpine-just () | (typ , _)
+ctorSpine-just () | ((pi _ _ _) , _)
+ctorSpine-just () | ((lam _ _ _) , _)
+ctorSpine-just () | ((app _ _) , _)
+ctorSpine-just () | (nat , _)
+ctorSpine-just () | (ze , _)
+ctorSpine-just () | ((su _) , _)
+ctorSpine-just () | (unit , _)
+ctorSpine-just () | (one , _)
+ctorSpine-just () | (empty , _)
+ctorSpine-just () | ((dty _) , _)
+ctorSpine-just () | ((mData _ _ _) , _)
+ctorSpine-just () | ((mNat _ _ _ _) , _)
+ctorSpine-just () | ((mEmp _ _) , _)
+ctorSpine-just () | ((mUnit _ _ _) , _)
+ctorSpine-just () | ((idt _ _ _) , _)
+ctorSpine-just () | (rfl , _)
+ctorSpine-just () | ((rwt _ _ _) , _)
+ctorSpine-just () | ((def _) , _)
+ctorSpine-just () | ((ann _ _) , _)
+ctorSpine-just () | ((prod _ _) , _)
+ctorSpine-just () | ((pair _ _) , _)
+ctorSpine-just () | ((fst _) , _)
+ctorSpine-just () | ((snd _) , _)
+ctorSpine-just () | ((nu _) , _)
+ctorSpine-just () | ((unf _ _) , _)
+ctorSpine-just () | ((ucons _) , _)
+ctorSpine-just () | (i64 , _)
+ctorSpine-just () | (f32ty , _)
+ctorSpine-just () | ((tensor _ _) , _)
+ctorSpine-just () | ((addi _ _) , _)
+ctorSpine-just () | ((muli _ _) , _)
+ctorSpine-just () | ((addt _ _) , _)
+ctorSpine-just () | ((toi64 _) , _)
+ctorSpine-just () | ((packi _ _) , _)
+
+-- Data types dty i p₁ … pₙ.
+dtyArgs : ∀ {n} → Tm n → Maybe (ℕ × List (Tm n))
+dtyArgs t with unspine t
+... | (dty i , as) = just (i , as)
+... | _ = nothing
+
+dtyArgs-just : ∀ {n} {t : Tm n} {i as}
+  → dtyArgs t ≡ just (i , as) → Spine (dty i) as t
+dtyArgs-just {t = t} eq with unspine t in ueq
+dtyArgs-just refl | (dty _ , _) = unspine→Spine′ ueq
+dtyArgs-just () | ((var _) , _)
+dtyArgs-just () | (typ , _)
+dtyArgs-just () | ((pi _ _ _) , _)
+dtyArgs-just () | ((lam _ _ _) , _)
+dtyArgs-just () | ((app _ _) , _)
+dtyArgs-just () | (nat , _)
+dtyArgs-just () | (ze , _)
+dtyArgs-just () | ((su _) , _)
+dtyArgs-just () | (unit , _)
+dtyArgs-just () | (one , _)
+dtyArgs-just () | (empty , _)
+dtyArgs-just () | ((ctor _ _) , _)
+dtyArgs-just () | ((mData _ _ _) , _)
+dtyArgs-just () | ((mNat _ _ _ _) , _)
+dtyArgs-just () | ((mEmp _ _) , _)
+dtyArgs-just () | ((mUnit _ _ _) , _)
+dtyArgs-just () | ((idt _ _ _) , _)
+dtyArgs-just () | (rfl , _)
+dtyArgs-just () | ((rwt _ _ _) , _)
+dtyArgs-just () | ((def _) , _)
+dtyArgs-just () | ((ann _ _) , _)
+dtyArgs-just () | ((prod _ _) , _)
+dtyArgs-just () | ((pair _ _) , _)
+dtyArgs-just () | ((fst _) , _)
+dtyArgs-just () | ((snd _) , _)
+dtyArgs-just () | ((nu _) , _)
+dtyArgs-just () | ((unf _ _) , _)
+dtyArgs-just () | ((ucons _) , _)
+dtyArgs-just () | (i64 , _)
+dtyArgs-just () | (f32ty , _)
+dtyArgs-just () | ((tensor _ _) , _)
+dtyArgs-just () | ((addi _ _) , _)
+dtyArgs-just () | ((muli _ _) , _)
+dtyArgs-just () | ((addt _ _) , _)
+dtyArgs-just () | ((toi64 _) , _)
+dtyArgs-just () | ((packi _ _) , _)
+
+-- `def i` applied to at least one argument.
+defArgs : ∀ {n} → Tm n → Maybe (ℕ × Tm n × List (Tm n))
+defArgs t with unspine t
+... | (def i , a ∷ as) = just (i , a , as)
+... | _ = nothing
+
+defArgs-just : ∀ {n} {t : Tm n} {i a as}
+  → defArgs t ≡ just (i , a , as) → Spine (def i) (a ∷ as) t
+defArgs-just {t = t} eq with unspine t in ueq
+defArgs-just refl | (def _ , _ ∷ _) = unspine→Spine′ ueq
+defArgs-just () | (def _ , [])
+defArgs-just () | ((var _) , _)
+defArgs-just () | (typ , _)
+defArgs-just () | ((pi _ _ _) , _)
+defArgs-just () | ((lam _ _ _) , _)
+defArgs-just () | ((app _ _) , _)
+defArgs-just () | (nat , _)
+defArgs-just () | (ze , _)
+defArgs-just () | ((su _) , _)
+defArgs-just () | (unit , _)
+defArgs-just () | (one , _)
+defArgs-just () | (empty , _)
+defArgs-just () | ((dty _) , _)
+defArgs-just () | ((ctor _ _) , _)
+defArgs-just () | ((mData _ _ _) , _)
+defArgs-just () | ((mNat _ _ _ _) , _)
+defArgs-just () | ((mEmp _ _) , _)
+defArgs-just () | ((mUnit _ _ _) , _)
+defArgs-just () | ((idt _ _ _) , _)
+defArgs-just () | (rfl , _)
+defArgs-just () | ((rwt _ _ _) , _)
+defArgs-just () | ((ann _ _) , _)
+defArgs-just () | ((prod _ _) , _)
+defArgs-just () | ((pair _ _) , _)
+defArgs-just () | ((fst _) , _)
+defArgs-just () | ((snd _) , _)
+defArgs-just () | ((nu _) , _)
+defArgs-just () | ((unf _ _) , _)
+defArgs-just () | ((ucons _) , _)
+defArgs-just () | (i64 , _)
+defArgs-just () | (f32ty , _)
+defArgs-just () | ((tensor _ _) , _)
+defArgs-just () | ((addi _ _) , _)
+defArgs-just () | ((muli _ _) , _)
+defArgs-just () | ((addt _ _) , _)
+defArgs-just () | ((toi64 _) , _)
+defArgs-just () | ((packi _ _) , _)
+
+-- A λ, with its parts.
+lamView : ∀ {n} → Tm n → Maybe (Qty × Tm n × Tm (suc n))
+lamView (lam q A t) = just (q , A , t)
+lamView _ = nothing
+
+lamView-just : ∀ {n} {t : Tm n} {q A b} → lamView t ≡ just (q , A , b) → t ≡ lam q A b
+lamView-just {t = lam _ _ _} refl = refl
