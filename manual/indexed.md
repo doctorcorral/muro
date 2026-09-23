@@ -38,8 +38,8 @@ match i motive (λ (k : Nat) → λ (_ : Fin k) → Vec A k → A)
 `lookup` returns a function `Vec A k → A`, then applies it to `xs`. That is how the index `k` stays aligned with the vector you eliminate.
 
 ```
-def lookup : run Π (-A : Type) → Π (n : Nat) → Π (i : Fin n) → Π (xs : Vec A n) → A :=
-  λ (-A : Type) → λ (n : Nat) → λ (i : Fin n) → λ (xs : Vec A n) →
+def lookup : run Π (-A : Type) → Π (-n : Nat) → Π (i : Fin n) → Π (xs : Vec A n) → A :=
+  λ (-A : Type) → λ (-n : Nat) → λ (i : Fin n) → λ (xs : Vec A n) →
     (match i motive (λ (k : Nat) → λ (_ : Fin k) → Vec A k → A)
       | fzero m =>
           λ (ys : Vec A suc(m)) →
@@ -52,6 +52,8 @@ def lookup : run Π (-A : Type) → Π (n : Nat) → Π (i : Fin n) → Π (xs :
               | vnil => 0
               | vcons p a as => lookup A p j as)) xs
 ```
+
+`n` is erased: it only appears in types. That makes `i` the first non-erased argument, the one a self-call must descend on, and `j` (from `fsuc m j`, a field of the argument `i`) is smaller. `as` is a field of `ys`, a λ-bound variable, and is not smaller: matching a variable that is not an argument, or a computed value, exposes nothing a self-call may descend on.
 
 The `vnil` branches are well-typed empty cases: conversion has already forced `suc(m)` against `0` to be impossible in a consistent book, but the surface still asks you to write a branch. The body `0` is a placeholder the checker accepts in that impossible corner of the motive; a real lookup never takes it when `Fin n` and `Vec A n` agree.
 
@@ -70,7 +72,7 @@ def lookup-ok : evidence {lookup Nat suc(0) (fzero 0) ones1 ≡ suc 0 : Nat} :=
 ```
 {:ok, src} = Muro.emit_file("examples/vec.muro", Muro.Vecs)
 Code.eval_string(src)
-Muro.Vecs.lookup({:suc, 0}, {:fzero, 0}, Muro.Vecs.ones1())
+Muro.Vecs.lookup({:fzero, 0}, Muro.Vecs.ones1())
 # {:suc, 0}
 ```
 

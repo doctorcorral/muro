@@ -870,6 +870,7 @@ defmodule Muro.Check do
                  gamma,
                  m,
                  dname,
+                 scrut_ok(rs, e),
                  params,
                  idxs,
                  mot_fun,
@@ -1468,11 +1469,11 @@ defmodule Muro.Check do
     end
   end
 
-  defp check_branches(_k, _book, _rs, gamma, _m, _dname, _params, _idxs, _mot, [], []) do
+  defp check_branches(_k, _book, _rs, gamma, _m, _dname, _sm, _params, _idxs, _mot, [], []) do
     {:ok, u0s(nctx(gamma))}
   end
 
-  defp check_branches(k, book, rs, gamma, m, dname, params, idxs, mot, [c | cs], bs) do
+  defp check_branches(k, book, rs, gamma, m, dname, sm, params, idxs, mot, [c | cs], bs) do
     with {:ok, rest} <- inst_params(k, book, c.type, params) do
       np = nparams_of(book, dname)
 
@@ -1484,8 +1485,11 @@ defmodule Muro.Check do
         # its branch is skipped
         {:ok, :clash} ->
           case bs do
-            [] -> {:error, "missing branch for #{c.name}"}
-            [_ | bs1] -> check_branches(k, book, rs, gamma, m, dname, params, idxs, mot, cs, bs1)
+            [] ->
+              {:error, "missing branch for #{c.name}"}
+
+            [_ | bs1] ->
+              check_branches(k, book, rs, gamma, m, dname, sm, params, idxs, mot, cs, bs1)
           end
 
         {:ok, forces} ->
@@ -1508,6 +1512,7 @@ defmodule Muro.Check do
                          m,
                          dname,
                          c.name,
+                         sm,
                          rest,
                          wrapped,
                          mot,
@@ -1515,7 +1520,20 @@ defmodule Muro.Check do
                          forces
                        ),
                      {:ok, v} <-
-                       check_branches(k, book, rs, gamma, m, dname, params, idxs, mot, cs, bs1) do
+                       check_branches(
+                         k,
+                         book,
+                         rs,
+                         gamma,
+                         m,
+                         dname,
+                         sm,
+                         params,
+                         idxs,
+                         mot,
+                         cs,
+                         bs1
+                       ) do
                   {:ok, combine_alt(m, u, v)}
                 end
               end
@@ -1524,7 +1542,7 @@ defmodule Muro.Check do
     end
   end
 
-  defp check_branches(_, _, _, _, _, _, _, _, _, [], [_ | _]),
+  defp check_branches(_, _, _, _, _, _, _, _, _, _, [], [_ | _]),
     do: {:error, "match branch count does not match constructors"}
 
   defp wrap_tel({:pi, q, a, b}, body), do: {:lam, q, a, wrap_tel(b, body)}
@@ -1540,13 +1558,16 @@ defmodule Muro.Check do
   # A branch of match against the constructor's telescope ty: one λ per
   # remaining Π (a forced argument is instantiated instead of bound), then
   # the body against the motive at the constructor applied to the arguments.
-  defp check_br(k, book, rs, gamma, m, dname, cname, ty, br, mot, args, forces) do
+  # sm: the scrutinee is a variable a self-call may descend on (scrut_ok),
+  # so a field of type D … is smaller; the fields of a computed scrutinee
+  # are not smaller than anything.
+  defp check_br(k, book, rs, gamma, m, dname, cname, sm, ty, br, mot, args, forces) do
     with {:ok, ty1} <- whnf(k, book, ty) do
-      check_br_n(k, book, rs, gamma, m, dname, cname, ty1, br, mot, args, forces)
+      check_br_n(k, book, rs, gamma, m, dname, cname, sm, ty1, br, mot, args, forces)
     end
   end
 
-  defp check_br_n(k, book, rs, gamma, m, dname, cname, ty1, br, mot, args, forces) do
+  defp check_br_n(k, book, rs, gamma, m, dname, cname, sm, ty1, br, mot, args, forces) do
     case ty1 do
       {:pi, q, a, b} ->
         case {forces, br} do
@@ -1562,6 +1583,7 @@ defmodule Muro.Check do
                 m,
                 dname,
                 cname,
+                sm,
                 Subst.inst(b, u),
                 Subst.inst(t, u),
                 mot,
@@ -1571,7 +1593,7 @@ defmodule Muro.Check do
             end
 
           {[nil | fs], {:lam, q1, a1, t}} ->
-            rec? = is_d_type?(book, dname, a)
+            rec? = sm and is_d_type?(book, dname, a)
             rs1 = ext_rec(rs, rec?, rec?)
             rs2 = if q == :erased, do: keep_next(rs, rs1), else: rs1
             args1 = Enum.map(args, &Subst.wk/1) ++ [{:var, 0}]
@@ -1588,6 +1610,7 @@ defmodule Muro.Check do
                      m,
                      dname,
                      cname,
+                     sm,
                      b,
                      t,
                      Subst.wk(mot),
@@ -1616,11 +1639,11 @@ defmodule Muro.Check do
 
   # A forced argument is substituted into the branch; the result is not a
   # subterm, so the step spends a unit of fuel (Agda: forceBr).
-  defp force_br(0, _book, _rs, _gamma, _m, _dname, _cname, _ty, _br, _mot, _args, _forces),
+  defp force_br(0, _book, _rs, _gamma, _m, _dname, _cname, _sm, _ty, _br, _mot, _args, _forces),
     do: {:error, @out_of_fuel}
 
-  defp force_br(k, book, rs, gamma, m, dname, cname, ty, br, mot, args, forces),
-    do: check_br(k - 1, book, rs, gamma, m, dname, cname, ty, br, mot, args, forces)
+  defp force_br(k, book, rs, gamma, m, dname, cname, sm, ty, br, mot, args, forces),
+    do: check_br(k - 1, book, rs, gamma, m, dname, cname, sm, ty, br, mot, args, forces)
 
   defp wk_forces(fs) do
     Enum.map(fs, fn

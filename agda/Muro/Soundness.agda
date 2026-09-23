@@ -80,9 +80,9 @@ lamRec rs q =
   let rs1 = extRec rs false (RecSt.nextOk rs)
   in if eqQty q erased then keepNext rs rs1 else rs1
 
-brRec : ∀ {n} → RecSt n → Qty → ℕ → Tm n → RecSt (suc n)
-brRec rs q di A =
-  let rec? = isDType di A
+brRec : ∀ {n} → RecSt n → Bool → Qty → ℕ → Tm n → RecSt (suc n)
+brRec rs sm q di A =
+  let rec? = sm ∧ isDType di A
       rs1  = extRec rs rec? rec?
   in if eqQty q erased then keepNext rs rs1 else rs1
 
@@ -150,18 +150,18 @@ checkCtorApp-sound : ∀ k σ {n} (rs : RecSt n) {Γ : Ctx n} m {di ps e X u d} 
     → Spine (ctor di ci) as e × (lookupCtor d ci ≡ ok c)
     × InstParams σ (closed (Ctor.ctype c)) ps T
     × (σ , Γ ⊢[ m ] T ▹ as ⇝ R ⊣ u) × (σ ⊢[ spec ] R ≈ X)
-checkBr-sound : ∀ k σ {n} (rs : RecSt n) {Γ : Ctx n} m di ci {np ty br D P args forces u} → GoodSig σ → FragCtx Γ
+checkBr-sound : ∀ k σ {n} (rs : RecSt n) {Γ : Ctx n} m di ci sm {np ty br D P args forces u} → GoodSig σ → FragCtx Γ
   → Frag ty → Frag br → Frag D → Frag P → FragL args → Tel di np ty → nparamsOf σ di ≡ np
   → forces ≡ noForces ty
-  → checkBr k σ rs Γ m di ci ty br (lam affine D P) args forces ≡ ok u
+  → checkBr k σ rs Γ m di ci sm ty br (lam affine D P) args forces ≡ ok u
   → ∃ λ X → BrTy σ di ci ty P args X × (σ , Γ ⊢[ m ] br ⇐ X ⊣ u)
-checkBrPi-sound : ∀ k σ {n} (rs : RecSt n) {Γ : Ctx n} m di ci {np q A B br D P args u} → GoodSig σ → FragCtx Γ
+checkBrPi-sound : ∀ k σ {n} (rs : RecSt n) {Γ : Ctx n} m di ci sm {np q A B br D P args u} → GoodSig σ → FragCtx Γ
   → Frag A → Frag B → Frag br → Frag D → Frag P → FragL args → Tel di np B → nparamsOf σ di ≡ np
-  → checkBrPi k σ rs Γ m di ci q A B br (lam affine D P) args (noForces (pi q A B)) ≡ ok u
+  → checkBrPi k σ rs Γ m di ci sm q A B br (lam affine D P) args (noForces (pi q A B)) ≡ ok u
   → ∃ λ X → BrTy σ di ci (pi q A B) P args X × (σ , Γ ⊢[ m ] br ⇐ X ⊣ u)
-checkBranches-sound : ∀ k σ {n} (rs : RecSt n) {Γ : Ctx n} m di {np params D P ci cs bs u} → GoodSig σ → FragCtx Γ
+checkBranches-sound : ∀ k σ {n} (rs : RecSt n) {Γ : Ctx n} m di sm {np params D P ci cs bs u} → GoodSig σ → FragCtx Γ
   → FragL params → Frag D → Frag P → FragL bs → CtorsOk di np cs → nparamsOf σ di ≡ np
-  → checkBranches k σ rs Γ m di params [] (lam affine D P) ci cs bs ≡ ok u
+  → checkBranches k σ rs Γ m di sm params [] (lam affine D P) ci cs bs ≡ ok u
   → σ , Γ ⊢[ m ] bs brs⟨ di , params , P , ci ⟩ cs ⊣ u
 
 ------------------------------------------------------------------------
@@ -339,7 +339,7 @@ infer-sound k σ rs {Γ = Γ} m G FΓ (f-mData {e = e} {P = P} {bs = bs} Fe FP F
       with checkTy k σ (extRec rs false false) (ext Γ affine (appsFrom (dty di) params)) P in meq
 ...     | fail _ = ⊥-elim (fail≢ok eq)
 ...     | ok tt
-      with checkBranches k σ rs Γ m di params [] (lam affine (appsFrom (dty di) params) P) 0 (DataDecl.ctors d) bs in beq
+      with checkBranches k σ rs Γ m di (scrutOk rs e) params [] (lam affine (appsFrom (dty di) params) P) 0 (DataDecl.ctors d) bs in beq
 ...       | fail _ = ⊥-elim (fail≢ok eq)
 ...       | ok bu with combine m eu bu in ceq
 ...         | fail _ = ⊥-elim (fail≢ok eq)
@@ -364,7 +364,7 @@ infer-sound k σ rs {Γ = Γ} m G FΓ (f-mData {e = e} {P = P} {bs = bs} Fe FP F
          (≈-≡ (trans (Spine-≡ sp) (cong (appsFrom (dty di)) (sym params≡args))))))
        leq nidx lps
        (checkTy-sound k σ (extRec rs false false) G (FragCtx-ext FΓ FD) FP meq)
-       (checkBranches-sound k σ rs m di {np = nparams d} G FΓ Fparams FD FP Fbs (ctorsOk {i = di} {d = d} G leq) (nparamsOf-ok {σ} {di} {d} leq) beq)
+       (checkBranches-sound k σ rs m di (scrutOk rs e) {np = nparams d} G FΓ Fparams FD FP Fbs (ctorsOk {i = di} {d = d} G leq) (nparamsOf-ok {σ} {di} {d} leq) beq)
        ceq
    , ≈-sym β-mot
 
@@ -680,7 +680,7 @@ checkCtorApp-sound k σ rs {Γ = Γ} m {di} {ps} {e} {X} G FΓ Fe Fps FX leq eq 
 -- checkBr: one branch along its constructor's telescope.
 ------------------------------------------------------------------------
 
-checkBr-sound k σ rs {Γ = Γ} m di ci {np} {ty} {br} {D} {P} {args} G FΓ Fty Fbr FD FP Fargs tl npeq refl eq
+checkBr-sound k σ rs {Γ = Γ} m di ci sm {np} {ty} {br} {D} {P} {args} G FΓ Fty Fbr FD FP Fargs tl npeq refl eq
   with whnf k σ ty in weq
 ... | fail _ = ⊥-elim (fail≢ok eq)
 ... | ok ty′ with Tel-whnf k σ tl weq
@@ -693,12 +693,12 @@ checkBr-sound k σ rs {Γ = Γ} m di ci {np} {ty} {br} {D} {P} {args} G FΓ Fty 
   _ , bt-end (sp-snoc sp) ≈-refl
     , ⇐-≈ (check-sound k σ rs m G FΓ Fbr (f-app (f-lam FD FP) (Frag-appsFrom f-ctor Fargs)) eq) β-mot
 ...     | tel-pi {q = q} {A = A} {B = B} tl′ | f-pi FA FB
-        with checkBrPi-sound k σ rs m di ci G FΓ FA FB Fbr FD FP Fargs tl′ npeq eq
+        with checkBrPi-sound k σ rs m di ci sm G FΓ FA FB Fbr FD FP Fargs tl′ npeq eq
 ...       | X , bt , Dbr = X , bt , Dbr
 
 -- the branch must be a λ for the next constructor argument (no
 -- argument is forced: the data type has no indices)
-checkBrPi-sound k σ rs {Γ = Γ} m di ci {q = q} {A = A} {B = B} {D = D} {P = P} {args = args} G FΓ FA FB (f-lam {q = q′} {A = A′} {t = t} FA′ Ft) FD FP Fargs tl npeq eq
+checkBrPi-sound k σ rs {Γ = Γ} m di ci sm {q = q} {A = A} {B = B} {D = D} {P = P} {args = args} G FΓ FA FB (f-lam {q = q′} {A = A′} {t = t} FA′ Ft) FD FP Fargs tl npeq eq
   with eqQty q q′ in qeq
 ... | false = ⊥-elim (fail≢ok eq)
 ... | true with eqQty-sound q q′ qeq
@@ -709,14 +709,14 @@ checkBrPi-sound k σ rs {Γ = Γ} m di ci {q = q} {A = A} {B = B} {D = D} {P = P
 ...       | ok tt with (if eqQty q reuse then isData k σ A >>= guard "+ requires a Data type" else ok tt) in req
 ...         | fail _ = ⊥-elim (fail≢ok eq)
 ...         | ok tt
-          with checkBr k σ (brRec rs q di A) (ext Γ q A) m di ci B t (lam affine (wk D) (ren (lift suc) P))
+          with checkBr k σ (brRec rs sm q di A) (ext Γ q A) m di ci sm B t (lam affine (wk D) (ren (lift suc) P))
                  (renList suc args ++ (var zero ∷ [])) (wkForces (noForces B)) in beq
 ...         | fail _ = ⊥-elim (fail≢ok eq)
 ...         | ok (u₀ Vec.∷ us) with checkBound m q u₀ in bq
 ...           | fail _ = ⊥-elim (fail≢ok eq)
 ...           | ok tt with ok-inj eq
 ...             | refl
-              with checkBr-sound k σ (brRec rs q di A) m di ci G (FragCtx-ext FΓ FA) FB Ft (Frag-wk FD)
+              with checkBr-sound k σ (brRec rs sm q di A) m di ci sm G (FragCtx-ext FΓ FA) FB Ft (Frag-wk FD)
                      (Frag-ren (lift suc) FP) (FragL-++ (FragL-ren suc Fargs) (fl-∷ f-var fl-[])) tl npeq
                      (wkForces-noForces (countPis B)) beq
 ...               | X , bt , Dt =
@@ -724,36 +724,36 @@ checkBrPi-sound k σ rs {Γ = Γ} m di ci {q = q} {A = A} {B = B} {D = D} {P = P
   , bt-pi ≈-refl (reuseOk-sound k σ q (GoodSig.frag G) FA req) bt
   , ⇐-lam (checkTy-sound k σ rs G FΓ FA′ teq) ≈-refl (conv-sound k σ (GoodSig.frag G) FA′ FA ceq)
       (reuseOk-sound k σ q (GoodSig.frag G) FA req) Dt bq
-checkBrPi-sound k σ rs m di ci G FΓ FA FB f-var FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB f-typ FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB (f-pi _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB (f-app _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB f-nat FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB f-ze FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB (f-su _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB f-unit FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB f-one FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB f-empty FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB f-dty FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB f-ctor FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB (f-mData _ _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB (f-mNat _ _ _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB (f-mEmp _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB (f-mUnit _ _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB (f-idt _ _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB f-rfl FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB (f-rwt _ _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB f-def FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
-checkBrPi-sound k σ rs m di ci G FΓ FA FB (f-ann _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB f-var FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB f-typ FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB (f-pi _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB (f-app _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB f-nat FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB f-ze FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB (f-su _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB f-unit FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB f-one FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB f-empty FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB f-dty FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB f-ctor FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB (f-mData _ _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB (f-mNat _ _ _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB (f-mEmp _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB (f-mUnit _ _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB (f-idt _ _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB f-rfl FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB (f-rwt _ _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB f-def FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB (f-ann _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
 
 ------------------------------------------------------------------------
 -- checkBranches: one branch per constructor, in order.
 ------------------------------------------------------------------------
 
-checkBranches-sound k σ rs m di G FΓ Fps FD FP fl-[] co-[] npeq eq with ok-inj eq
+checkBranches-sound k σ rs m di sm G FΓ Fps FD FP fl-[] co-[] npeq eq with ok-inj eq
 ... | refl = brs-[]
-checkBranches-sound k σ rs m di G FΓ Fps FD FP (fl-∷ _ _) co-[] npeq eq = ⊥-elim (fail≢ok eq)
-checkBranches-sound k σ {n} rs {Γ = Γ} m di {np} {params} {D} {P} {ci} G FΓ Fps FD FP fl-[] (co-∷ {c} {cs} Fc tlc rest) npeq eq
+checkBranches-sound k σ rs m di sm G FΓ Fps FD FP (fl-∷ _ _) co-[] npeq eq = ⊥-elim (fail≢ok eq)
+checkBranches-sound k σ {n} rs {Γ = Γ} m di sm {np} {params} {D} {P} {ci} G FΓ Fps FD FP fl-[] (co-∷ {c} {cs} Fc tlc rest) npeq eq
   with instParams k σ (closed (Ctor.ctype c)) params in ipeq
 ... | fail _ = ⊥-elim (fail≢ok eq)
 ... | ok ty with instParams-sound k σ (GoodSig.frag G) (Frag-closed Fc) Fps (Tel-ren fromZero tlc) ipeq
@@ -761,21 +761,21 @@ checkBranches-sound k σ {n} rs {Γ = Γ} m di {np} {params} {D} {P} {ci} G FΓ 
 ...     | fail _ = ⊥-elim (fail≢ok eq)
 ...     | ok r with forcePairs-tel k σ tl feq
 ...       | refl = ⊥-elim (fail≢ok eq)
-checkBranches-sound k σ {n} rs {Γ = Γ} m di {np} {params} {D} {P} {ci} G FΓ Fps FD FP (fl-∷ {t = b} {ts = bs} Fb Fbs′) (co-∷ {c} {cs} Fc tlc rest) npeq eq
+checkBranches-sound k σ {n} rs {Γ = Γ} m di sm {np} {params} {D} {P} {ci} G FΓ Fps FD FP (fl-∷ {t = b} {ts = bs} Fb Fbs′) (co-∷ {c} {cs} Fc tlc rest) npeq eq
   with instParams k σ (closed (Ctor.ctype c)) params in ipeq
 ... | fail _ = ⊥-elim (fail≢ok eq)
 ... | ok ty with instParams-sound k σ (GoodSig.frag G) (Frag-closed Fc) Fps (Tel-ren fromZero tlc) ipeq
 ...   | ip , Fty , tl rewrite npeq with forcePairs {n} {n} k σ np [] 0 ty in feq
 ...     | fail _ = ⊥-elim (fail≢ok eq)
 ...     | ok r with forcePairs-tel k σ tl feq
-...       | refl with checkBr k σ rs Γ m di ci ty b (lam affine D P) [] (noForces ty) in beq
+...       | refl with checkBr k σ rs Γ m di ci sm ty b (lam affine D P) [] (noForces ty) in beq
 ...         | fail _ = ⊥-elim (fail≢ok eq)
-...         | ok u with checkBranches k σ rs Γ m di params [] (lam affine D P) (suc ci) cs bs in ceq
+...         | ok u with checkBranches k σ rs Γ m di sm params [] (lam affine D P) (suc ci) cs bs in ceq
 ...           | fail _ = ⊥-elim (fail≢ok eq)
 ...           | ok v with ok-inj eq
-...             | refl with checkBr-sound k σ rs m di ci G FΓ Fty Fb FD FP fl-[] tl npeq refl beq
+...             | refl with checkBr-sound k σ rs m di ci sm G FΓ Fty Fb FD FP fl-[] tl npeq refl beq
 ...               | X , bt , Db =
-  brs-∷ ip bt Db (checkBranches-sound k σ rs m di G FΓ Fps FD FP Fbs′ rest npeq ceq)
+  brs-∷ ip bt Db (checkBranches-sound k σ rs m di sm G FΓ Fps FD FP Fbs′ rest npeq ceq)
 
 ------------------------------------------------------------------------
 -- checkTy: Type, a kind, or a small type (infer then conv with Type).

@@ -351,7 +351,7 @@ defmodule Muro.CheckTest do
     refute out =~ "lookup-ok"
     Code.eval_string(out)
     ones1 = {:vcons, 0, {:suc, 0}, :vnil}
-    assert Muro.Vecs.lookup({:suc, 0}, {:fzero, 0}, ones1) == {:suc, 0}
+    assert Muro.Vecs.lookup({:fzero, 0}, ones1) == {:suc, 0}
   end
 
   # Type is a sort. A kind (Π … → Type) is well-formed but is not a term of
@@ -492,6 +492,58 @@ defmodule Muro.CheckTest do
 
     assert {:error, msg} = Check.check_sig([bad | book])
     assert msg =~ "descend"
+  end
+
+  # The fields of a computed scrutinee are not smaller than anything: this
+  # `boom z` would unfold to itself, and `absurd` would be an evidence of
+  # Empty. Same rule as `match` on Nat (scrut_ok).
+  test "a field of a computed scrutinee is not smaller" do
+    src = """
+    data N : Type where
+      z : N
+      s : N → N
+
+    def P : spec Π (x : N) → Type :=
+      λ (x : N) →
+        match x motive (λ _ → Type)
+          | z => Unit
+          | s _ => Empty
+
+    def bump : run Π (n : N) → N :=
+      λ (n : N) → s n
+
+    def boom : evidence Π (n : N) → Empty :=
+      λ (n : N) →
+        match (bump n) motive (λ x → P x)
+          | z => tt
+          | s m => boom m
+
+    def absurd : evidence Empty :=
+      boom z
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "boom body"
+    assert msg =~ "descend"
+
+    # matching a λ-bound variable that is not an argument exposes nothing either
+    lam_src = """
+    data List (A : Type) : Type where
+      nil  : List A
+      cons : A → List A → List A
+
+    def bad : run Π (xs : List Nat) → Nat :=
+      λ (xs : List Nat) →
+        (λ (ys : List Nat) →
+          match ys motive (λ _ → Nat)
+            | nil => 0
+            | cons _ as => bad as) (cons 0 xs)
+    """
+
+    assert {:ok, book2} = Parser.parse(lam_src)
+    assert {:error, msg2} = Check.check_sig(book2)
+    assert msg2 =~ "descend"
   end
 
   test "non-descending Maybe recursion fails" do

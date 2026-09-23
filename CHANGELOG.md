@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.1
+
+A kernel fix. `match` on a `data` type marked every field of type `D …` as smaller, whatever the scrutinee was, so a self-call could descend on a field of a computed value (`match (f x) …`) or of a λ-bound variable that is not an argument. That accepted non-terminating `run` and `evidence` definitions, including an `evidence Empty`. `match` on `Nat` already required the scrutinee to be an argument or a smaller variable (`scrutOk`); `match` on a `data` type now does the same.
+
+### Checker (`Muro.Check`)
+
+- `checkBranches`, `checkBr`, `checkBrPi`, `forceBr` take the scrutinee flag `scrutOk rs e`; a field is smaller only if the flag holds and its type is `D …`. Elixir mirror: `check_branches`, `check_br`, `check_br_n`, `force_br` take `sm = scrut_ok(rs, e)`.
+- `Muro.Soundness`: `brRec`, `checkBr-sound`, `checkBrPi-sound`, `checkBranches-sound` carry the flag; the statements are otherwise unchanged (⊢ has no descent rule).
+- Test: a `boom`/`absurd` pair on a computed scrutinee and a λ-bound scrutinee are refused with `recursive call does not descend on a smaller argument`.
+
+### Examples and manual
+
+- `examples/vec.muro`, `agda/Muro/ExampleVec.agda`, `manual/indexed.md`: `lookup` erases its length `n` (`Π (-n : Nat)`), so `i : Fin n` is the argument recursion descends on and `j` from `fsuc m j` is smaller. Emitted `lookup/2` no longer takes the length.
+- `manual/language.md`, `manual/data.md`: the scrutinee of the `match` that exposes a smaller variable must be the argument being descended on or a smaller variable.
+
+### Package
+
+- Version 0.4.1.
+
 ## 0.4.0
 
 The checker is total and the soundness proof is `--safe`. `Muro.Check` carries no `TERMINATING` pragma: it is structurally recursive on the term, and fuel is spent only where a term is reduced. Running out of fuel is an error, never an unreduced term. All shipped examples check as before.

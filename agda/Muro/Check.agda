@@ -995,54 +995,56 @@ mutual
   -- A branch of match against the constructor's telescope ty: one λ per
   -- remaining Π (a forced argument is instantiated instead of bound),
   -- then the body against the motive at the constructor applied to the
-  -- arguments.
-  checkBr : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Tm n → Tm n → Tm n → List (Tm n) → List (Maybe (Tm n)) → Result (UseVec n)
-  checkBr k σ rs Γ m di ci ty br mot args forces with whnf k σ ty
+  -- arguments. sm: the scrutinee is a variable a self-call may descend
+  -- on (scrutOk), so a field of type D … is smaller; the fields of a
+  -- computed scrutinee are not smaller than anything.
+  checkBr : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Bool → Tm n → Tm n → Tm n → List (Tm n) → List (Maybe (Tm n)) → Result (UseVec n)
+  checkBr k σ rs Γ m di ci sm ty br mot args forces with whnf k σ ty
   ... | fail msg          = fail msg
-  ... | ok (pi q A B)     = checkBrPi k σ rs Γ m di ci q A B br mot args forces
+  ... | ok (pi q A B)     = checkBrPi k σ rs Γ m di ci sm q A B br mot args forces
   ... | ok ty′            =
     check k σ rs Γ m br
       (appsFrom mot
         (List._++_ (drop (nparamsOf σ di) (proj₂ (apps ty′)))
           (appsFrom (ctor di ci) args ∷ [])))
 
-  checkBrPi : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Qty → Tm n → Tm (suc n) → Tm n → Tm n → List (Tm n) → List (Maybe (Tm n)) → Result (UseVec n)
-  checkBrPi k σ rs Γ m di ci q A B (lam q′ A′ t) mot args (just u ∷ fs) =
+  checkBrPi : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Bool → Qty → Tm n → Tm (suc n) → Tm n → Tm n → List (Tm n) → List (Maybe (Tm n)) → Result (UseVec n)
+  checkBrPi k σ rs Γ m di ci sm q A B (lam q′ A′ t) mot args (just u ∷ fs) =
     guard "λ/Π quantity mismatch" (eqQty q q′) >>
     checkTy k σ rs Γ A′ >>
     conv k σ A′ A >>
-    forceBr k σ rs Γ m di ci (inst B u) (inst t u) mot (List._++_ args (u ∷ [])) fs
-  checkBrPi k σ rs Γ m di ci q A B (lam q′ A′ t) mot args (nothing ∷ fs) =
+    forceBr k σ rs Γ m di ci sm (inst B u) (inst t u) mot (List._++_ args (u ∷ [])) fs
+  checkBrPi k σ rs Γ m di ci sm q A B (lam q′ A′ t) mot args (nothing ∷ fs) =
     guard "λ/Π quantity mismatch" (eqQty q q′) >>
     checkTy k σ rs Γ A′ >>
     conv k σ A′ A >>
     (if eqQty q reuse then isData k σ A >>= guard "+ requires a Data type" else ok tt) >>
-    let rec? = isDType di A
+    let rec? = sm ∧ isDType di A
         rs1  = extRec rs rec? rec?
         rs′  = if eqQty q erased then keepNext rs rs1 else rs1
         args′ = List._++_ (renList suc args) (var zero ∷ [])
-    in checkBr k σ rs′ (ext Γ q A) m di ci B t (wk mot) args′ (wkForces fs) >>= λ uses →
+    in checkBr k σ rs′ (ext Γ q A) m di ci sm B t (wk mot) args′ (wkForces fs) >>= λ uses →
     let (u₀ , us) = headTailU uses
     in checkBound m q u₀ >> ok us
-  checkBrPi k σ rs Γ m di ci q A B _ mot args (_ ∷ _) =
+  checkBrPi k σ rs Γ m di ci sm q A B _ mot args (_ ∷ _) =
     fail "match branch expected a λ for a constructor argument"
-  checkBrPi k σ rs Γ m di ci q A B _ mot args [] =
+  checkBrPi k σ rs Γ m di ci sm q A B _ mot args [] =
     fail "constructor telescope / force list mismatch"
 
   -- A forced argument is substituted into the branch; the result is not a
   -- subterm, so the step spends a unit of fuel.
-  forceBr : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Tm n → Tm n → Tm n → List (Tm n) → List (Maybe (Tm n)) → Result (UseVec n)
-  forceBr zero    _ _  _ _ _  _  _  _  _   _    _      = fail outOfFuel
-  forceBr (suc k) σ rs Γ m di ci ty br mot args forces = checkBr k σ rs Γ m di ci ty br mot args forces
+  forceBr : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Bool → Tm n → Tm n → Tm n → List (Tm n) → List (Maybe (Tm n)) → Result (UseVec n)
+  forceBr zero    _ _  _ _ _  _  _  _  _  _   _    _      = fail outOfFuel
+  forceBr (suc k) σ rs Γ m di ci sm ty br mot args forces = checkBr k σ rs Γ m di ci sm ty br mot args forces
 
   nparamsOf : Sig → ℕ → ℕ
   nparamsOf σ i with lookupData σ i
   ... | ok d   = nparams d
   ... | fail _ = 0
 
-  checkBranches : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → List (Tm n) → List (Tm n) → Tm n → ℕ → List Ctor → List (Tm n) → Result (UseVec n)
-  checkBranches _ _ _ _ _ _ _ _ _ _ [] [] = ok u0s
-  checkBranches k σ rs Γ m di params idxs mot ci (c ∷ cs) bs =
+  checkBranches : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → Bool → List (Tm n) → List (Tm n) → Tm n → ℕ → List Ctor → List (Tm n) → Result (UseVec n)
+  checkBranches _ _ _ _ _ _ _ _ _ _ _ [] [] = ok u0s
+  checkBranches k σ rs Γ m di sm params idxs mot ci (c ∷ cs) bs =
     instParams k σ (closed (Ctor.ctype c)) params >>= λ rest →
     analyzeForces k σ (nparamsOf σ di) idxs rest >>= λ where
       -- a clash: the constructor cannot produce the expected indices,
@@ -1051,15 +1053,15 @@ mutual
         case bs of λ where
           []        → fail ("missing branch for " ++ Ctor.cname c)
           (_ ∷ bs′) →
-            checkBranches k σ rs Γ m di params idxs mot (suc ci) cs bs′
+            checkBranches k σ rs Γ m di sm params idxs mot (suc ci) cs bs′
       (just forces) →
         case bs of λ where
           []        → fail ("missing branch for " ++ Ctor.cname c)
           (b ∷ bs′) →
-            checkBr k σ rs Γ m di ci rest b mot [] forces >>= λ u →
-            checkBranches k σ rs Γ m di params idxs mot (suc ci) cs bs′ >>= λ v →
+            checkBr k σ rs Γ m di ci sm rest b mot [] forces >>= λ u →
+            checkBranches k σ rs Γ m di sm params idxs mot (suc ci) cs bs′ >>= λ v →
             ok (combineAlt m u v)
-  checkBranches _ _ _ _ _ _ _ _ _ _ [] (_ ∷ _) =
+  checkBranches _ _ _ _ _ _ _ _ _ _ _ [] (_ ∷ _) =
     fail "match branch count does not match constructors"
 
   firstMotLam : ∀ {n} → ℕ → DataDecl → List (Tm n) → Tm (suc n) → Tm n
@@ -1203,7 +1205,7 @@ mutual
     lookupData σ di >>= λ d →
     checkMotive k σ rs Γ di params idxs P >>
     let motFun = firstMotLam di d params P
-    in checkBranches k σ rs Γ m di params idxs motFun 0 (DataDecl.ctors d) bs >>= λ bu →
+    in checkBranches k σ rs Γ m di (scrutOk rs e) params idxs motFun 0 (DataDecl.ctors d) bs >>= λ bu →
     combine m eu bu >>= λ uses →
     ok (appsFrom motFun (List._++_ idxs (e ∷ [])) , uses)
 

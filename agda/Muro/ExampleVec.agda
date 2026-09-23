@@ -40,7 +40,7 @@ vconsTy =
 lookupTy : ∀ {V} → PTm V
 lookupTy =
   pi erased typ (λ A →
-  pi affine nat (λ n →
+  pi erased nat (λ n →
   pi affine (app (dty 0) (var n)) (λ _ →
   pi affine (app (app (dty 1) (var A)) (var n)) (λ _ →
     var A))))
@@ -48,7 +48,7 @@ lookupTy =
 lookupTm : ∀ {V} → PTm V
 lookupTm =
   lam erased typ (λ A →
-  lam affine nat (λ n →
+  lam erased nat (λ n →
   lam affine (app (dty 0) (var n)) (λ i →
   lam affine (app (app (dty 1) (var A)) (var n)) (λ xs →
     app
