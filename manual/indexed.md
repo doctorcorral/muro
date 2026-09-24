@@ -53,7 +53,7 @@ def lookup : run Π (-A : Type) → Π (-n : Nat) → Π (i : Fin n) → Π (xs 
               | vcons p a as => lookup A p j as)) xs
 ```
 
-`n` is erased: it only appears in types. That makes `i` the first non-erased argument, the one a self-call must descend on, and `j` (from `fsuc m j`, a field of the argument `i`) is smaller. `as` is a field of `ys`, a λ-bound variable, and is not smaller: matching a variable that is not an argument, or a computed value, exposes nothing a self-call may descend on.
+`n` is erased: it only appears in types, and the emitted `lookup` does not take it. `lookup` descends on `i`: `j` (from `fsuc m j`, a field of `i`) is passed at that position. `as` is a field of `ys`, a λ-bound variable, and is not smaller: matching a variable that is not an argument, or a computed value, exposes nothing a self-call may descend on. Keeping `n` unerased also checks; the checker finds the argument to descend on.
 
 The `vnil` branches are well-typed empty cases: conversion has already forced `suc(m)` against `0` to be impossible in a consistent book, but the surface still asks you to write a branch. The body `0` is a placeholder the checker accepts in that impossible corner of the motive; a real lookup never takes it when `Fin n` and `Vec A n` agree.
 

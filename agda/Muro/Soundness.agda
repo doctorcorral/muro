@@ -47,8 +47,9 @@ open import Muro.Check
   using (whnf; conv; apps; viewPi; viewId; viewData; isData; instParams; isRunType;
          infer; check; checkTy; checkAgainst; checkCtorApp; inferCtorSpine; inferConv;
          checkLam; checkBr; checkBrPi; checkBranches; checkMotive; firstMotLam; nparamsOf;
-         analyzeForces; forcePairs; countPis; wkForces; RecSt; extRec; keepNext; scrutOk; checkRec; floatIdOk;
-         isDType; checkDef; checkDefs; checkDatas; checkSig; emptyRec; defRec)
+         analyzeForces; forcePairs; countPis; wkForces; RecSt; extRec; lamRec; scrutOk; checkRec; selfApplied;
+         inferApp; inferHead; inferDef; floatIdOk;
+         isDType; checkDef; checkBody; checkBodyAt; retryBody; checkAt; argPositions; checkDefs; checkDatas; checkSig; emptyRec; defRec)
 open import Muro.Judgement
 open import Muro.Wall using (spec-⇒-uses)
 open import Muro.Typing using (typ-ext-suc; ≈-≡)
@@ -74,17 +75,10 @@ eqMode-sound run run _ = refl
 eqMode-sound evid evid _ = refl
 eqMode-sound spec spec _ = refl
 
--- the recursion state Check uses under a λ / a match binder
-lamRec : ∀ {n} → RecSt n → Qty → RecSt (suc n)
-lamRec rs q =
-  let rs1 = extRec rs false (RecSt.nextOk rs)
-  in if eqQty q erased then keepNext rs rs1 else rs1
-
-brRec : ∀ {n} → RecSt n → Bool → Qty → ℕ → Tm n → RecSt (suc n)
-brRec rs sm q di A =
-  let rec? = sm ∧ isDType di A
-      rs1  = extRec rs rec? rec?
-  in if eqQty q erased then keepNext rs rs1 else rs1
+-- the recursion state Check uses under a match binder (under a λ it is
+-- Check.lamRec)
+brRec : ∀ {n} → RecSt n → Bool → ℕ → Tm n → RecSt (suc n)
+brRec rs sm di A = extRec rs (sm ∧ isDType di A) (sm ∧ isDType di A)
 
 viewPi-≈ : ∀ k σ {n} {T : Tm n} {q A B} → FragSig σ → Frag T
   → viewPi k σ T ≡ ok (q , A , B) → σ ⊢[ spec ] T ≈ pi q A B
@@ -119,6 +113,15 @@ viewId-Frag k σ fs FT eq with whnf-Frag k σ fs FT (viewId-sound k σ eq)
 infer-sound : ∀ k σ {n} (rs : RecSt n) {Γ : Ctx n} m {e A u} → GoodSig σ → FragCtx Γ → Frag e
   → infer k σ rs Γ m e ≡ ok (A , u)
   → Frag A × ∃ λ A′ → (σ , Γ ⊢[ m ] e ⇒ A′ ⊣ u) × (σ ⊢[ spec ] A′ ≈ A)
+inferApp-sound : ∀ k σ {n} (rs : RecSt n) {Γ : Ctx n} m {f a A u} → GoodSig σ → FragCtx Γ → Frag f → Frag a
+  → inferApp k σ rs Γ m f a ≡ ok (A , u)
+  → Frag A × ∃ λ A′ → (σ , Γ ⊢[ m ] app f a ⇒ A′ ⊣ u) × (σ ⊢[ spec ] A′ ≈ A)
+inferHead-sound : ∀ k σ {n} (rs : RecSt n) {Γ : Ctx n} m {e A u} → GoodSig σ → FragCtx Γ → Frag e
+  → inferHead k σ rs Γ m e ≡ ok (A , u)
+  → Frag A × ∃ λ A′ → (σ , Γ ⊢[ m ] e ⇒ A′ ⊣ u) × (σ ⊢[ spec ] A′ ≈ A)
+inferDef-sound : ∀ k σ {n} (rs : RecSt n) {Γ : Ctx n} m {i A u} → GoodSig σ → FragCtx Γ
+  → inferDef k σ rs Γ m i ≡ ok (A , u)
+  → Frag A × ∃ λ A′ → (σ , Γ ⊢[ m ] def i ⇒ A′ ⊣ u) × (σ ⊢[ spec ] A′ ≈ A)
 check-sound : ∀ k σ {n} (rs : RecSt n) {Γ : Ctx n} m {e A u} → GoodSig σ → FragCtx Γ → Frag e → Frag A
   → check k σ rs Γ m e A ≡ ok u → σ , Γ ⊢[ m ] e ⇐ A ⊣ u
 checkTy-sound : ∀ k σ {n} (rs : RecSt n) {Γ : Ctx n} {A} → GoodSig σ → FragCtx Γ → Frag A
@@ -224,73 +227,24 @@ infer-sound k σ rs {Γ = Γ} m G FΓ (f-lam {q = q} {A = A} {t = t} FA Ft) eq w
 ... | fail _ = ⊥-elim (fail≢ok eq)
 ... | ok tt with (if eqQty q reuse then isData k σ A >>= guard "+ requires a Data type" else ok tt) in req
 ...   | fail _ = ⊥-elim (fail≢ok eq)
-...   | ok tt with infer k σ (lamRec rs q) (ext Γ q A) m t in ieq
+...   | ok tt with infer k σ (lamRec rs) (ext Γ q A) m t in ieq
 ...     | fail _ = ⊥-elim (fail≢ok eq)
 ...     | ok (B , u₀ Vec.∷ us) with checkBound m q u₀ in beq
 ...       | fail _ = ⊥-elim (fail≢ok eq)
 ...       | ok tt with ok-inj eq
-...         | refl with infer-sound k σ (lamRec rs q) m G (FragCtx-ext FΓ FA) Ft ieq
+...         | refl with infer-sound k σ (lamRec rs) m G (FragCtx-ext FΓ FA) Ft ieq
 ...           | FB , B′ , D , c = f-pi FA FB , _
             , ⇒-lam (checkTy-sound k σ rs G FΓ FA teq) (reuseOk-sound k σ q (GoodSig.frag G) FA req) D beq
             , ≈-pi ≈-refl c
 
--- application
-infer-sound k σ rs {Γ = Γ} m G FΓ (f-app {f = f} {a = a} Ff Fa) eq with infer k σ rs Γ m f in feq
+-- application: the head as a head, then the descent check on the
+-- maximal spine (checkRec has no bearing on ⊢)
+infer-sound k σ rs {Γ = Γ} m G FΓ (f-app {f = f} {a = a} Ff Fa) eq with inferApp k σ rs Γ m f a in aeq
 ... | fail _ = ⊥-elim (fail≢ok eq)
-... | ok (ft , fu) with viewPi k σ ft in peq
+... | ok r with checkRec m rs (app f a)
 ...   | fail _ = ⊥-elim (fail≢ok eq)
-...   | ok (affine , A , B) with check k σ rs Γ m a A in aeq
-...     | fail _ = ⊥-elim (fail≢ok eq)
-...     | ok au with appUses σ m f fu au in ueq
-...       | fail _ = ⊥-elim (fail≢ok eq)
-...       | ok uses with checkRec k σ m rs (app f a)
-...         | fail _ = ⊥-elim (fail≢ok eq)
-...         | ok _ with ok-inj eq
-...           | refl with infer-sound k σ rs m G FΓ Ff feq
-...             | Fft , F′ , Df , c with viewPi-Frag k σ (GoodSig.frag G) Fft peq
-...               | FA , FB = Frag-inst FB Fa , _
-                , ⇒-app-aff Df (≈-trans c (viewPi-≈ k σ (GoodSig.frag G) Fft peq))
-                    (check-sound k σ rs m G FΓ Fa FA aeq) ueq
-                , ≈-refl
-infer-sound k σ rs {Γ = Γ} m G FΓ (f-app {f = f} {a = a} Ff Fa) eq | ok (ft , fu) | ok (reuse , A , B) with isData k σ A in deq
-...     | fail _ = ⊥-elim (fail≢ok eq)
-...     | ok false = ⊥-elim (fail≢ok eq)
-...     | ok true with check k σ rs Γ m a A in aeq
-...       | fail _ = ⊥-elim (fail≢ok eq)
-...       | ok au with appUses σ m f fu au in ueq
-...         | fail _ = ⊥-elim (fail≢ok eq)
-...         | ok uses with checkRec k σ m rs (app f a)
-...           | fail _ = ⊥-elim (fail≢ok eq)
-...           | ok _ with ok-inj eq
-...             | refl with infer-sound k σ rs m G FΓ Ff feq
-...               | Fft , F′ , Df , c with viewPi-Frag k σ (GoodSig.frag G) Fft peq
-...                 | FA , FB = Frag-inst FB Fa , _
-                  , ⇒-app-reuse Df (≈-trans c (viewPi-≈ k σ (GoodSig.frag G) Fft peq))
-                      (isData-sound k σ (GoodSig.frag G) FA deq)
-                      (check-sound k σ rs m G FΓ Fa FA aeq) ueq
-                  , ≈-refl
-infer-sound k σ rs {Γ = Γ} m G FΓ (f-app {f = f} {a = a} Ff Fa) eq | ok (ft , fu) | ok (erased , A , B) with check k σ rs Γ spec a A in aeq
-...     | fail _ = ⊥-elim (fail≢ok eq)
-...     | ok au with eqMode m spec in meq
-...       | true with eqMode-sound m spec meq
-...         | refl with ok-inj eq
-...           | refl with infer-sound k σ rs spec G FΓ Ff feq
-...             | Fft , F′ , Df , c with spec-⇒-uses Df
-...               | refl with viewPi-Frag k σ (GoodSig.frag G) Fft peq
-...                 | FA , FB = Frag-inst FB Fa , _
-                  , ⇒-app-era Df (≈-trans c (viewPi-≈ k σ (GoodSig.frag G) Fft peq))
-                      (check-sound k σ rs spec G FΓ Fa FA aeq)
-                  , ≈-refl
-infer-sound k σ rs {Γ = Γ} m G FΓ (f-app {f = f} {a = a} Ff Fa) eq | ok (ft , fu) | ok (erased , A , B) | ok au | false
-  with checkRec k σ m rs (app f a)
-...         | fail _ = ⊥-elim (fail≢ok eq)
-...         | ok _ with ok-inj eq
-...           | refl with infer-sound k σ rs m G FΓ Ff feq
-...             | Fft , F′ , Df , c with viewPi-Frag k σ (GoodSig.frag G) Fft peq
-...               | FA , FB = Frag-inst FB Fa , _
-                , ⇒-app-era Df (≈-trans c (viewPi-≈ k σ (GoodSig.frag G) Fft peq))
-                    (check-sound k σ rs spec G FΓ Fa FA aeq)
-                , ≈-refl
+...   | ok tt with ok-inj eq
+...     | refl = inferApp-sound k σ rs m G FΓ Ff Fa aeq
 
 -- Nat
 infer-sound k σ rs run G FΓ f-nat eq = ⊥-elim (fail≢ok eq)
@@ -453,21 +407,10 @@ infer-sound k σ rs {Γ = Γ} m G FΓ (f-rwt {e = e} {P = P} {t = t} Fe FP Ft) e
                   (check-sound k σ rs m G FΓ Ft (Frag-inst FP Fr) teq)
               , ≈-refl
 
--- definitions
-infer-sound k σ {n} rs m G FΓ (f-def {i = i}) eq with lookupDef σ i in leq
+-- definitions: the self-application test has no bearing on ⊢
+infer-sound k σ {n} rs m G FΓ (f-def {i = i}) eq with selfApplied m rs i
 ... | fail _ = ⊥-elim (fail≢ok eq)
-... | ok d with allowedDef (Def.dmode d) m in aeq
-...   | false = ⊥-elim (fail≢ok eq)
-...   | true with eqMode m run
-...     | false with ok-inj eq
-...       | refl = Frag-closed (proj₁ (FragSig.defs (GoodSig.frag G) i d leq)) , _
-                 , ⇒-def leq aeq , ≈-refl
-infer-sound k σ {n} rs m G FΓ (f-def {i = i}) eq | ok d | true | true with isRunType k σ (closed {n} (Def.dtype d))
-...       | fail _ = ⊥-elim (fail≢ok eq)
-...       | ok false = ⊥-elim (fail≢ok eq)
-...       | ok true with ok-inj eq
-...         | refl = Frag-closed (proj₁ (FragSig.defs (GoodSig.frag G) i d leq)) , _
-                   , ⇒-def leq aeq , ≈-refl
+... | ok tt = inferDef-sound k σ rs m G FΓ eq
 
 -- annotation
 infer-sound k σ rs {Γ = Γ} m G FΓ (f-ann {e = e} {A = A} Fe FA) eq with checkTy k σ rs Γ A in teq
@@ -480,12 +423,111 @@ infer-sound k σ rs {Γ = Γ} m G FΓ (f-ann {e = e} {A = A} Fe FA) eq with chec
       , ≈-refl
 
 ------------------------------------------------------------------------
--- check
+-- inferApp / inferHead / inferDef: the head of a spine.
+------------------------------------------------------------------------
+
+-- an application: the head as a head
+inferApp-sound k σ rs {Γ = Γ} m {f = f} {a = a} G FΓ Ff Fa eq with inferHead k σ rs Γ m f in feq
+... | fail _ = ⊥-elim (fail≢ok eq)
+... | ok (ft , fu) with viewPi k σ ft in peq
+...   | fail _ = ⊥-elim (fail≢ok eq)
+...   | ok (affine , A , B) with check k σ rs Γ m a A in aeq
+...     | fail _ = ⊥-elim (fail≢ok eq)
+...     | ok au with appUses σ m f fu au in ueq
+...       | fail _ = ⊥-elim (fail≢ok eq)
+...       | ok uses with ok-inj eq
+...           | refl with inferHead-sound k σ rs m G FΓ Ff feq
+...             | Fft , F′ , Df , c with viewPi-Frag k σ (GoodSig.frag G) Fft peq
+...               | FA , FB = Frag-inst FB Fa , _
+                , ⇒-app-aff Df (≈-trans c (viewPi-≈ k σ (GoodSig.frag G) Fft peq))
+                    (check-sound k σ rs m G FΓ Fa FA aeq) ueq
+                , ≈-refl
+inferApp-sound k σ rs {Γ = Γ} m {f = f} {a = a} G FΓ Ff Fa eq | ok (ft , fu) | ok (reuse , A , B) with isData k σ A in deq
+...     | fail _ = ⊥-elim (fail≢ok eq)
+...     | ok false = ⊥-elim (fail≢ok eq)
+...     | ok true with check k σ rs Γ m a A in aeq
+...       | fail _ = ⊥-elim (fail≢ok eq)
+...       | ok au with appUses σ m f fu au in ueq
+...         | fail _ = ⊥-elim (fail≢ok eq)
+...         | ok uses with ok-inj eq
+...             | refl with inferHead-sound k σ rs m G FΓ Ff feq
+...               | Fft , F′ , Df , c with viewPi-Frag k σ (GoodSig.frag G) Fft peq
+...                 | FA , FB = Frag-inst FB Fa , _
+                  , ⇒-app-reuse Df (≈-trans c (viewPi-≈ k σ (GoodSig.frag G) Fft peq))
+                      (isData-sound k σ (GoodSig.frag G) FA deq)
+                      (check-sound k σ rs m G FΓ Fa FA aeq) ueq
+                  , ≈-refl
+inferApp-sound k σ rs {Γ = Γ} m {f = f} {a = a} G FΓ Ff Fa eq | ok (ft , fu) | ok (erased , A , B) with check k σ rs Γ spec a A in aeq
+...     | fail _ = ⊥-elim (fail≢ok eq)
+...     | ok au with eqMode m spec in meq
+...       | true with eqMode-sound m spec meq
+...         | refl with ok-inj eq
+...           | refl with inferHead-sound k σ rs spec G FΓ Ff feq
+...             | Fft , F′ , Df , c with spec-⇒-uses Df
+...               | refl with viewPi-Frag k σ (GoodSig.frag G) Fft peq
+...                 | FA , FB = Frag-inst FB Fa , _
+                  , ⇒-app-era Df (≈-trans c (viewPi-≈ k σ (GoodSig.frag G) Fft peq))
+                      (check-sound k σ rs spec G FΓ Fa FA aeq)
+                  , ≈-refl
+inferApp-sound k σ rs {Γ = Γ} m {f = f} {a = a} G FΓ Ff Fa eq | ok (ft , fu) | ok (erased , A , B) | ok au | false
+  with ok-inj eq
+...           | refl with inferHead-sound k σ rs m G FΓ Ff feq
+...             | Fft , F′ , Df , c with viewPi-Frag k σ (GoodSig.frag G) Fft peq
+...               | FA , FB = Frag-inst FB Fa , _
+                , ⇒-app-era Df (≈-trans c (viewPi-≈ k σ (GoodSig.frag G) Fft peq))
+                    (check-sound k σ rs spec G FΓ Fa FA aeq)
+                , ≈-refl
+
+inferDef-sound k σ {n} rs m {i = i} G FΓ eq with lookupDef σ i in leq
+... | fail _ = ⊥-elim (fail≢ok eq)
+... | ok d with allowedDef (Def.dmode d) m in aeq
+...   | false = ⊥-elim (fail≢ok eq)
+...   | true with eqMode m run
+...     | false with ok-inj eq
+...       | refl = Frag-closed (proj₁ (FragSig.defs (GoodSig.frag G) i d leq)) , _
+                 , ⇒-def leq aeq , ≈-refl
+inferDef-sound k σ {n} rs m {i = i} G FΓ eq | ok d | true | true with isRunType k σ (closed {n} (Def.dtype d))
+...       | fail _ = ⊥-elim (fail≢ok eq)
+...       | ok false = ⊥-elim (fail≢ok eq)
+...       | ok true with ok-inj eq
+...         | refl = Frag-closed (proj₁ (FragSig.defs (GoodSig.frag G) i d leq)) , _
+                   , ⇒-def leq aeq , ≈-refl
+
+-- the head of a spine: an application or a definition is inferred as a
+-- head, anything else as a term
+inferHead-sound k σ rs m G FΓ (f-app Ff Fa) eq = inferApp-sound k σ rs m G FΓ Ff Fa eq
+inferHead-sound k σ rs m G FΓ f-def eq = inferDef-sound k σ rs m G FΓ eq
+inferHead-sound k σ rs m G FΓ f-var eq = infer-sound k σ rs m G FΓ f-var eq
+inferHead-sound k σ rs m G FΓ f-typ eq = infer-sound k σ rs m G FΓ f-typ eq
+inferHead-sound k σ rs m G FΓ (f-pi FA FB) eq = infer-sound k σ rs m G FΓ (f-pi FA FB) eq
+inferHead-sound k σ rs m G FΓ (f-lam FA Ft) eq = infer-sound k σ rs m G FΓ (f-lam FA Ft) eq
+inferHead-sound k σ rs m G FΓ f-nat eq = infer-sound k σ rs m G FΓ f-nat eq
+inferHead-sound k σ rs m G FΓ f-ze eq = infer-sound k σ rs m G FΓ f-ze eq
+inferHead-sound k σ rs m G FΓ (f-su Ft) eq = infer-sound k σ rs m G FΓ (f-su Ft) eq
+inferHead-sound k σ rs m G FΓ f-unit eq = infer-sound k σ rs m G FΓ f-unit eq
+inferHead-sound k σ rs m G FΓ f-one eq = infer-sound k σ rs m G FΓ f-one eq
+inferHead-sound k σ rs m G FΓ f-empty eq = infer-sound k σ rs m G FΓ f-empty eq
+inferHead-sound k σ rs m G FΓ f-dty eq = infer-sound k σ rs m G FΓ f-dty eq
+inferHead-sound k σ rs m G FΓ f-ctor eq = infer-sound k σ rs m G FΓ f-ctor eq
+inferHead-sound k σ rs m G FΓ (f-mData Fe FP Fbs) eq = infer-sound k σ rs m G FΓ (f-mData Fe FP Fbs) eq
+inferHead-sound k σ rs m G FΓ (f-mNat Fe FP Fz Fs) eq = infer-sound k σ rs m G FΓ (f-mNat Fe FP Fz Fs) eq
+inferHead-sound k σ rs m G FΓ (f-mEmp Fe FP) eq = infer-sound k σ rs m G FΓ (f-mEmp Fe FP) eq
+inferHead-sound k σ rs m G FΓ (f-mUnit Fe FP Fu) eq = infer-sound k σ rs m G FΓ (f-mUnit Fe FP Fu) eq
+inferHead-sound k σ rs m G FΓ (f-idt FA Fa Fb) eq = infer-sound k σ rs m G FΓ (f-idt FA Fa Fb) eq
+inferHead-sound k σ rs m G FΓ f-rfl eq = infer-sound k σ rs m G FΓ f-rfl eq
+inferHead-sound k σ rs m G FΓ (f-rwt Fe FP Ft) eq = infer-sound k σ rs m G FΓ (f-rwt Fe FP Ft) eq
+inferHead-sound k σ rs m G FΓ (f-ann Fe FA) eq = infer-sound k σ rs m G FΓ (f-ann Fe FA) eq
+
+
 ------------------------------------------------------------------------
 
 -- λ against a type: viewPi, or infer and convert (checkLam-sound is
 -- split on the view so that the fragment witness is matched in a clause
 -- head)
+------------------------------------------------------------------------
+-- check
+------------------------------------------------------------------------
+
 check-sound k σ rs m {e = lam q A t} {A = T} G FΓ Fe FT eq = checkLam-sound k σ rs m G FΓ Fe FT (viewPi k σ T) refl eq
 
 -- refl against a type
@@ -537,7 +579,7 @@ checkLam-sound k σ rs {Γ = Γ} m {T = T} G FΓ (f-lam {q = q} {A = A} {t = t} 
 ...       | fail _ = ⊥-elim (fail≢ok eq)
 ...       | ok tt with (if eqQty q reuse then isData k σ A′ >>= guard "+ requires a Data type" else ok tt) in req
 ...         | fail _ = ⊥-elim (fail≢ok eq)
-...         | ok tt with check k σ (lamRec rs q) (ext Γ q A′) m t B in beq
+...         | ok tt with check k σ (lamRec rs) (ext Γ q A′) m t B in beq
 ...           | fail _ = ⊥-elim (fail≢ok eq)
 ...           | ok (u₀ Vec.∷ us) with checkBound m q u₀ in bq
 ...             | fail _ = ⊥-elim (fail≢ok eq)
@@ -546,7 +588,7 @@ checkLam-sound k σ rs {Γ = Γ} m {T = T} G FΓ (f-lam {q = q} {A = A} {t = t} 
 ...                 | FA′ , FB =
   ⇐-lam (checkTy-sound k σ rs G FΓ FA teq) (viewPi-≈ k σ (GoodSig.frag G) FT peq)
     (conv-sound k σ (GoodSig.frag G) FA FA′ ceq) (reuseOk-sound k σ q (GoodSig.frag G) FA′ req)
-    (check-sound k σ (lamRec rs q) m G (FragCtx-ext FΓ FA′) Ft FB beq) bq
+    (check-sound k σ (lamRec rs) m G (FragCtx-ext FΓ FA′) Ft FB beq) bq
 checkLam-sound k σ rs m G FΓ f-var FT (ok _) peq eq = ⊥-elim (fail≢ok eq)
 checkLam-sound k σ rs m G FΓ f-typ FT (ok _) peq eq = ⊥-elim (fail≢ok eq)
 checkLam-sound k σ rs m G FΓ (f-pi _ _) FT (ok _) peq eq = ⊥-elim (fail≢ok eq)
@@ -709,14 +751,14 @@ checkBrPi-sound k σ rs {Γ = Γ} m di ci sm {q = q} {A = A} {B = B} {D = D} {P 
 ...       | ok tt with (if eqQty q reuse then isData k σ A >>= guard "+ requires a Data type" else ok tt) in req
 ...         | fail _ = ⊥-elim (fail≢ok eq)
 ...         | ok tt
-          with checkBr k σ (brRec rs sm q di A) (ext Γ q A) m di ci sm B t (lam affine (wk D) (ren (lift suc) P))
+          with checkBr k σ (brRec rs sm di A) (ext Γ q A) m di ci sm B t (lam affine (wk D) (ren (lift suc) P))
                  (renList suc args ++ (var zero ∷ [])) (wkForces (noForces B)) in beq
 ...         | fail _ = ⊥-elim (fail≢ok eq)
 ...         | ok (u₀ Vec.∷ us) with checkBound m q u₀ in bq
 ...           | fail _ = ⊥-elim (fail≢ok eq)
 ...           | ok tt with ok-inj eq
 ...             | refl
-              with checkBr-sound k σ (brRec rs sm q di A) m di ci sm G (FragCtx-ext FΓ FA) FB Ft (Frag-wk FD)
+              with checkBr-sound k σ (brRec rs sm di A) m di ci sm G (FragCtx-ext FΓ FA) FB Ft (Frag-wk FD)
                      (Frag-ren (lift suc) FP) (FragL-++ (FragL-ren suc Fargs) (fl-∷ f-var fl-[])) tl npeq
                      (wkForces-noForces (countPis B)) beq
 ...               | X , bt , Dt =
@@ -857,14 +899,37 @@ DefOk σ d = (σ , Vec.[] ⊢ Def.dtype d wf)
 
 checkDef-sound : ∀ k σ i {d} → GoodSig σ → lookupDef σ i ≡ ok d
   → checkDef k σ i ≡ ok tt → DefOk σ d
+-- checkBody tries the argument positions; whichever succeeds, the body
+-- was checked with some recursion state
+retryBody-sound : ∀ k σ i d msg ps {u} → retryBody k σ i d msg ps ≡ ok u
+  → ∃ λ rs → check k σ rs Vec.[] (Def.dmode d) (Def.dbody d) (Def.dtype d) ≡ ok u
+retryBody-sound k σ i d msg [] eq = ⊥-elim (fail≢ok eq)
+retryBody-sound k σ i d msg (p ∷ ps) eq with checkAt k σ i d p in peq
+... | ok u with ok-inj eq
+...   | refl = defRec i p , peq
+retryBody-sound k σ i d msg (p ∷ ps) eq | fail _ = retryBody-sound k σ i d msg ps eq
+
+checkBodyAt-sound : ∀ k σ i d ps {u} → checkBodyAt k σ i d ps ≡ ok u
+  → ∃ λ rs → check k σ rs Vec.[] (Def.dmode d) (Def.dbody d) (Def.dtype d) ≡ ok u
+checkBodyAt-sound k σ i d [] eq = defRec i 0 , eq
+checkBodyAt-sound k σ i d (p ∷ ps) eq with checkAt k σ i d p in peq
+... | ok u with ok-inj eq
+...   | refl = defRec i p , peq
+checkBodyAt-sound k σ i d (p ∷ ps) eq | fail msg = retryBody-sound k σ i d msg ps eq
+
+checkBody-sound : ∀ k σ i d {u} → checkBody k σ i d ≡ ok u
+  → ∃ λ rs → check k σ rs Vec.[] (Def.dmode d) (Def.dbody d) (Def.dtype d) ≡ ok u
+checkBody-sound k σ i d eq = checkBodyAt-sound k σ i d (argPositions 0 (Def.dtype d)) eq
+
 checkDef-sound k σ i {d} G leq eq with lookupDef σ i in leq′
 ... | fail _ = ⊥-elim (fail≢ok leq)
 ... | ok d′ with ok-inj leq
 ...   | refl with >>-ok₃ eq
 ...     | (_ , teq) , (_ , beq) , _ , _ with FragSig.defs (GoodSig.frag G) i d′ leq′
-...       | FT , FB =
+...       | FT , FB with checkBody-sound k σ i d′ (tag-ok beq)
+...         | rs , ceq =
   checkTy-sound k σ emptyRec G FragCtx-[] FT (ok-tt (tag-ok teq))
-  , _ , check-sound k σ (defRec i) (Def.dmode d′) G FragCtx-[] FB FT (tag-ok beq)
+  , _ , check-sound k σ rs (Def.dmode d′) G FragCtx-[] FB FT ceq
 
 checkDefs-sound : ∀ k σ j ds → checkDefs k σ j ds ≡ ok tt
   → ∀ i d → lookupList ds i ≡ ok d → checkDef k σ (j + i) ≡ ok tt

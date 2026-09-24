@@ -169,12 +169,12 @@ defmodule Muro.CheckTest do
     assert {:error, r} = Check.check_sig([run])
 
     assert r =~ "pair" or r =~ "unguarded" or r =~ "unfold" or r =~ "×" or r =~ "Stream" or
-             r =~ "ν" or r =~ "convert"
+             r =~ "ν" or r =~ "convert" or r =~ "applied"
 
     assert {:error, e} = Check.check_sig([evid])
 
     assert e =~ "pair" or e =~ "unguarded" or e =~ "unfold" or e =~ "×" or e =~ "Stream" or
-             e =~ "ν" or e =~ "convert"
+             e =~ "ν" or e =~ "convert" or e =~ "applied"
   end
 
   test "even_dec.muro checks; Dec and evenDec are not emitted" do
@@ -259,7 +259,7 @@ defmodule Muro.CheckTest do
     }
 
     assert {:error, msg} = Check.check_sig(book ++ [bad])
-    assert msg =~ "unfold" or msg =~ "ν" or msg =~ "unguarded"
+    assert msg =~ "unfold" or msg =~ "ν" or msg =~ "unguarded" or msg =~ "applied"
   end
 
   test "bisim.muro checks; evidence is not emitted" do
@@ -287,7 +287,9 @@ defmodule Muro.CheckTest do
     }
 
     assert {:error, msg} = Check.check_sig(book ++ [bad])
-    assert msg =~ "unfold" or msg =~ "ν" or msg =~ "unguarded" or msg =~ "convert"
+
+    assert msg =~ "unfold" or msg =~ "ν" or msg =~ "unguarded" or msg =~ "convert" or
+             msg =~ "applied"
   end
 
   test "list.muro checks; evidence is not emitted; length runs" do
@@ -544,6 +546,77 @@ defmodule Muro.CheckTest do
     assert {:ok, book2} = Parser.parse(lam_src)
     assert {:error, msg2} = Check.check_sig(book2)
     assert msg2 =~ "descend"
+  end
+
+  # The self-call must descend at the position of the argument it descends
+  # on; a smaller variable passed at another position is not descent
+  # (f (1, 0) → f (2, 0) → f (2, 1) → … would diverge).
+  test "a smaller variable at another position is not descent" do
+    src = """
+    def f : run Π (x : Nat) → Π (y : Nat) → Nat :=
+      λ (x : Nat) → λ (y : Nat) →
+        match x motive (λ _ → Nat)
+          | 0 => y
+          | suc xp => f (suc (suc y)) xp
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "f body"
+    assert msg =~ "descend"
+  end
+
+  # The definition being checked may not be passed along unapplied.
+  test "an unapplied self-reference is refused" do
+    src = """
+    def apply : run Π (f : Π (x : Nat) → Nat) → Π (x : Nat) → Nat :=
+      λ (f : Π (x : Nat) → Nat) → λ (x : Nat) → f x
+
+    def loop : run Π (n : Nat) → Nat :=
+      λ (n : Nat) → apply loop n
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "loop body"
+    assert msg =~ "applied"
+
+    spec = """
+    def selfSpec : spec Π (n : Nat) → Nat :=
+      λ (n : Nat) → selfSpec n
+    """
+
+    assert {:ok, book2} = Parser.parse(spec)
+    assert Check.check_sig(book2) == :ok
+  end
+
+  # The position a definition descends on is found by the checker; it need
+  # not be the first argument.
+  test "descent on a later argument" do
+    src = """
+    def plusFlip : run Π (m : Nat) → Π (n : Nat) → Nat :=
+      λ (m : Nat) → λ (n : Nat) →
+        match n motive (λ _ → Nat)
+          | 0 => m
+          | suc np => suc (plusFlip m np)
+
+    def three : evidence {plusFlip suc(0) suc(suc(0)) ≡ suc(suc(suc(0))) : Nat} :=
+      refl
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+
+    # lookup with the length kept: it descends on i, the third argument
+    vec = File.read!("examples/vec.muro")
+
+    unerased =
+      String.replace(vec, "Π (-n : Nat) → Π (i : Fin n)", "Π (n : Nat) → Π (i : Fin n)")
+      |> String.replace("λ (-n : Nat) → λ (i : Fin n)", "λ (n : Nat) → λ (i : Fin n)")
+
+    assert unerased != vec
+    assert {:ok, book2} = Parser.parse(unerased)
+    assert Check.check_sig(book2) == :ok
   end
 
   test "non-descending Maybe recursion fails" do

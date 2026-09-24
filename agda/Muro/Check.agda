@@ -36,28 +36,38 @@ open import Muro.Spine using (unspine; ctorSpine; dtyArgs; defArgs)
 
 ------------------------------------------------------------------------
 -- Recursion state: run and evid structural descent (not spec).
--- `guarded` is the ν dual of `smaller`: a self-call under the tail of
--- an unfold pair is productive.
+-- A definition descends on one argument position `pos`, the same for
+-- every self-call: the variable bound by the leading λ at that position
+-- is `recOk`; a field of a match on a recOk or smaller variable is
+-- `smaller` (structurally below argument pos). A self-call must be the
+-- head of a maximal application spine whose argument at `pos` is a
+-- smaller variable. checkDef tries each non-erased position.
 ------------------------------------------------------------------------
 
 record RecSt (n : ℕ) : Set where
   constructor recst
   field
-    self    : Maybe ℕ
+    self    : Maybe ℕ        -- the definition being checked
+    pos     : ℕ              -- the argument position it descends on
+    nextArg : Maybe ℕ        -- leading λs still to pass before that argument
     smaller : Vec Bool n
     recOk   : Vec Bool n
-    nextOk  : Bool
-    guarded : Bool
 
 extRec : ∀ {n} → RecSt n → Bool → Bool → RecSt (suc n)
-extRec (recst sl sm rok _ g) newSmall newOk =
-  recst sl (newSmall ∷ sm) (newOk ∷ rok) false g
+extRec (recst sl p _ sm rok) newSmall newOk =
+  recst sl p nothing (newSmall ∷ sm) (newOk ∷ rok)
 
--- Erased binders do not consume the next recursive argument.
-keepNext : ∀ {n} → RecSt n → RecSt (suc n) → RecSt (suc n)
-keepNext old new =
-  recst (RecSt.self new) (RecSt.smaller new) (RecSt.recOk new)
-        (RecSt.nextOk old) (RecSt.guarded new)
+-- A leading λ of a definition body binds argument `pos` when nextArg
+-- is just 0; erased binders count as positions too.
+lamRec : ∀ {n} → RecSt n → RecSt (suc n)
+lamRec (recst sl p na sm rok) = recst sl p (stepArg na) (false ∷ sm) (isArg na ∷ rok)
+  where
+    isArg : Maybe ℕ → Bool
+    isArg (just zero) = true
+    isArg _           = false
+    stepArg : Maybe ℕ → Maybe ℕ
+    stepArg (just (suc k)) = just k
+    stepArg _              = nothing
 
 scrutOk : ∀ {n} → RecSt n → Tm n → Bool
 scrutOk rs (var x) = lookup (RecSt.recOk rs) x ∨ lookup (RecSt.smaller rs) x
@@ -823,35 +833,39 @@ checkCtorRest i np ni t = skip np t
     skip (suc _) _          = fail "constructor type has too few parameter binders"
     skip zero    u          = checkTelPos i np ni u
 
-checkRec : ∀ {n} → ℕ → Sig → Mode → RecSt n → Tm n → Result ⊤
-checkRec _ _ spec _ _ = ok tt
-checkRec {n} k σ m rs t = go (apps t)
+noDescent : String
+noDescent = "recursive call does not descend on a smaller argument"
+
+-- A maximal application spine headed by the definition being checked
+-- (run and evid; spec is not checked): the argument at `pos` must be a
+-- smaller variable. A shorter spine has no such argument.
+checkRec : ∀ {n} → Mode → RecSt n → Tm n → Result ⊤
+checkRec spec _ _ = ok tt
+checkRec {n} m rs t = go (apps t)
   where
-    descend : ℕ → ℕ → List (Tm n) → Bool → Result ⊤
-    descend i j [] seenComp =
-      lookupDef σ i >>= λ d →
-      case nthQty (Def.dtype d) j of λ where
-        (ok _)   → ok tt
-        (fail _) →
-          if seenComp then fail "recursive call does not descend on a smaller argument"
-          else ok tt
-    descend i j (a ∷ as) seenComp =
-      lookupDef σ i >>= λ d →
-      nthQty (Def.dtype d) j >>= λ q →
-      if eqQty q erased
-      then descend i (suc j) as seenComp
-      else if isSmallerVar rs a
-      then ok tt
-      else descend i (suc j) as true
+    descend : List (Tm n) → Result ⊤
+    descend args =
+      case lookupList args (RecSt.pos rs) of λ where
+        (ok a)   → if isSmallerVar rs a then ok tt else fail noDescent
+        (fail _) → fail noDescent
 
     go : Tm n × List (Tm n) → Result ⊤
     go (def i , args) =
       case RecSt.self rs of λ where
         nothing  → ok tt
-        (just j) → if i ≡ᵇ j
-          then (if RecSt.guarded rs then ok tt else descend i 0 args false)
-          else ok tt
+        (just j) → if i ≡ᵇ j then descend args else ok tt
     go _ = ok tt
+
+-- The definition being checked may not occur unapplied in run or evid:
+-- passed along, it could be applied to anything.
+selfApplied : ∀ {n} → Mode → RecSt n → ℕ → Result ⊤
+selfApplied spec _ _ = ok tt
+selfApplied _ rs i =
+  case RecSt.self rs of λ where
+    nothing  → ok tt
+    (just j) → if i ≡ᵇ j
+      then fail "recursive definition must be applied to its arguments"
+      else ok tt
 
 -- Index clash / forcing. Expected indices live at n; the constructor
 -- target may mention ctor-argument variables (depth d). No metavars:
@@ -1020,8 +1034,7 @@ mutual
     conv k σ A′ A >>
     (if eqQty q reuse then isData k σ A >>= guard "+ requires a Data type" else ok tt) >>
     let rec? = sm ∧ isDType di A
-        rs1  = extRec rs rec? rec?
-        rs′  = if eqQty q erased then keepNext rs rs1 else rs1
+        rs′  = extRec rs rec? rec?
         args′ = List._++_ (renList suc args) (var zero ∷ [])
     in checkBr k σ rs′ (ext Γ q A) m di ci sm B t (wk mot) args′ (wkForces fs) >>= λ uses →
     let (u₀ , us) = headTailU uses
@@ -1098,6 +1111,37 @@ mutual
     check k σ rs Γ m a A >>= λ au → appUses σ m f fu au
 
   -- ⇒-var-run / ⇒-var-evid / ⇒-var-spec
+  -- An application, its head inferred as a head. The descent check is
+  -- the outermost app's (infer′), on the maximal spine.
+  inferApp : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Result (Tm n × UseVec n)
+  inferApp k σ rs Γ m f a =
+    inferHead k σ rs Γ m f >>= λ (ft , fu) →
+    viewPi k σ ft >>= λ (q , A , B) →
+    inferArg k σ rs Γ m f a q A fu >>= λ uses →
+    ok (inst B a , uses)
+
+  -- The head of an application spine: the definition being checked is
+  -- applied here, so selfApplied is not asked; an inner app is not the
+  -- maximal spine, so checkRec is not run. Anything else is inferred as
+  -- a term.
+  inferHead : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Result (Tm n × UseVec n)
+  inferHead k σ rs Γ m (app f a) = inferApp k σ rs Γ m f a
+  inferHead k σ rs Γ m (def i)   = inferDef k σ rs Γ m i
+  inferHead k σ rs Γ m t         = infer k σ rs Γ m t
+
+  -- ⇒-def, without the self-application test (infer′ asks it).
+  inferDef : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → Result (Tm n × UseVec n)
+  inferDef {n} k σ rs Γ m i =
+    lookupDef σ i >>= λ d →
+    (if allowedDef (Def.dmode d) m
+     then ok tt
+     else fail ("no promotion: " ++ showMode (Def.dmode d) ++ " definition " ++ Def.dname d ++ " in " ++ showMode m ++ " mode")) >>
+    (if eqMode m run
+     then (isRunType k σ (closed {n} (Def.dtype d)) >>= λ b →
+           guard ("no promotion: definition " ++ Def.dname d ++ " has a spec type") b)
+     else ok tt) >>
+    ok (closed {n} (Def.dtype d) , u0s)
+
   infer′ k σ rs Γ (var x) run with qtyOf Γ x
   ... | erased = fail "no promotion: erased variable in run mode"
   ... | q      =
@@ -1150,9 +1194,7 @@ mutual
     (if eqQty q reuse
      then isData k σ A >>= guard "+ requires a Data type"
      else ok tt) >>
-    let rs1 = extRec rs false (RecSt.nextOk rs)
-        rs′ = if eqQty q erased then keepNext rs rs1 else rs1
-    in infer k σ rs′ (ext Γ q A) m t >>= λ (B , uses) →
+    infer k σ (lamRec rs) (ext Γ q A) m t >>= λ (B , uses) →
     let (u₀ , us) = headTailU uses
     in checkBound m q u₀ >> ok (pi q A B , us)
 
@@ -1161,11 +1203,9 @@ mutual
   -- site of an evidence definition in evid mode its uses are discarded
   -- (Env.appUses: instantiating a theorem does not consume resources).
   infer′ k σ rs Γ (app f a) m =
-    infer k σ rs Γ m f >>= λ (ft , fu) →
-    viewPi k σ ft >>= λ (q , A , B) →
-    inferArg k σ rs Γ m f a q A fu >>= λ uses →
-    checkRec k σ m rs (app f a) >>
-    ok (inst B a , uses)
+    inferApp k σ rs Γ m f a >>= λ r →
+    checkRec m rs (app f a) >>
+    ok r
 
   -- ⇒-idt
   infer′ k σ rs Γ (idt _ _ _) run = fail "no promotion: identity type is an erased term"
@@ -1237,16 +1277,9 @@ mutual
     combine m eu uu >>= λ uses → ok (inst P e , uses)
 
   -- ⇒-def
-  infer′ {n} k σ rs Γ (def i) m =
-    lookupDef σ i >>= λ d →
-    (if allowedDef (Def.dmode d) m
-     then ok tt
-     else fail ("no promotion: " ++ showMode (Def.dmode d) ++ " definition " ++ Def.dname d ++ " in " ++ showMode m ++ " mode")) >>
-    (if eqMode m run
-     then (isRunType k σ (closed {n} (Def.dtype d)) >>= λ b →
-           guard ("no promotion: definition " ++ Def.dname d ++ " has a spec type") b)
-     else ok tt) >>
-    ok (closed {n} (Def.dtype d) , u0s)
+  infer′ k σ rs Γ (def i) m =
+    selfApplied m rs i >>
+    inferDef k σ rs Γ m i
 
   -- ⇒-ann
   infer′ k σ rs Γ (ann e A) m =
@@ -1376,7 +1409,7 @@ mutual
     viewNu k σ T >>= λ F →
     infer k σ rs Γ m seed >>= λ (S , seedU) →
     conv k σ A S >>
-    check k σ (extRec rs false (RecSt.nextOk rs)) (ext Γ q S) m t (wk (inst F S)) >>= λ uses →
+    check k σ (extRec rs false false) (ext Γ q S) m t (wk (inst F S)) >>= λ uses →
     let (u₀ , us) = headTailU uses
     in checkBound m q u₀ >>
        checkUnfold k σ m rs (lam q A t) >>
@@ -1399,9 +1432,7 @@ mutual
     checkTy k σ rs Γ A >>
     conv k σ A A′ >>
     (if eqQty q reuse then isData k σ A′ >>= guard "+ requires a Data type" else ok tt) >>
-    let rs1 = extRec rs false (RecSt.nextOk rs)
-        rs′ = if eqQty q erased then keepNext rs rs1 else rs1
-    in check k σ rs′ (ext Γ q A′) m t B >>= λ uses →
+    check k σ (lamRec rs) (ext Γ q A′) m t B >>= λ uses →
     let (u₀ , us) = headTailU uses
     in checkBound m q u₀ >> ok us
   checkLam k σ rs Γ m _ T (ok _) = fail "checkLam: not a λ"
@@ -1426,10 +1457,18 @@ mutual
 ------------------------------------------------------------------------
 
 emptyRec : RecSt 0
-emptyRec = recst nothing [] [] false false
+emptyRec = recst nothing 0 nothing [] []
 
-defRec : ℕ → RecSt 0
-defRec i = recst (just i) [] [] true false
+-- Checking definition i, descending on argument position p.
+defRec : ℕ → ℕ → RecSt 0
+defRec i p = recst (just i) p (just p) [] []
+
+-- The non-erased argument positions of a definition's type, read
+-- syntactically: the candidates for the position a self-call descends on.
+argPositions : ∀ {n} → ℕ → Tm n → List ℕ
+argPositions j (pi q _ B) =
+  (if eqQty q erased then [] else j ∷ []) List.++ argPositions (suc j) B
+argPositions _ _ = []
 
 -- Constructor fields must be small types. Parameters are (A : Type) and
 -- are skipped; a field of type Type would make the data type a large
@@ -1468,11 +1507,36 @@ checkDatas k σ = go 0 (Sig.datas σ)
     go _ []       = ok tt
     go i (d ∷ ds) = checkData k σ i d >> go (suc i) ds
 
+-- The body is checked descending on the first non-erased argument; if
+-- that fails, on each later one. A definition with no self-call passes
+-- the first attempt. When every attempt fails, the first attempt's
+-- error is reported: the position only affects the descent check, so a
+-- type error is the same for every position.
+checkAt : ℕ → Sig → ℕ → Def → ℕ → Result (UseVec 0)
+checkAt k σ i d p = check k σ (defRec i p) [] (Def.dmode d) (Def.dbody d) (Def.dtype d)
+
+retryBody : ℕ → Sig → ℕ → Def → String → List ℕ → Result (UseVec 0)
+retryBody k σ i d msg []       = fail msg
+retryBody k σ i d msg (p ∷ ps) =
+  case checkAt k σ i d p of λ where
+    (ok u)   → ok u
+    (fail _) → retryBody k σ i d msg ps
+
+checkBodyAt : ℕ → Sig → ℕ → Def → List ℕ → Result (UseVec 0)
+checkBodyAt k σ i d []       = checkAt k σ i d 0
+checkBodyAt k σ i d (p ∷ ps) =
+  case checkAt k σ i d p of λ where
+    (ok u)     → ok u
+    (fail msg) → retryBody k σ i d msg ps
+
+checkBody : ℕ → Sig → ℕ → Def → Result (UseVec 0)
+checkBody k σ i d = checkBodyAt k σ i d (argPositions 0 (Def.dtype d))
+
 checkDef : ℕ → Sig → ℕ → Result ⊤
 checkDef k σ i =
   lookupDef σ i >>= λ d →
   tag (Def.dname d ++ " type") (checkTy k σ emptyRec [] (Def.dtype d)) >>
-  tag (Def.dname d ++ " body") (check k σ (defRec i) [] (Def.dmode d) (Def.dbody d) (Def.dtype d)) >>
+  tag (Def.dname d ++ " body") (checkBody k σ i d) >>
   tag (Def.dname d ++ " productivity")
       (checkNu (Def.dmode d) (Def.dtype d) (Def.dbody d)) >>
   ok tt

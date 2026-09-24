@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.2
+
+A kernel fix to the descent check, and its redesign. A definition in `run` or `evidence` now descends on one argument position, the same at every self-call, and the checker finds that position; a self-reference must be applied. Two more ways to write a non-terminating `run` or `evidence` definition are closed, and the "first non-erased argument" rule is gone.
+
+### Checker (`Muro.Check`)
+
+- A self-call must pass a smaller variable *at the position of the argument it descends on*. Before, a smaller variable at any non-erased position counted, so `f (suc xp) y = f (suc (suc y)) xp` was accepted and diverges; with the `Type`-valued motive of 0.4.1 it gave an `evidence Empty`.
+- The definition being checked may not occur unapplied in `run` or `evidence` (`loop n = apply loop n` was accepted; `apply` may apply it to anything). Error: `recursive definition must be applied to its arguments`. Spec is unchanged.
+- The descent position is no longer fixed to the first non-erased argument. `checkBody` checks the body descending on the first non-erased position and, if that fails, on each later one; a definition with no self-call passes at once; when every attempt fails the first attempt's error is reported (the position only affects the descent check). `lookup` in `vec.muro` checks with or without its length erased.
+- `RecSt` is `self`, `pos`, `nextArg`, `smaller`, `recOk`. `nextOk`/`keepNext` are replaced by `lamRec` (every leading λ, erased or not, is a position); the never-set `guarded` field is removed. The application case infers its head with `inferHead` (`inferApp`, `inferDef`), so the descent check runs once, on the maximal spine, and a bare self-reference is caught at the `def` case (`selfApplied`). `checkRec` no longer needs the signature or the fuel.
+- Elixir mirror: `check_rec/3`, `self_applied/3`, `arg_positions/2`, `lam_rec/1`, `infer_head/6`, `infer_app/7`, `infer_def/5`, `check_body/3`, `def_rec/2`.
+- `Muro.Soundness`: `inferApp-sound`, `inferHead-sound`, `inferDef-sound`, `checkBody-sound` (whichever position succeeds, the body was checked with some recursion state); `brRec` follows `extRec`. Statements unchanged.
+- Tests: the two counterexamples are refused; descent on a second argument and `lookup` with its length kept are accepted; a spec definition may still refer to itself unapplied.
+
+### Manual
+
+- `language.md` (Recursion and descent) rewritten for the one-position rule and the three things that are not descent; `data.md`, `indexed.md`, `start.md`, `extending.md` follow.
+
+### Package
+
+- Version 0.4.2.
+
 ## 0.4.1
 
 A kernel fix. `match` on a `data` type marked every field of type `D …` as smaller, whatever the scrutinee was, so a self-call could descend on a field of a computed value (`match (f x) …`) or of a λ-bound variable that is not an argument. That accepted non-terminating `run` and `evidence` definitions, including an `evidence Empty`. `match` on `Nat` already required the scrutinee to be an argument or a smaller variable (`scrutOk`); `match` on a `data` type now does the same.
