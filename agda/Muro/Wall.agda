@@ -173,6 +173,7 @@ spec-⇒-uses (⇒-def _ _) = refl
 spec-⇒-uses (⇒-ann _ D) = spec-⇐-uses D
 spec-⇒-uses (⇒-prod _ _) = refl
 spec-⇒-uses (⇒-pair _ _ eq) = sym (ok-inj eq)
+spec-⇒-uses (⇒-letp _ _ _ _ _ _ eq) = sym (ok-inj eq)
 
 spec-⇐-uses (⇐-conv D _) = spec-⇒-uses D
 spec-⇐-uses (⇐-lam _ _ _ _ D _) with spec-⇐-uses D

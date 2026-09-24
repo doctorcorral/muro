@@ -58,8 +58,6 @@ data Tm (n : ℕ) : Set where
   -- let (a, b) = e in t (t binds a at var 1 and b at var 0)
   prod  : Tm n → Tm n → Tm n
   pair  : Tm n → Tm n → Tm n
-  fst   : Tm n → Tm n
-  snd   : Tm n → Tm n
   letp  : Tm n → Tm (suc (suc n)) → Tm n
   -- ν X. F  (F binds X at var 0). Stream A = ν X. A × X.
   nu    : Tm (suc n) → Tm n
@@ -105,8 +103,6 @@ data PTm (V : Set) : Set where
   ann   : PTm V → PTm V → PTm V
   prod  : PTm V → PTm V → PTm V
   pair  : PTm V → PTm V → PTm V
-  fst   : PTm V → PTm V
-  snd   : PTm V → PTm V
   letp  : PTm V → (V → V → PTm V) → PTm V
   nu    : (V → PTm V) → PTm V
   unf   : PTm V → PTm V → PTm V
@@ -176,8 +172,6 @@ showTm (def i)      = showDef i
 showTm (ann e A)    = "{" ++ showTm e ++ " : " ++ showTm A ++ "}"
 showTm (prod A B)   = "(" ++ showTm A ++ " × " ++ showTm B ++ ")"
 showTm (pair a b)   = "(" ++ showTm a ++ ", " ++ showTm b ++ ")"
-showTm (fst t)      = "fst(" ++ showTm t ++ ")"
-showTm (snd t)      = "snd(" ++ showTm t ++ ")"
 showTm (letp e t)   = "let (_, _) = " ++ showTm e ++ " in " ++ showTm t
 showTm (nu F)       = "ν(" ++ showTm F ++ ")"
 showTm (unf s f)    = "unfold " ++ showTm s ++ " " ++ showTm f

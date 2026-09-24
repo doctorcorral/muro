@@ -40,6 +40,7 @@ open import Muro.Subst
 open import Muro.Env
 open import Muro.Spine
 open import Muro.Frag
+open import Muro.SubstLemmas using (strengthen₂-sound)
 open import Muro.Reduction
 open import Muro.Convert
 open import Muro.Data hiding (subst₂)
@@ -511,8 +512,33 @@ infer-sound k σ rs {Γ = Γ} m hd G FΓ (f-pair {a = a} {b = b} Fa Fb) eq with 
 ...         | FA , A′ , Da , cA | FB , B′ , Db , cB =
   f-prod FA FB , _ , ⇒-pair Da Db ceq , ≈-prod cA cB
 
--- let only checks
-infer-sound k σ rs m hd G FΓ (f-letp _ _) eq = ⊥-elim (fail≢ok eq)
+-- let in inference mode: the body's type is strengthened past the two
+-- components; strengthen₂-sound turns success into a double weakening.
+infer-sound k σ rs {Γ = Γ} m hd G FΓ (f-letp {e = e} {t = t} Fe Ft) eq with infer k σ rs Γ m e in ieq
+... | fail _ = ⊥-elim (fail≢ok eq)
+... | ok (E , eu) with viewProd k σ E in veq
+...   | fail _ = ⊥-elim (fail≢ok eq)
+...   | ok (A , B) with infer k σ (extRec (extRec rs false false) false false)
+                             (ext (ext Γ affine A) affine (wk B)) m t in teq
+...     | fail _ = ⊥-elim (fail≢ok eq)
+...     | ok (T , ub Vec.∷ ua Vec.∷ tus) with strengthen₂ T in seq
+...       | fail _ = ⊥-elim (fail≢ok eq)
+...       | ok C with checkBound m affine ub in bb
+...         | fail _ = ⊥-elim (fail≢ok eq)
+...         | ok tt with checkBound m affine ua in ba
+...           | fail _ = ⊥-elim (fail≢ok eq)
+...           | ok tt with combine m eu tus in ceq
+...             | fail _ = ⊥-elim (fail≢ok eq)
+...             | ok us with ok-inj eq
+...               | refl with infer-sound k σ rs m false G FΓ Fe ieq
+...                 | FE , E′ , De , c with viewProd-Frag k σ (GoodSig.frag G) FE veq
+...                   | FA , FB with infer-sound k σ (extRec (extRec rs false false) false false) m false G
+                                      (FragCtx-ext (FragCtx-ext FΓ FA) (Frag-wk FB)) Ft teq
+...                     | FT , T′ , Dt , cT with strengthen₂-sound T seq
+...                       | refl =
+  Frag-unren suc C (Frag-unren suc (wk C) FT) , _
+  , ⇒-letp De (≈-trans c (viewProd-≈ k σ (GoodSig.frag G) FE veq)) Dt cT bb ba ceq
+  , ≈-refl
 
 ------------------------------------------------------------------------
 -- check
@@ -920,8 +946,9 @@ checkTy-sound k σ rs {Γ = Γ} {A = A@(prod _ _)} G FΓ Fe eq with infer k σ r
 checkTy-sound k σ rs {Γ = Γ} {A = A@(pair _ _)} G FΓ Fe eq with infer k σ rs Γ spec A in ieq
 ... | fail _ = ⊥-elim (fail≢ok eq)
 ... | ok (T , _) = checkTy-el k σ rs G FΓ Fe ieq eq
--- infer′ refuses a let outright, so checkTy on one is fail.
-checkTy-sound k σ rs {A = letp _ _} G FΓ Fe eq = ⊥-elim (fail≢ok eq)
+checkTy-sound k σ rs {Γ = Γ} {A = A@(letp _ _)} G FΓ Fe eq with infer k σ rs Γ spec A in ieq
+... | fail _ = ⊥-elim (fail≢ok eq)
+... | ok (T , _) = checkTy-el k σ rs G FΓ Fe ieq eq
 
 ------------------------------------------------------------------------
 -- The corollaries for a definition and for a signature.

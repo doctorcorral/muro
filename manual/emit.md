@@ -52,11 +52,29 @@ defmodule Foo do
 | n-argument ctor | `{:ctor, args…}` |
 | `left n` / `right t` | `{:left, n}` / `{:right, t}` |
 | `(a, b)` | `{a, b}` |
-| `let (a, b) = e in t` | `({a, b} = e; t)` |
+| `let (a, b) = e in t`, `fst`, `snd` | `({a, b} = e; t)` |
 | `run` Stream | `Stream.unfold/2` |
 | `addi` / `addt` / `packI` | `Nx.add` / `Nx.stack` / `Nx.tensor` |
 
 `rewrite` emits as its body. `refl` would be `:refl` if it ever appeared in run; it should not.
+
+## Failing functions
+
+A `run` function that can fail returns a sum, and its constructors are the Elixir tags. Nothing in the kernel knows the `{:ok, _}` / `{:error, _}` convention; the constructor names do the work (`examples/result.muro`):
+
+```
+data Result (E : Type) (A : Type) : Type where
+  ok    : A → Result E A
+  error : E → Result E A
+
+def pred : run Π (n : Nat) → Result Unit Nat :=
+  λ (n : Nat) →
+    match n motive (λ _ → Result Unit Nat)
+      | 0 => error tt
+      | suc p => ok p
+```
+
+emits `def pred(x0)` returning `{:error, :tt}` or `{:ok, x1}`. A caller that wants a raising variant writes it in Elixir over the emitted function; emit never raises except for `Empty`.
 
 ## Erased arguments
 

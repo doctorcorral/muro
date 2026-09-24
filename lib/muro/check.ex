@@ -293,22 +293,6 @@ defmodule Muro.Check do
 
   defp whnf(k, book, {:ann, e, _}), do: whnf(k - 1, book, e)
 
-  defp whnf(k, book, {:fst, e}) do
-    case whnf(k - 1, book, e) do
-      {:ok, {:pair, a, _}} -> whnf(k - 1, book, a)
-      {:ok, e1} -> {:ok, {:fst, e1}}
-      err -> err
-    end
-  end
-
-  defp whnf(k, book, {:snd, e}) do
-    case whnf(k - 1, book, e) do
-      {:ok, {:pair, _, b}} -> whnf(k - 1, book, b)
-      {:ok, e1} -> {:ok, {:snd, e1}}
-      err -> err
-    end
-  end
-
   # ι-letp
   defp whnf(k, book, {:letp, e, t}) do
     case whnf(k - 1, book, e) do
@@ -517,9 +501,6 @@ defmodule Muro.Check do
     with :ok <- conv(k, book, a, a1), do: conv(k, book, b, b1)
   end
 
-  defp conv_n(k, book, {:fst, t}, {:fst, t1}), do: conv(k, book, t, t1)
-  defp conv_n(k, book, {:snd, t}, {:snd, t1}), do: conv(k, book, t, t1)
-
   defp conv_n(k, book, {:letp, e, t}, {:letp, e1, t1}) do
     with :ok <- conv(k, book, e, e1), do: conv(k, book, t, t1)
   end
@@ -652,7 +633,7 @@ defmodule Muro.Check do
          {:ok, a} <- payload_ty(k, book, f),
          {:ok, {tt, _}} <- infer(k, book, rs, gamma, :spec, t),
          :ok <- conv(k, book, ts, tt) do
-      id = {:idt, a, {:fst, {:ucons, s}}, {:fst, {:ucons, t}}}
+      id = {:idt, a, {:letp, {:ucons, s}, {:var, 1}}, {:letp, {:ucons, t}, {:var, 1}}}
       {:ok, {:nu, {:prod, Subst.wk(id), {:var, 0}}}}
     end
   end
@@ -727,8 +708,6 @@ defmodule Muro.Check do
   defp has_self?(self, {:app, f, a}), do: has_self?(self, f) or has_self?(self, a)
   defp has_self?(self, {:su, t}), do: has_self?(self, t)
   defp has_self?(self, {:pair, a, b}), do: has_self?(self, a) or has_self?(self, b)
-  defp has_self?(self, {:fst, t}), do: has_self?(self, t)
-  defp has_self?(self, {:snd, t}), do: has_self?(self, t)
   defp has_self?(self, {:letp, e, t}), do: has_self?(self, e) or has_self?(self, t)
   defp has_self?(self, {:unf, s, f}), do: has_self?(self, s) or has_self?(self, f)
   defp has_self?(self, {:ucons, s}), do: has_self?(self, s)
@@ -758,8 +737,6 @@ defmodule Muro.Check do
   defp occurs?(x, {:su, t}), do: occurs?(x, t)
   defp occurs?(x, {:prod, a, b}), do: occurs?(x, a) or occurs?(x, b)
   defp occurs?(x, {:pair, a, b}), do: occurs?(x, a) or occurs?(x, b)
-  defp occurs?(x, {:fst, t}), do: occurs?(x, t)
-  defp occurs?(x, {:snd, t}), do: occurs?(x, t)
   defp occurs?(x, {:letp, e, t}), do: occurs?(x, e) or occurs?(x + 2, t)
   defp occurs?(x, {:nu, f}), do: occurs?(x + 1, f)
   defp occurs?(x, {:bisim, s, t}), do: occurs?(x, s) or occurs?(x, t)
@@ -1099,22 +1076,25 @@ defmodule Muro.Check do
           {:ok, {{:prod, ta, tb}, uses}}
         end
 
-      # let only checks (⇐-letp): its result type is the expected type.
-      {_m, {:letp, _, _}} ->
-        {:error, "let needs an expected type"}
-
-      # ⇒-fst
-      {m, {:fst, t1}} ->
-        with {:ok, {tt, u}} <- infer(k, book, rs, gamma, m, t1),
-             {:ok, {a, _}} <- view_prod(k, book, tt) do
-          {:ok, {a, u}}
-        end
-
-      # ⇒-snd
-      {m, {:snd, t1}} ->
-        with {:ok, {tt, u}} <- infer(k, book, rs, gamma, m, t1),
-             {:ok, {_, b}} <- view_prod(k, book, tt) do
-          {:ok, {b, u}}
+      # ⇒-letp: as ⇐-letp, but the body is inferred and its type must not
+      # mention the two components (Subst.strengthen2).
+      {m, {:letp, e, t}} ->
+        with {:ok, {e_ty, eu}} <- infer(k, book, rs, gamma, m, e),
+             {:ok, {a1, b1}} <- view_prod(k, book, e_ty),
+             {:ok, {t_ty, [ub, ua | tus]}} <-
+               infer(
+                 k,
+                 book,
+                 ext_rec(ext_rec(rs, false, false), false, false),
+                 ext(ext(gamma, :affine, a1), :affine, Subst.wk(b1)),
+                 m,
+                 t
+               ),
+             {:ok, c} <- Subst.strengthen2(t_ty),
+             :ok <- check_bound(m, :affine, ub),
+             :ok <- check_bound(m, :affine, ua),
+             {:ok, uses} <- combine(m, eu, tus) do
+          {:ok, {c, uses}}
         end
 
       # ⇒-unf
@@ -1849,8 +1829,6 @@ defmodule Muro.Check do
   defp occurs_d?(i, {:pair, a, b}), do: occurs_d?(i, a) or occurs_d?(i, b)
   defp occurs_d?(i, {:idt, a, b, c}), do: occurs_d?(i, a) or occurs_d?(i, b) or occurs_d?(i, c)
   defp occurs_d?(i, {:su, t}), do: occurs_d?(i, t)
-  defp occurs_d?(i, {:fst, t}), do: occurs_d?(i, t)
-  defp occurs_d?(i, {:snd, t}), do: occurs_d?(i, t)
   defp occurs_d?(i, {:letp, e, t}), do: occurs_d?(i, e) or occurs_d?(i, t)
   defp occurs_d?(i, {:nu, f}), do: occurs_d?(i, f)
   defp occurs_d?(i, {:unf, s, f}), do: occurs_d?(i, s) or occurs_d?(i, f)

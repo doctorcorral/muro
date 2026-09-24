@@ -20,7 +20,7 @@ There is one ν former. The block is required for shape, then dropped — Stream
 
 ASCII: `nu Stream (A : Type) : Type where uncons : Stream A -> A * Stream A`.
 
-`uncons` splits a stream into a head and a tail. `head` and `tail` are sugar for `fst (uncons s)` and `snd (uncons s)`.
+`uncons` splits a stream into a head and a tail. `head` and `tail` are sugar for `fst (uncons s)` and `snd (uncons s)`, that is, for a `let` on `uncons s` (see [Terms](language.md#products)).
 
 ## unfold
 

@@ -21,7 +21,7 @@ zerosTm : Tm 0
 zerosTm = unf ze (lam affine nat (pair ze ze))
 
 headZerosTy : Tm 0
-headZerosTy = idt nat (fst (ucons (def 0))) ze
+headZerosTy = idt nat (fstTm (ucons (def 0))) ze
 
 headZerosTm : Tm 0
 headZerosTm = rfl

@@ -1,7 +1,7 @@
 defmodule Muro.CheckTest do
   use ExUnit.Case, async: true
 
-  alias Muro.{Check, Emit, Example, Parser}
+  alias Muro.{Ast, Check, Emit, Example, Parser}
 
   test "parse, check, and emit half_ok.muro" do
     src = File.read!("examples/half_ok.muro")
@@ -153,6 +153,45 @@ defmodule Muro.CheckTest do
     assert Muro.PairLet.swap({1, 2}) == {2, 1}
   end
 
+  test "result.muro: ok/error constructors are the Elixir tags" do
+    src = File.read!("examples/result.muro")
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+
+    out = Emit.emit_module(Muro.ResultEx, book)
+    Code.eval_string(out)
+    assert Muro.ResultEx.pred(0) == {:error, :tt}
+    assert Muro.ResultEx.pred({:suc, 0}) == {:ok, 0}
+    assert Muro.ResultEx.orZero({:error, :tt}) == 0
+    assert Muro.ResultEx.orZero({:ok, 3}) == 3
+  end
+
+  test "fst and snd are let; head (tail s) infers through let" do
+    src = """
+    ν Stream (A : Type) : Type where
+      uncons : Stream A → A × Stream A
+    def natsFrom : run Π (n : Nat) → Stream Nat :=
+      λ (n : Nat) → unfold n (λ (+ k : Nat) → (k, suc k))
+    def second : run Π (s : Stream Nat) → Nat :=
+      λ (s : Stream Nat) → head (tail s)
+    def second-ok : evidence {second (natsFrom 0) ≡ suc(0) : Nat} := refl
+    def first : run Π (p : Nat × Nat) → Nat := λ (p : Nat × Nat) → fst p
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+    first = Enum.find(book, &(&1.name == "first"))
+    assert {:ok, {:lam, _, _, {:letp, {:var, 0}, {:var, 1}}}} = Ast.to_db(first.body)
+
+    out = Emit.emit_module(Muro.SecondEx, book)
+    Code.eval_string(out)
+    assert Muro.SecondEx.second(Muro.SecondEx.natsFrom(0)) == {:suc, 0}
+  end
+
+  test "an application argument may be followed by a colon on the same line" do
+    assert {:ok, _} = Parser.parse("def a : evidence {0 ≡ f x : Nat} := refl")
+  end
+
   test "let opens an affine pair once; both projections use it twice" do
     plus =
       "def plus : run Π (n : Nat) → Π (m : Nat) → Nat := λ (n : Nat) → λ (m : Nat) → n\n"
@@ -181,15 +220,26 @@ defmodule Muro.CheckTest do
     assert {:error, msg} = Check.check_sig(book)
     assert msg =~ "affine variable used twice"
 
-    # let only checks: as the head of an application it has no expected type
+    # let also infers: as the head of an application its body's type is
+    # strengthened past the components
     head =
       plus <>
         "def f : run Π (p : (Π (n : Nat) → Nat) × Nat) → Nat := " <>
         "λ (p : (Π (n : Nat) → Nat) × Nat) → (let (g, y) = p in g) 0"
 
     assert {:ok, book} = Parser.parse(head)
+    assert Check.check_sig(book) == :ok
+
+    # ... unless that type mentions a component
+    dep =
+      "data Fin : Nat → Type where\n  fzero : Π (n : Nat) → Fin suc(n)\n" <>
+        "def mkFin : run Π (n : Nat) → Fin suc(n) := λ (n : Nat) → fzero n\n" <>
+        "def g : run Π (p : Nat × Nat) → Nat := " <>
+        "λ (p : Nat × Nat) → uncons (let (x, y) = p in mkFin x)"
+
+    assert {:ok, book} = Parser.parse(dep)
     assert {:error, msg} = Check.check_sig(book)
-    assert msg =~ "let needs an expected type"
+    assert msg =~ "mentions a component"
 
     # the scrutinee must be a product
     not_prod = plus <> "def f : run Π (n : Nat) → Nat := λ (n : Nat) → let (x, y) = n in x"

@@ -174,9 +174,7 @@ ne-untyped-⇒ (ne-mUnit ne) (⇒-mUnit D _ _ _) = ne-untyped-⇐ ne D
 ne-untyped-⇒ (ne-mEmp ne) (⇒-mEmp D _) = ne-untyped-⇐ ne D
 ne-untyped-⇒ (ne-rwt ne) (⇒-rwt D _ _ _) = ne-untyped-⇒ ne D
 ne-untyped-⇒ (ne-mData ne) (⇒-mData D _ _ _ _ _ _ _) = ne-untyped-⇒ ne D
-ne-untyped-⇒ (ne-letp _) ()
-ne-untyped-⇒ (ne-foreign f-fst) ()
-ne-untyped-⇒ (ne-foreign f-snd) ()
+ne-untyped-⇒ (ne-letp ne) (⇒-letp D _ _ _ _ _ _) = ne-untyped-⇒ ne D
 ne-untyped-⇒ (ne-foreign f-nu) ()
 ne-untyped-⇒ (ne-foreign f-unf) ()
 ne-untyped-⇒ (ne-foreign f-ucons) ()
@@ -414,6 +412,9 @@ progress-⇒ (⇒-mData _ _ lk _ _ _ _ _) = ⊥-elim (fail≢ok lk)
 progress-⇒ (⇒-def lk _) = ⊥-elim (fail≢ok lk)
 progress-⇒ (⇒-ann _ _) = inj₂ (_ , ann-e)
 progress-⇒ (⇒-pair _ _ _) = inj₁ nf-pair
+progress-⇒ (⇒-letp De c _ _ _ _ _) with progress-⇒ De
+... | inj₂ (_ , s) = inj₂ (_ , letp-e s)
+... | inj₁ nf = nf-prod-prog nf De c
 
 ------------------------------------------------------------------------
 -- The same canonical-forms argument for the declarative judgment ⊨,

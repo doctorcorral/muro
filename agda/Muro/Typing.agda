@@ -367,6 +367,8 @@ forget-⇒ (⇒-def lk al) = conv (t-def lk al) ≈-refl
 forget-⇒ (⇒-ann W D) = conv (t-ann (forget-wf W) (forget-⇐ D)) ≈-refl
 forget-⇒ (⇒-prod DA DB) = conv (t-prod (forget-⇐ DA) (forget-⇐ DB)) ≈-refl
 forget-⇒ (⇒-pair Da Db _) = conv (t-pair (forget-⇒ Da) (forget-⇒ Db)) ≈-refl
+forget-⇒ (⇒-letp De c Dt cT _ _ _) =
+  conv (t-letp (conv-≈ (forget-⇒ De) c) (conv-≈ (forget-⇒ Dt) cT)) ≈-refl
 
 forget-⇐ (⇐-conv D c) = conv-≈ (forget-⇒ D) c
 forget-⇐ (⇐-lam W cT c rok D _) =

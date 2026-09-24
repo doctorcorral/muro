@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.6.0
+
+The kernel has one pair eliminator. `fst` and `snd` are no longer constructors of the term language: `fst t` parses to `let (a, b) = t in a` and `snd t` to `let (a, b) = t in b`, so `head` and `tail` are a `let` on `uncons` too. To keep them usable wherever they were, `let` is now also inferred: `⇒-letp` infers the body under the two binders and requires its type not to mention the components. Every use of pairs is now inside the proved fragment.
+
+### Language
+
+- `let (a, b) = e in t` is inferred as well as checked. The body's type is strengthened past the two binders; `let (x, y) = p in mkFin x`, whose type `Fin suc(x)` mentions `x`, is refused in inference position with `let: the body's type mentions a component of the pair` (it still checks against an expected type).
+- `fst`, `snd`, `head`, `tail` are surface sugar for `let`. Same programs check; `head (tail s)` and `tail s ~ t` go through the inferred `let`.
+- Parser: an application stops before `ident :` only at the start of a line (the next constructor of a `data` block). `{0 ≡ f x : Nat}` now parses; before, `f x` was cut at `x :`.
+
+### Kernel (Agda)
+
+- `Muro.Syntax`: `fst`, `snd` removed, with their clauses in every module (`Tag`, `Subst`, `SubstLemmas`, `Unembed`, `Spine`, `Reduction`, `Convert`, `Check`, `Consistency`, `Soundness/*`). `Subst.fstTm` / `sndTm` build the `let` forms; `always` and `bisim` use them.
+- `Muro.Subst`: `renM` (partial renaming), `strengthen₂ = renM unwk₂`. `Muro.SubstLemmas`: `renM-sound`, `strengthen₂-sound : strengthen₂ T ≡ ok C → T ≡ wk (wk C)`.
+- `Muro.Judgement`: `⇒-letp`. `Muro.Typing`: `forget-⇒` case. `Muro.Wall`: `spec-⇒-uses` case. `Muro.Consistency`: `ne-untyped-⇒`, `progress-⇒` cases.
+- `Muro.Frag`: `Frag-unren` (the fragment is closed under un-renaming). `Muro.Soundness`: `infer-sound` for `letp` through `strengthen₂-sound`; `checkTy-sound` on a `let` goes through `infer`. Statements unchanged; `--safe`, no postulates.
+- `Muro.Check`: `infer′` has the `letp` clause; `whnf`, `synEqD`, `convND`, `hasSelf`, `occurs`, `occursD` lose the projection clauses.
+
+### Elixir mirror
+
+- `{:fst, _}` / `{:snd, _}` removed from `Muro.Ast`, `Muro.Subst`, `Muro.Check`, `Muro.Emit`. Parser desugars `fst`, `snd`, `head`, `tail`; `Always` and `~` build the `let` form. `Muro.Subst.strengthen2/1`. `Muro.Check`: `infer` clause for `{:letp, e, t}`.
+- `examples/result.muro`: a failing `run` function returns `Result E A`; `ok` / `error` emit as `{:ok, _}` / `{:error, _}` because constructor names are the tags. Tests for it, for `fst` as `let`, for `head (tail s)`, and for the parser change.
+
+### Manual
+
+- `language.md` (Products), `grammar.md` (layout note), `streams.md`, `emit.md` (Failing functions), `limits.md`, `extending.md`, `examples.md`.
+
+### Package
+
+- Version 0.6.0.
+
 ## 0.5.0
 
 A language addition: `let (a, b) = e in t` opens a pair. It is the eliminator an affine pair was missing. `fst p` and `snd p` each use `p`, so a pair-typed variable could never have both components used; `let` uses it once and binds both components, each affine.

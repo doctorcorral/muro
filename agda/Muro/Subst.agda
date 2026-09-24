@@ -46,8 +46,6 @@ mutual
   ren ρ (ann e A)     = ann (ren ρ e) (ren ρ A)
   ren ρ (prod A B)    = prod (ren ρ A) (ren ρ B)
   ren ρ (pair a b)    = pair (ren ρ a) (ren ρ b)
-  ren ρ (fst t)       = fst (ren ρ t)
-  ren ρ (snd t)       = snd (ren ρ t)
   ren ρ (letp e t)    = letp (ren ρ e) (ren (lift (lift ρ)) t)
   ren ρ (nu F)        = nu (ren (lift ρ) F)
   ren ρ (unf s f)     = unf (ren ρ s) (ren ρ f)
@@ -72,14 +70,83 @@ wk = ren suc
 stream : ∀ {n} → Tm n → Tm n
 stream A = nu (prod (wk A) (var zero))
 
+------------------------------------------------------------------------
+-- Partial renaming: the map may refuse a variable, and then so does the
+-- term. strengthen₂ undoes a double weakening where possible: it is how
+-- Check decides whether the type inferred for a let body mentions the
+-- two components (SubstLemmas.strengthen₂-sound).
+------------------------------------------------------------------------
+
+liftM : ∀ {n m} → (Fin n → Result (Fin m)) → Fin (suc n) → Result (Fin (suc m))
+liftM ρ zero    = ok zero
+liftM ρ (suc i) = suc <$> ρ i
+
+mutual
+  renM : ∀ {n m} → (Fin n → Result (Fin m)) → Tm n → Result (Tm m)
+  renM ρ (var i) = var <$> ρ i
+  renM ρ typ = ok typ
+  renM ρ (pi q A B) = (pi q) <$> renM ρ A ⊛ renM (liftM ρ) B
+  renM ρ (lam q A t) = (lam q) <$> renM ρ A ⊛ renM (liftM ρ) t
+  renM ρ (app f a) = app <$> renM ρ f ⊛ renM ρ a
+  renM ρ nat = ok nat
+  renM ρ ze = ok ze
+  renM ρ (su t) = su <$> renM ρ t
+  renM ρ unit = ok unit
+  renM ρ one = ok one
+  renM ρ empty = ok empty
+  renM ρ (dty i) = ok (dty i)
+  renM ρ (ctor i j) = ok (ctor i j)
+  renM ρ (mData e P bs) = mData <$> renM ρ e ⊛ renM (liftM ρ) P ⊛ renMList ρ bs
+  renM ρ (mNat e P z s) = mNat <$> renM ρ e ⊛ renM (liftM ρ) P ⊛ renM ρ z ⊛ renM (liftM ρ) s
+  renM ρ (mEmp e P) = mEmp <$> renM ρ e ⊛ renM (liftM ρ) P
+  renM ρ (mUnit e P u) = mUnit <$> renM ρ e ⊛ renM (liftM ρ) P ⊛ renM ρ u
+  renM ρ (idt A a b) = idt <$> renM ρ A ⊛ renM ρ a ⊛ renM ρ b
+  renM ρ rfl = ok rfl
+  renM ρ (rwt e P t) = rwt <$> renM ρ e ⊛ renM (liftM ρ) P ⊛ renM ρ t
+  renM ρ (def i) = ok (def i)
+  renM ρ (ann e A) = ann <$> renM ρ e ⊛ renM ρ A
+  renM ρ (prod A B) = prod <$> renM ρ A ⊛ renM ρ B
+  renM ρ (pair a b) = pair <$> renM ρ a ⊛ renM ρ b
+  renM ρ (letp e t) = letp <$> renM ρ e ⊛ renM (liftM (liftM ρ)) t
+  renM ρ (nu F) = nu <$> renM (liftM ρ) F
+  renM ρ (unf s f) = unf <$> renM ρ s ⊛ renM ρ f
+  renM ρ (ucons s) = ucons <$> renM ρ s
+  renM ρ i64 = ok i64
+  renM ρ f32ty = ok f32ty
+  renM ρ (tensor d s) = tensor <$> renM ρ d ⊛ renM ρ s
+  renM ρ (addi x y) = addi <$> renM ρ x ⊛ renM ρ y
+  renM ρ (muli x y) = muli <$> renM ρ x ⊛ renM ρ y
+  renM ρ (addt t u) = addt <$> renM ρ t ⊛ renM ρ u
+  renM ρ (toi64 t) = toi64 <$> renM ρ t
+  renM ρ (packi x y) = packi <$> renM ρ x ⊛ renM ρ y
+
+  renMList : ∀ {n m} → (Fin n → Result (Fin m)) → List (Tm n) → Result (List (Tm m))
+  renMList ρ []       = ok []
+  renMList ρ (t ∷ ts) = _∷_ <$> renM ρ t ⊛ renMList ρ ts
+
+unwk₂ : ∀ {n} → Fin (suc (suc n)) → Result (Fin n)
+unwk₂ zero          = fail "let: the body's type mentions a component of the pair"
+unwk₂ (suc zero)    = fail "let: the body's type mentions a component of the pair"
+unwk₂ (suc (suc i)) = ok i
+
+strengthen₂ : ∀ {n} → Tm (suc (suc n)) → Result (Tm n)
+strengthen₂ = renM unwk₂
+
+-- The projections are sugar for let: fst t = let (a, _) = t in a.
+fstTm : ∀ {n} → Tm n → Tm n
+fstTm t = letp t (var (suc zero))
+
+sndTm : ∀ {n} → Tm n → Tm n
+sndTm t = letp t (var zero)
+
 -- Always P s = ν Y. P (head s) × Y
 always : ∀ {n} → Tm n → Tm n → Tm n
-always P s = nu (prod (wk (app P (fst (ucons s)))) (var zero))
+always P s = nu (prod (wk (app P (fstTm (ucons s)))) (var zero))
 
 -- σ ~ τ = ν R. {head σ ≡ head τ : A} × R
 bisim : ∀ {n} → Tm n → Tm n → Tm n → Tm n
 bisim A σ τ =
-  nu (prod (wk (idt A (fst (ucons σ)) (fst (ucons τ)))) (var zero))
+  nu (prod (wk (idt A (fstTm (ucons σ)) (fstTm (ucons τ)))) (var zero))
 
 fromZero : ∀ {n} → Fin 0 → Fin n
 fromZero ()
@@ -117,8 +184,6 @@ mutual
   sub σ (ann e A)      = ann (sub σ e) (sub σ A)
   sub σ (prod A B)     = prod (sub σ A) (sub σ B)
   sub σ (pair a b)     = pair (sub σ a) (sub σ b)
-  sub σ (fst t)        = fst (sub σ t)
-  sub σ (snd t)        = snd (sub σ t)
   sub σ (letp e t)     = letp (sub σ e) (sub (lifts (lifts σ)) t)
   sub σ (nu F)         = nu (sub (lifts σ) F)
   sub σ (unf s f)      = unf (sub σ s) (sub σ f)
@@ -200,8 +265,6 @@ mutual
   toPHOAS ρ (ann e A)      = ann (toPHOAS ρ e) (toPHOAS ρ A)
   toPHOAS ρ (prod A B)     = prod (toPHOAS ρ A) (toPHOAS ρ B)
   toPHOAS ρ (pair a b)     = pair (toPHOAS ρ a) (toPHOAS ρ b)
-  toPHOAS ρ (fst t)        = fst (toPHOAS ρ t)
-  toPHOAS ρ (snd t)        = snd (toPHOAS ρ t)
   toPHOAS ρ (letp e t)     = letp (toPHOAS ρ e)
                                   (λ a b → toPHOAS (λ { zero → b ; (suc zero) → a ; (suc (suc i)) → ρ i }) t)
   toPHOAS ρ (nu F)         = nu (λ v → toPHOAS (λ { zero → v ; (suc i) → ρ i }) F)

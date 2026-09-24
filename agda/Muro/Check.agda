@@ -126,14 +126,6 @@ mutual
   ... | ok d    = whnf k σ (closed (Def.dbody d))
   ... | fail _  = ok (def i)
   whnf (suc k) σ (ann e _) = whnf k σ e
-  whnf (suc k) σ (fst e) with whnf k σ e
-  ... | fail m          = fail m
-  ... | ok (pair a _)   = whnf k σ a
-  ... | ok e′           = ok (fst e′)
-  whnf (suc k) σ (snd e) with whnf k σ e
-  ... | fail m          = fail m
-  ... | ok (pair _ b)   = whnf k σ b
-  ... | ok e′           = ok (snd e′)
   whnf (suc k) σ (ucons e) = whnf k σ e >>= uconsWhnf k σ
   whnf (suc k) σ (letp e t) with whnf k σ e
   ... | fail m          = fail m
@@ -250,8 +242,6 @@ mutual
   synEqD (ann e A)      (ann e′ A′)    = synEq e e′ ∧ synEq A A′
   synEqD (prod A B)     (prod A′ B′)   = synEq A A′ ∧ synEq B B′
   synEqD (pair a b)     (pair a′ b′)   = synEq a a′ ∧ synEq b b′
-  synEqD (fst t)        (fst t′)       = synEq t t′
-  synEqD (snd t)        (snd t′)       = synEq t t′
   synEqD (letp e t)     (letp e′ t′)   = synEq e e′ ∧ synEq t t′
   synEqD (nu F)         (nu F′)        = synEq F F′
   synEqD (unf s f)      (unf s′ f′)    = synEq s s′ ∧ synEq f f′
@@ -340,8 +330,6 @@ mutual
   convND k σ (ann e A)     (ann e′ A′)   = conv k σ e e′ >> conv k σ A A′
   convND k σ (prod A B)    (prod A′ B′)  = conv k σ A A′ >> conv k σ B B′
   convND k σ (pair a b)    (pair a′ b′)  = conv k σ a a′ >> conv k σ b b′
-  convND k σ (fst t)       (fst t′)      = conv k σ t t′
-  convND k σ (snd t)       (snd t′)      = conv k σ t t′
   convND k σ (letp e t)    (letp e′ t′)  = conv k σ e e′ >> conv k σ t t′
   convND k σ (nu F)        (nu F′)       = conv k σ F F′
   convND k σ (unf s f)     (unf s′ f′)   = conv k σ s s′ >> conv k σ f f′
@@ -376,8 +364,6 @@ data _≈[_]_ {n} : Tm n → Sig → Tm n → Set where
   ≈-cong-pi  : ∀ {σ q A A′ B B′} → A ≈[ σ ] A′ → B ≈[ σ ] B′ → pi q A B ≈[ σ ] pi q A′ B′
   ≈-cong-idt : ∀ {σ A A′ a a′ b b′} → A ≈[ σ ] A′ → a ≈[ σ ] a′ → b ≈[ σ ] b′ →
                idt A a b ≈[ σ ] idt A′ a′ b′
-  ≈-ιfst : ∀ {σ a b} → fst (pair a b) ≈[ σ ] a
-  ≈-ιsnd : ∀ {σ a b} → snd (pair a b) ≈[ σ ] b
   ≈-ιletp : ∀ {σ a b t} → letp (pair a b) t ≈[ σ ] inst₂ t a b
   ≈-ιuncons : ∀ {σ s f h t} →
               app f s ≈[ σ ] pair h t →
@@ -510,13 +496,13 @@ data _,_⊢[_]_⇒_ σ Γ where
     → σ , Γ ⊢[ m ] b ⇐ B
     → σ , Γ ⊢[ m ] pair a b ⇒ prod A B
 
-  ⇒-fst : ∀ {m A B t}
-    → σ , Γ ⊢[ m ] t ⇒ prod A B
-    → σ , Γ ⊢[ m ] fst t ⇒ A
-
-  ⇒-snd : ∀ {m A B t}
-    → σ , Γ ⊢[ m ] t ⇒ prod A B
-    → σ , Γ ⊢[ m ] snd t ⇒ B
+  -- let in inference mode: the body's type must not mention the two
+  -- components (strengthen₂ succeeds).
+  ⇒-letp : ∀ {m A B e t T C}
+    → σ , Γ ⊢[ m ] e ⇒ prod A B
+    → σ , ext (ext Γ affine A) affine (wk B) ⊢[ m ] t ⇒ T
+    → strengthen₂ T ≡ ok C
+    → σ , Γ ⊢[ m ] letp e t ⇒ C
 
   ⇒-nu : ∀ {F}                                        -- body small
     → σ , ext Γ affine typ ⊢[ spec ] F ⇒ typ
@@ -590,7 +576,8 @@ data _,_⊢[_]_⇐_ σ Γ where
 
   -- let (a, b) = e in t: the tensor eliminator. Both components are
   -- bound affine (a at var 1, b at var 0); the body is checked against
-  -- the expected type weakened past them. let only checks.
+  -- the expected type weakened past them. fst / snd are surface sugar:
+  -- fst t = letp t (var 1), snd t = letp t (var 0).
   ⇐-letp : ∀ {m A B e t C}
     → σ , Γ ⊢[ m ] e ⇒ prod A B
     → σ , ext (ext Γ affine A) affine (wk B) ⊢[ m ] t ⇐ wk (wk C)
@@ -688,8 +675,6 @@ mutual
   hasSelf s (app f a)      = hasSelf s f ∨ hasSelf s a
   hasSelf s (su t)         = hasSelf s t
   hasSelf s (pair a b)     = hasSelf s a ∨ hasSelf s b
-  hasSelf s (fst t)        = hasSelf s t
-  hasSelf s (snd t)        = hasSelf s t
   hasSelf s (letp e t)     = hasSelf s e ∨ hasSelf s t
   hasSelf s (unf u f)      = hasSelf s u ∨ hasSelf s f
   hasSelf s (ucons u)      = hasSelf s u
@@ -760,8 +745,6 @@ mutual
   occurs x (ann e A)      = occurs x e ∨ occurs x A
   occurs x (prod A B)     = occurs x A ∨ occurs x B
   occurs x (pair a b)     = occurs x a ∨ occurs x b
-  occurs x (fst t)        = occurs x t
-  occurs x (snd t)        = occurs x t
   occurs x (letp e t)     = occurs x e ∨ occurs (suc (suc x)) t
   occurs x (nu F)         = occurs (suc x) F
   occurs x (unf s f)      = occurs x s ∨ occurs x f
@@ -808,8 +791,6 @@ mutual
   occursD i (unf s f)      = occursD i s ∨ occursD i f
   occursD i (ucons s)      = occursD i s
   occursD i (su t)         = occursD i t
-  occursD i (fst t)        = occursD i t
-  occursD i (snd t)        = occursD i t
   occursD i (letp e t)     = occursD i e ∨ occursD i t
   occursD i (tensor d s)   = occursD i d ∨ occursD i s
   occursD i (addi a b)     = occursD i a ∨ occursD i b
@@ -1316,20 +1297,20 @@ mutual
     combine m au bu >>= λ uses →
     ok (prod A B , uses)
 
-  -- let only checks (⇐-letp): its result type is the expected type.
-  infer′ k σ rs Γ (letp _ _) m _ = fail "let needs an expected type"
-
-  -- ⇒-fst
-  infer′ k σ rs Γ (fst t) m _ =
-    infer k σ rs Γ m t >>= λ (T , u) →
-    viewProd k σ T >>= λ (A , _) →
-    ok (A , u)
-
-  -- ⇒-snd
-  infer′ k σ rs Γ (snd t) m _ =
-    infer k σ rs Γ m t >>= λ (T , u) →
-    viewProd k σ T >>= λ (_ , B) →
-    ok (B , u)
+  -- ⇒-letp: as ⇐-letp, but the body is inferred and its type must be a
+  -- double weakening (it does not mention the components).
+  infer′ k σ rs Γ (letp e t) m _ =
+    infer k σ rs Γ m e >>= λ (E , eu) →
+    viewProd k σ E >>= λ (A , B) →
+    infer k σ (extRec (extRec rs false false) false false)
+          (ext (ext Γ affine A) affine (wk B)) m t >>= λ (T , uses) →
+    strengthen₂ T >>= λ C →
+    let (ub , us₁) = headTailU uses
+        (ua , tus) = headTailU us₁
+    in checkBound m affine ub >>
+       checkBound m affine ua >>
+       combine m eu tus >>= λ us →
+       ok (C , us)
 
   -- ⇒-unf
   infer′ k σ rs Γ (unf seed f) m _ =
