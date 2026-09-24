@@ -36,28 +36,38 @@ open import Muro.Spine using (unspine; ctorSpine; dtyArgs; defArgs)
 
 ------------------------------------------------------------------------
 -- Recursion state: run and evid structural descent (not spec).
--- `guarded` is the ν dual of `smaller`: a self-call under the tail of
--- an unfold pair is productive.
+-- A definition descends on one argument position `pos`, the same for
+-- every self-call: the variable bound by the leading λ at that position
+-- is `recOk`; a field of a match on a recOk or smaller variable is
+-- `smaller` (structurally below argument pos). A self-call must be the
+-- head of a maximal application spine whose argument at `pos` is a
+-- smaller variable. checkDef tries each non-erased position.
 ------------------------------------------------------------------------
 
 record RecSt (n : ℕ) : Set where
   constructor recst
   field
-    self    : Maybe ℕ
+    self    : Maybe ℕ        -- the definition being checked
+    pos     : ℕ              -- the argument position it descends on
+    nextArg : Maybe ℕ        -- leading λs still to pass before that argument
     smaller : Vec Bool n
     recOk   : Vec Bool n
-    nextOk  : Bool
-    guarded : Bool
 
 extRec : ∀ {n} → RecSt n → Bool → Bool → RecSt (suc n)
-extRec (recst sl sm rok _ g) newSmall newOk =
-  recst sl (newSmall ∷ sm) (newOk ∷ rok) false g
+extRec (recst sl p _ sm rok) newSmall newOk =
+  recst sl p nothing (newSmall ∷ sm) (newOk ∷ rok)
 
--- Erased binders do not consume the next recursive argument.
-keepNext : ∀ {n} → RecSt n → RecSt (suc n) → RecSt (suc n)
-keepNext old new =
-  recst (RecSt.self new) (RecSt.smaller new) (RecSt.recOk new)
-        (RecSt.nextOk old) (RecSt.guarded new)
+-- A leading λ of a definition body binds argument `pos` when nextArg
+-- is just 0; erased binders count as positions too.
+lamRec : ∀ {n} → RecSt n → RecSt (suc n)
+lamRec (recst sl p na sm rok) = recst sl p (stepArg na) (false ∷ sm) (isArg na ∷ rok)
+  where
+    isArg : Maybe ℕ → Bool
+    isArg (just zero) = true
+    isArg _           = false
+    stepArg : Maybe ℕ → Maybe ℕ
+    stepArg (just (suc k)) = just k
+    stepArg _              = nothing
 
 scrutOk : ∀ {n} → RecSt n → Tm n → Bool
 scrutOk rs (var x) = lookup (RecSt.recOk rs) x ∨ lookup (RecSt.smaller rs) x
@@ -823,35 +833,44 @@ checkCtorRest i np ni t = skip np t
     skip (suc _) _          = fail "constructor type has too few parameter binders"
     skip zero    u          = checkTelPos i np ni u
 
-checkRec : ∀ {n} → ℕ → Sig → Mode → RecSt n → Tm n → Result ⊤
-checkRec _ _ spec _ _ = ok tt
-checkRec {n} k σ m rs t = go (apps t)
+noDescent : String
+noDescent = "recursive call does not descend on a smaller argument"
+
+-- A maximal application spine headed by the definition being checked
+-- (run and evid; spec is not checked): the argument at `pos` must be a
+-- smaller variable. A shorter spine has no such argument. The Bool is
+-- infer′'s: an inner application (the head of a larger spine) is not
+-- the maximal spine and is not checked.
+checkRec : ∀ {n} → Mode → Bool → RecSt n → Tm n → Result ⊤
+checkRec spec _    _  _ = ok tt
+checkRec _    true _  _ = ok tt
+checkRec {n} m false rs t = go (apps t)
   where
-    descend : ℕ → ℕ → List (Tm n) → Bool → Result ⊤
-    descend i j [] seenComp =
-      lookupDef σ i >>= λ d →
-      case nthQty (Def.dtype d) j of λ where
-        (ok _)   → ok tt
-        (fail _) →
-          if seenComp then fail "recursive call does not descend on a smaller argument"
-          else ok tt
-    descend i j (a ∷ as) seenComp =
-      lookupDef σ i >>= λ d →
-      nthQty (Def.dtype d) j >>= λ q →
-      if eqQty q erased
-      then descend i (suc j) as seenComp
-      else if isSmallerVar rs a
-      then ok tt
-      else descend i (suc j) as true
+    descend : List (Tm n) → Result ⊤
+    descend args =
+      case lookupList args (RecSt.pos rs) of λ where
+        (ok a)   → if isSmallerVar rs a then ok tt else fail noDescent
+        (fail _) → fail noDescent
 
     go : Tm n × List (Tm n) → Result ⊤
     go (def i , args) =
       case RecSt.self rs of λ where
         nothing  → ok tt
-        (just j) → if i ≡ᵇ j
-          then (if RecSt.guarded rs then ok tt else descend i 0 args false)
-          else ok tt
+        (just j) → if i ≡ᵇ j then descend args else ok tt
     go _ = ok tt
+
+-- The definition being checked may not occur unapplied in run or evid:
+-- passed along, it could be applied to anything. The Bool is infer′'s:
+-- at the head of a spine it is applied.
+selfApplied : ∀ {n} → Mode → Bool → RecSt n → ℕ → Result ⊤
+selfApplied spec _    _  _ = ok tt
+selfApplied _    true _  _ = ok tt
+selfApplied _    false rs i =
+  case RecSt.self rs of λ where
+    nothing  → ok tt
+    (just j) → if i ≡ᵇ j
+      then fail "recursive definition must be applied to its arguments"
+      else ok tt
 
 -- Index clash / forcing. Expected indices live at n; the constructor
 -- target may mention ctor-argument variables (depth d). No metavars:
@@ -936,7 +955,7 @@ wkForces (x ∷ xs) = wkForce x ∷ wkForces xs
 -- from its head (inferCtorSpine), as an application is.
 mutual
   infer : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Result (Tm n × UseVec n)
-  infer k σ rs Γ m t = infer′ k σ rs Γ t m
+  infer k σ rs Γ m t = infer′ k σ rs Γ t m false
 
   check : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Result (UseVec n)
   check k σ rs Γ m e A = check′ k σ rs Γ m e A
@@ -952,11 +971,14 @@ mutual
   checkTy k σ rs Γ (pi q A₁ B) =                             -- type-pi
     checkTy k σ rs Γ A₁ >>
     checkTy k σ (extRec rs false false) (ext Γ q A₁) B
-  checkTy k σ rs Γ A = infer′ k σ rs Γ A spec >>= λ (T , _) → conv k σ T typ   -- type-el
+  checkTy k σ rs Γ A = infer′ k σ rs Γ A spec false >>= λ (T , _) → conv k σ T typ   -- type-el
 
   -- The term comes before the mode so that the case tree splits on the
   -- term first: infer′ … t m reduces for a known t and an unknown m.
-  infer′ : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Tm n → Mode → Result (Tm n × UseVec n)
+  -- The Bool: the term is the head of an application spine. Only the
+  -- app and def cases read it (descent); every other case passes on
+  -- through infer / check, which is not a head.
+  infer′ : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Tm n → Mode → Bool → Result (Tm n × UseVec n)
   check′ : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Result (UseVec n)
 
   headTailU : ∀ {n} → UseVec (suc n) → Use × UseVec n
@@ -1020,8 +1042,7 @@ mutual
     conv k σ A′ A >>
     (if eqQty q reuse then isData k σ A >>= guard "+ requires a Data type" else ok tt) >>
     let rec? = sm ∧ isDType di A
-        rs1  = extRec rs rec? rec?
-        rs′  = if eqQty q erased then keepNext rs rs1 else rs1
+        rs′  = extRec rs rec? rec?
         args′ = List._++_ (renList suc args) (var zero ∷ [])
     in checkBr k σ rs′ (ext Γ q A) m di ci sm B t (wk mot) args′ (wkForces fs) >>= λ uses →
     let (u₀ , us) = headTailU uses
@@ -1098,61 +1119,59 @@ mutual
     check k σ rs Γ m a A >>= λ au → appUses σ m f fu au
 
   -- ⇒-var-run / ⇒-var-evid / ⇒-var-spec
-  infer′ k σ rs Γ (var x) run with qtyOf Γ x
+  infer′ k σ rs Γ (var x) run _ with qtyOf Γ x
   ... | erased = fail "no promotion: erased variable in run mode"
   ... | q      =
     isRunType k σ (typOf Γ x) >>= λ b →
     if b
     then ok (typOf Γ x , oneHot x (if eqQty q reuse then Uω else U1))
     else fail ("no promotion: variable has a spec type " ++ showTm (typOf Γ x))
-  infer′ k σ rs Γ (var x) evid with qtyOf Γ x
+  infer′ k σ rs Γ (var x) evid _ with qtyOf Γ x
   ... | erased = fail "no promotion: erased variable in evidence mode"
   ... | q      = ok (typOf Γ x , oneHot x (if eqQty q reuse then Uω else U1))
-  infer′ k σ rs Γ (var x) spec = ok (typOf Γ x , u0s)
+  infer′ k σ rs Γ (var x) spec _ = ok (typOf Γ x , u0s)
 
   -- ⇒-ze
-  infer′ k σ rs Γ ze m = ok (nat , u0s)
+  infer′ k σ rs Γ ze m _ = ok (nat , u0s)
 
   -- ⇒-su
-  infer′ k σ rs Γ (su t) m =
+  infer′ k σ rs Γ (su t) m _ =
     check k σ rs Γ m t nat >>= λ u → ok (nat , u)
 
   -- ⇒-tt
-  infer′ k σ rs Γ one m = ok (unit , u0s)
+  infer′ k σ rs Γ one m _ = ok (unit , u0s)
 
   -- ⇒-nat / ⇒-unit / ⇒-empty  (spec only: these are types)
-  infer′ k σ rs Γ nat run = fail "no promotion: Nat is an erased term"
-  infer′ k σ rs Γ nat evid = fail "no promotion: Nat is an erased term"
-  infer′ k σ rs Γ unit run = fail "no promotion: Unit is an erased term"
-  infer′ k σ rs Γ unit evid = fail "no promotion: Unit is an erased term"
-  infer′ k σ rs Γ empty run = fail "no promotion: Empty is an erased term"
-  infer′ k σ rs Γ empty evid = fail "no promotion: Empty is an erased term"
-  infer′ k σ rs Γ typ run = fail "no promotion: Type is an erased term"
-  infer′ k σ rs Γ typ evid = fail "no promotion: Type is an erased term"
-  infer′ k σ rs Γ nat spec = ok (typ , u0s)
-  infer′ k σ rs Γ unit spec = ok (typ , u0s)
-  infer′ k σ rs Γ empty spec = ok (typ , u0s)
-  infer′ k σ rs Γ typ spec = fail "Type has no type (no Type : Type)"
+  infer′ k σ rs Γ nat run _ = fail "no promotion: Nat is an erased term"
+  infer′ k σ rs Γ nat evid _ = fail "no promotion: Nat is an erased term"
+  infer′ k σ rs Γ unit run _ = fail "no promotion: Unit is an erased term"
+  infer′ k σ rs Γ unit evid _ = fail "no promotion: Unit is an erased term"
+  infer′ k σ rs Γ empty run _ = fail "no promotion: Empty is an erased term"
+  infer′ k σ rs Γ empty evid _ = fail "no promotion: Empty is an erased term"
+  infer′ k σ rs Γ typ run _ = fail "no promotion: Type is an erased term"
+  infer′ k σ rs Γ typ evid _ = fail "no promotion: Type is an erased term"
+  infer′ k σ rs Γ nat spec _ = ok (typ , u0s)
+  infer′ k σ rs Γ unit spec _ = ok (typ , u0s)
+  infer′ k σ rs Γ empty spec _ = ok (typ , u0s)
+  infer′ k σ rs Γ typ spec _ = fail "Type has no type (no Type : Type)"
 
   -- ⇒-pi
-  infer′ k σ rs Γ (pi _ _ _) run = fail "no promotion: Π is an erased term"
-  infer′ k σ rs Γ (pi _ _ _) evid = fail "no promotion: Π is an erased term"
+  infer′ k σ rs Γ (pi _ _ _) run _ = fail "no promotion: Π is an erased term"
+  infer′ k σ rs Γ (pi _ _ _) evid _ = fail "no promotion: Π is an erased term"
   -- The codomain must be small. With B wf instead, Π (x : A) → Type : Type
   -- and Type is a retract of a small type (Girard's paradox).
-  infer′ k σ rs Γ (pi q A B) spec =
+  infer′ k σ rs Γ (pi q A B) spec _ =
     checkTy k σ rs Γ A >>
     check k σ (extRec rs false false) (ext Γ q A) spec B typ >>
     ok (typ , u0s)
 
   -- ⇒-lam
-  infer′ k σ rs Γ (lam q A t) m =
+  infer′ k σ rs Γ (lam q A t) m _ =
     checkTy k σ rs Γ A >>
     (if eqQty q reuse
      then isData k σ A >>= guard "+ requires a Data type"
      else ok tt) >>
-    let rs1 = extRec rs false (RecSt.nextOk rs)
-        rs′ = if eqQty q erased then keepNext rs rs1 else rs1
-    in infer k σ rs′ (ext Γ q A) m t >>= λ (B , uses) →
+    infer k σ (lamRec rs) (ext Γ q A) m t >>= λ (B , uses) →
     let (u₀ , us) = headTailU uses
     in checkBound m q u₀ >> ok (pi q A B , us)
 
@@ -1160,17 +1179,19 @@ mutual
   -- The argument is checked in the mode of the application; at a call
   -- site of an evidence definition in evid mode its uses are discarded
   -- (Env.appUses: instantiating a theorem does not consume resources).
-  infer′ k σ rs Γ (app f a) m =
-    infer k σ rs Γ m f >>= λ (ft , fu) →
+  -- The head is inferred as a head (hd = true): the descent check is
+  -- the outermost app's, on the maximal spine.
+  infer′ k σ rs Γ (app f a) m hd =
+    infer′ k σ rs Γ f m true >>= λ (ft , fu) →
     viewPi k σ ft >>= λ (q , A , B) →
     inferArg k σ rs Γ m f a q A fu >>= λ uses →
-    checkRec k σ m rs (app f a) >>
+    checkRec m hd rs (app f a) >>
     ok (inst B a , uses)
 
   -- ⇒-idt
-  infer′ k σ rs Γ (idt _ _ _) run = fail "no promotion: identity type is an erased term"
-  infer′ k σ rs Γ (idt _ _ _) evid = fail "no promotion: identity type is an erased term"
-  infer′ k σ rs Γ (idt A a b) spec =
+  infer′ k σ rs Γ (idt _ _ _) run _ = fail "no promotion: identity type is an erased term"
+  infer′ k σ rs Γ (idt _ _ _) evid _ = fail "no promotion: identity type is an erased term"
+  infer′ k σ rs Γ (idt A a b) spec _ =
     checkTy k σ rs Γ A >>
     floatIdOk k σ A >>
     check k σ rs Γ spec a A >>
@@ -1178,10 +1199,10 @@ mutual
     ok (typ , u0s)
 
   -- rfl must be checked (⇐-refl)
-  infer′ k σ rs Γ rfl m = fail "refl requires an expected identity type"
+  infer′ k σ rs Γ rfl m _ = fail "refl requires an expected identity type"
 
   -- ⇒-rwt
-  infer′ k σ rs Γ (rwt eq P t) m =
+  infer′ k σ rs Γ (rwt eq P t) m _ =
     infer k σ rs Γ evid eq >>= λ (et , _) →
     viewId k σ et >>= λ (A , l , r) →
     checkTy k σ (extRec rs false false) (ext Γ affine A) P >>
@@ -1189,17 +1210,17 @@ mutual
     ok (inst P l , tu)
 
   -- ⇒-dty
-  infer′ k σ rs Γ (dty _) run = fail "no promotion: a data former is an erased term"
-  infer′ k σ rs Γ (dty _) evid = fail "no promotion: a data former is an erased term"
-  infer′ k σ rs Γ (dty i) spec =
+  infer′ k σ rs Γ (dty _) run _ = fail "no promotion: a data former is an erased term"
+  infer′ k σ rs Γ (dty _) evid _ = fail "no promotion: a data former is an erased term"
+  infer′ k σ rs Γ (dty i) spec _ =
     lookupData σ i >>= λ d →
     ok (dtyType (DataDecl.pqtys d) (DataDecl.idxs d) , u0s)
 
   -- constructors are checked (⇐-ctor)
-  infer′ k σ rs Γ (ctor _ _) m = fail "constructor requires an expected data type"
+  infer′ k σ rs Γ (ctor _ _) m _ = fail "constructor requires an expected data type"
 
   -- ⇒-mData
-  infer′ k σ rs Γ (mData e P bs) m =
+  infer′ k σ rs Γ (mData e P bs) m _ =
     infer k σ rs Γ m e >>= λ (et , eu) →
     viewData k σ et >>= λ (di , params , idxs) →
     lookupData σ di >>= λ d →
@@ -1210,7 +1231,7 @@ mutual
     ok (appsFrom motFun (List._++_ idxs (e ∷ [])) , uses)
 
   -- ⇒-mNat
-  infer′ k σ rs Γ (mNat e P z s) m =
+  infer′ k σ rs Γ (mNat e P z s) m _ =
     check k σ rs Γ m e nat >>= λ eu →
     checkTy k σ (extRec rs false false) (ext Γ affine nat) P >>
     check k σ rs Γ m z (inst P ze) >>= λ zu →
@@ -1224,20 +1245,21 @@ mutual
        in combine m eu bu >>= λ uses → ok (inst P e , uses)
 
   -- ⇒-mEmp
-  infer′ k σ rs Γ (mEmp e P) m =
+  infer′ k σ rs Γ (mEmp e P) m _ =
     check k σ rs Γ m e empty >>= λ eu →
     checkTy k σ (extRec rs false false) (ext Γ affine empty) P >>
     ok (inst P e , eu)
 
   -- ⇒-mUnit
-  infer′ k σ rs Γ (mUnit e P u) m =
+  infer′ k σ rs Γ (mUnit e P u) m _ =
     check k σ rs Γ m e unit >>= λ eu →
     checkTy k σ (extRec rs false false) (ext Γ affine unit) P >>
     check k σ rs Γ m u (inst P one) >>= λ uu →
     combine m eu uu >>= λ uses → ok (inst P e , uses)
 
-  -- ⇒-def
-  infer′ {n} k σ rs Γ (def i) m =
+  -- ⇒-def; unapplied, the definition being checked is refused
+  infer′ {n} k σ rs Γ (def i) m hd =
+    selfApplied m hd rs i >>
     lookupDef σ i >>= λ d →
     (if allowedDef (Def.dmode d) m
      then ok tt
@@ -1249,47 +1271,47 @@ mutual
     ok (closed {n} (Def.dtype d) , u0s)
 
   -- ⇒-ann
-  infer′ k σ rs Γ (ann e A) m =
+  infer′ k σ rs Γ (ann e A) m _ =
     checkTy k σ rs Γ A >>
     check k σ rs Γ m e A >>= λ u → ok (A , u)
 
   -- ⇒-prod
-  infer′ k σ rs Γ (prod _ _) run = fail "no promotion: × is an erased term"
-  infer′ k σ rs Γ (prod _ _) evid = fail "no promotion: × is an erased term"
-  infer′ k σ rs Γ (prod A B) spec =                        -- components small
+  infer′ k σ rs Γ (prod _ _) run _ = fail "no promotion: × is an erased term"
+  infer′ k σ rs Γ (prod _ _) evid _ = fail "no promotion: × is an erased term"
+  infer′ k σ rs Γ (prod A B) spec _ =                        -- components small
     check k σ rs Γ spec A typ >>
     check k σ rs Γ spec B typ >>
     ok (typ , u0s)
 
   -- ⇒-nu
-  infer′ k σ rs Γ (nu _) run = fail "no promotion: ν is an erased term"
-  infer′ k σ rs Γ (nu _) evid = fail "no promotion: ν is an erased term"
-  infer′ k σ rs Γ (nu F) spec =                            -- body small
+  infer′ k σ rs Γ (nu _) run _ = fail "no promotion: ν is an erased term"
+  infer′ k σ rs Γ (nu _) evid _ = fail "no promotion: ν is an erased term"
+  infer′ k σ rs Γ (nu F) spec _ =                            -- body small
     check k σ (extRec rs false false) (ext Γ affine typ) spec F typ >>
     guard "ν body is not strictly positive" (strictPos F) >>
     ok (typ , u0s)
 
   -- ⇒-pair
-  infer′ k σ rs Γ (pair a b) m =
+  infer′ k σ rs Γ (pair a b) m _ =
     infer k σ rs Γ m a >>= λ (A , au) →
     infer k σ rs Γ m b >>= λ (B , bu) →
     combine m au bu >>= λ uses →
     ok (prod A B , uses)
 
   -- ⇒-fst
-  infer′ k σ rs Γ (fst t) m =
+  infer′ k σ rs Γ (fst t) m _ =
     infer k σ rs Γ m t >>= λ (T , u) →
     viewProd k σ T >>= λ (A , _) →
     ok (A , u)
 
   -- ⇒-snd
-  infer′ k σ rs Γ (snd t) m =
+  infer′ k σ rs Γ (snd t) m _ =
     infer k σ rs Γ m t >>= λ (T , u) →
     viewProd k σ T >>= λ (_ , B) →
     ok (B , u)
 
   -- ⇒-unf
-  infer′ k σ rs Γ (unf seed f) m =
+  infer′ k σ rs Γ (unf seed f) m _ =
     infer k σ rs Γ m seed >>= λ (S , seedU) →
     infer k σ rs Γ m f >>= λ (ft , fu) →
     viewPi k σ ft >>= λ (_ , S′ , Body) →
@@ -1301,40 +1323,40 @@ mutual
     ok (nu (prod (wk A) (var zero)) , uses)
 
   -- ⇒-ucons
-  infer′ k σ rs Γ (ucons s) m =
+  infer′ k σ rs Γ (ucons s) m _ =
     infer k σ rs Γ m s >>= λ (T , u) →
     viewNu k σ T >>= λ F →
     ok (inst F T , u)
 
   -- ⇒-i64 / ⇒-f32ty / ⇒-tensor  (spec formers)
-  infer′ k σ rs Γ i64 run = fail "no promotion: I64 is an erased term"
-  infer′ k σ rs Γ i64 evid = fail "no promotion: I64 is an erased term"
-  infer′ k σ rs Γ f32ty run = fail "no promotion: F32 is an erased term"
-  infer′ k σ rs Γ f32ty evid = fail "no promotion: F32 is an erased term"
-  infer′ k σ rs Γ i64 spec = ok (typ , u0s)
-  infer′ k σ rs Γ f32ty spec = ok (typ , u0s)
-  infer′ k σ rs Γ (tensor _ _) run = fail "no promotion: Tensor is an erased term"
-  infer′ k σ rs Γ (tensor _ _) evid = fail "no promotion: Tensor is an erased term"
-  infer′ k σ rs Γ (tensor D S) spec =
+  infer′ k σ rs Γ i64 run _ = fail "no promotion: I64 is an erased term"
+  infer′ k σ rs Γ i64 evid _ = fail "no promotion: I64 is an erased term"
+  infer′ k σ rs Γ f32ty run _ = fail "no promotion: F32 is an erased term"
+  infer′ k σ rs Γ f32ty evid _ = fail "no promotion: F32 is an erased term"
+  infer′ k σ rs Γ i64 spec _ = ok (typ , u0s)
+  infer′ k σ rs Γ f32ty spec _ = ok (typ , u0s)
+  infer′ k σ rs Γ (tensor _ _) run _ = fail "no promotion: Tensor is an erased term"
+  infer′ k σ rs Γ (tensor _ _) evid _ = fail "no promotion: Tensor is an erased term"
+  infer′ k σ rs Γ (tensor D S) spec _ =
     checkTy k σ rs Γ D >>
     isNxDtype k σ D >>= guard "Tensor dtype must be I64 or F32" >>
     check k σ rs Γ spec S i64 >>= λ _ →
     ok (typ , u0s)
 
   -- ⇒-addi / ⇒-muli
-  infer′ k σ rs Γ (addi x y) m =
+  infer′ k σ rs Γ (addi x y) m _ =
     check k σ rs Γ m x i64 >>= λ xu →
     check k σ rs Γ m y i64 >>= λ yu →
     combine m xu yu >>= λ uses →
     ok (i64 , uses)
-  infer′ k σ rs Γ (muli x y) m =
+  infer′ k σ rs Γ (muli x y) m _ =
     check k σ rs Γ m x i64 >>= λ xu →
     check k σ rs Γ m y i64 >>= λ yu →
     combine m xu yu >>= λ uses →
     ok (i64 , uses)
 
   -- ⇒-addt
-  infer′ k σ rs Γ (addt t u) m =
+  infer′ k σ rs Γ (addt t u) m _ =
     infer k σ rs Γ m t >>= λ (T , tu) →
     whnf k σ T >>= λ where
       (tensor D S) →
@@ -1344,12 +1366,12 @@ mutual
       T′ → fail ("addt expected a Tensor, got " ++ showTm T′)
 
   -- ⇒-toi64
-  infer′ k σ rs Γ (toi64 n) m =
+  infer′ k σ rs Γ (toi64 n) m _ =
     check k σ rs Γ m n nat >>= λ u →
     ok (i64 , u)
 
   -- ⇒-packi
-  infer′ k σ rs Γ (packi x y) m =
+  infer′ k σ rs Γ (packi x y) m _ =
     check k σ rs Γ m x i64 >>= λ xu →
     check k σ rs Γ m y i64 >>= λ yu →
     combine m xu yu >>= λ uses →
@@ -1376,7 +1398,7 @@ mutual
     viewNu k σ T >>= λ F →
     infer k σ rs Γ m seed >>= λ (S , seedU) →
     conv k σ A S >>
-    check k σ (extRec rs false (RecSt.nextOk rs)) (ext Γ q S) m t (wk (inst F S)) >>= λ uses →
+    check k σ (extRec rs false false) (ext Γ q S) m t (wk (inst F S)) >>= λ uses →
     let (u₀ , us) = headTailU uses
     in checkBound m q u₀ >>
        checkUnfold k σ m rs (lam q A t) >>
@@ -1399,9 +1421,7 @@ mutual
     checkTy k σ rs Γ A >>
     conv k σ A A′ >>
     (if eqQty q reuse then isData k σ A′ >>= guard "+ requires a Data type" else ok tt) >>
-    let rs1 = extRec rs false (RecSt.nextOk rs)
-        rs′ = if eqQty q erased then keepNext rs rs1 else rs1
-    in check k σ rs′ (ext Γ q A′) m t B >>= λ uses →
+    check k σ (lamRec rs) (ext Γ q A′) m t B >>= λ uses →
     let (u₀ , us) = headTailU uses
     in checkBound m q u₀ >> ok us
   checkLam k σ rs Γ m _ T (ok _) = fail "checkLam: not a λ"
@@ -1426,10 +1446,18 @@ mutual
 ------------------------------------------------------------------------
 
 emptyRec : RecSt 0
-emptyRec = recst nothing [] [] false false
+emptyRec = recst nothing 0 nothing [] []
 
-defRec : ℕ → RecSt 0
-defRec i = recst (just i) [] [] true false
+-- Checking definition i, descending on argument position p.
+defRec : ℕ → ℕ → RecSt 0
+defRec i p = recst (just i) p (just p) [] []
+
+-- The non-erased argument positions of a definition's type, read
+-- syntactically: the candidates for the position a self-call descends on.
+argPositions : ∀ {n} → ℕ → Tm n → List ℕ
+argPositions j (pi q _ B) =
+  (if eqQty q erased then [] else j ∷ []) List.++ argPositions (suc j) B
+argPositions _ _ = []
 
 -- Constructor fields must be small types. Parameters are (A : Type) and
 -- are skipped; a field of type Type would make the data type a large
@@ -1468,11 +1496,36 @@ checkDatas k σ = go 0 (Sig.datas σ)
     go _ []       = ok tt
     go i (d ∷ ds) = checkData k σ i d >> go (suc i) ds
 
+-- The body is checked descending on the first non-erased argument; if
+-- that fails, on each later one. A definition with no self-call passes
+-- the first attempt. When every attempt fails, the first attempt's
+-- error is reported: the position only affects the descent check, so a
+-- type error is the same for every position.
+checkAt : ℕ → Sig → ℕ → Def → ℕ → Result (UseVec 0)
+checkAt k σ i d p = check k σ (defRec i p) [] (Def.dmode d) (Def.dbody d) (Def.dtype d)
+
+retryBody : ℕ → Sig → ℕ → Def → String → List ℕ → Result (UseVec 0)
+retryBody k σ i d msg []       = fail msg
+retryBody k σ i d msg (p ∷ ps) =
+  case checkAt k σ i d p of λ where
+    (ok u)   → ok u
+    (fail _) → retryBody k σ i d msg ps
+
+checkBodyAt : ℕ → Sig → ℕ → Def → List ℕ → Result (UseVec 0)
+checkBodyAt k σ i d []       = checkAt k σ i d 0
+checkBodyAt k σ i d (p ∷ ps) =
+  case checkAt k σ i d p of λ where
+    (ok u)     → ok u
+    (fail msg) → retryBody k σ i d msg ps
+
+checkBody : ℕ → Sig → ℕ → Def → Result (UseVec 0)
+checkBody k σ i d = checkBodyAt k σ i d (argPositions 0 (Def.dtype d))
+
 checkDef : ℕ → Sig → ℕ → Result ⊤
 checkDef k σ i =
   lookupDef σ i >>= λ d →
   tag (Def.dname d ++ " type") (checkTy k σ emptyRec [] (Def.dtype d)) >>
-  tag (Def.dname d ++ " body") (check k σ (defRec i) [] (Def.dmode d) (Def.dbody d) (Def.dtype d)) >>
+  tag (Def.dname d ++ " body") (checkBody k σ i d) >>
   tag (Def.dname d ++ " productivity")
       (checkNu (Def.dmode d) (Def.dtype d) (Def.dbody d)) >>
   ok tt

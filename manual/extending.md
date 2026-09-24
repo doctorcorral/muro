@@ -129,7 +129,7 @@ De Bruijn drops the name strings: `{:pi, q, a, b}`, `{:lam, q, a, t}`, `{:mnat, 
 Hard rules you must not relax without a new theory:
 
 1. A run or evidence variable is used at most once, unless `+` on Data.
-2. Run and evidence recursion must descend on a non-erased argument. Spec does not check descent.
+2. Run and evidence recursion descends on one non-erased argument position, the same at every self-call, with a smaller variable there; a self-reference must be applied. Spec does not check descent. (`RecSt`, `checkRec`, `selfApplied`, `checkBody` in `Check`; the proof does not depend on the recursion state.)
 3. No promotion. Erased variables have no computational use.
 4. Emitted code is run only.
 

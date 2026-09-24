@@ -62,25 +62,33 @@ defmodule Muro.Check do
   defp typ_of(gamma, x), do: elem(Enum.at(gamma, x), 1)
 
   # -- rec state -------------------------------------------------------------
+  # A definition descends on one argument position `pos`, the same for every
+  # self-call: the variable bound by the leading λ at that position is
+  # rec_ok; a field of a match on a rec_ok or smaller variable is smaller
+  # (structurally below argument pos). A self-call must be the head of a
+  # maximal application spine whose argument at pos is a smaller variable.
+  # check_def tries each non-erased position (Agda: RecSt, checkBody).
 
-  defp empty_rec, do: %{self: nil, smaller: [], rec_ok: [], next_ok: false, guarded: false}
-  defp def_rec(name), do: %{self: name, smaller: [], rec_ok: [], next_ok: true, guarded: false}
+  defp empty_rec, do: %{self: nil, pos: 0, next_arg: nil, smaller: [], rec_ok: []}
+  defp def_rec(name, pos), do: %{self: name, pos: pos, next_arg: pos, smaller: [], rec_ok: []}
 
   defp ext_rec(rs, new_small, new_ok) do
     %{
       rs
       | smaller: [new_small | rs.smaller],
         rec_ok: [new_ok | rs.rec_ok],
-        next_ok: false
+        next_arg: nil
     }
   end
 
-  defp keep_next(old, new), do: %{new | next_ok: old.next_ok}
-
-  defp bind_rec(rs, q) do
-    new = ext_rec(rs, false, rs.next_ok)
-    if q == :erased, do: keep_next(rs, new), else: new
+  # A leading λ of a definition body binds argument pos when next_arg is 0;
+  # erased binders count as positions too (Agda: lamRec).
+  defp lam_rec(rs) do
+    %{ext_rec(rs, false, rs.next_arg == 0) | next_arg: step_arg(rs.next_arg)}
   end
+
+  defp step_arg(k) when is_integer(k) and k > 0, do: k - 1
+  defp step_arg(_), do: nil
 
   defp at(list, i), do: Enum.at(list, i) == true
 
@@ -183,20 +191,22 @@ defmodule Muro.Check do
     end
   end
 
-  defp nth_qty({:pi, q, _, _}, 0), do: {:ok, q}
-  defp nth_qty({:pi, _, _, b}, i), do: nth_qty(b, i - 1)
-  defp nth_qty(_, _), do: {:error, "recursive-call spine longer than Π telescope"}
+  @no_descent "recursive call does not descend on a smaller argument"
 
-  # Descent is required for run and evidence, not for spec.
-  defp check_rec(_book, :spec, _rs, _t), do: :ok
+  # A maximal application spine headed by the definition being checked (run
+  # and evidence; spec is not checked): the argument at pos must be a
+  # smaller variable. A shorter spine has no such argument. head? is
+  # infer's: an inner application (the head of a larger spine) is not the
+  # maximal spine and is not checked (Agda: checkRec).
+  defp check_rec(:spec, _head?, _rs, _t), do: :ok
+  defp check_rec(_mode, true, _rs, _t), do: :ok
 
-  defp check_rec(book, mode, rs, t) when mode in [:run, :evidence] do
+  defp check_rec(mode, false, rs, t) when mode in [:run, :evidence] do
     case apps(t) do
       {{:def, name}, args} when rs.self == name ->
-        if rs.guarded do
-          :ok
-        else
-          descend(book, mode, rs, name, args, 0)
+        case Enum.at(args, rs.pos) do
+          nil -> {:error, @no_descent}
+          a -> if smaller_var?(rs, a), do: :ok, else: {:error, @no_descent}
         end
 
       _ ->
@@ -204,38 +214,25 @@ defmodule Muro.Check do
     end
   end
 
-  defp descend(book, mode, rs, name, args, j),
-    do: descend(book, mode, rs, name, args, j, false)
+  # The definition being checked may not occur unapplied in run or evidence:
+  # passed along, it could be applied to anything. head? is infer's: at the
+  # head of a spine it is applied (Agda: selfApplied).
+  defp self_applied(:spec, _head?, _rs, _name), do: :ok
+  defp self_applied(_mode, true, _rs, _name), do: :ok
 
-  defp descend(book, _mode, _rs, name, [], j, seen_comp) do
-    with {:ok, d} <- lookup_def(book, name) do
-      case nth_qty(d.type, j) do
-        {:ok, _} ->
-          :ok
-
-        {:error, _} ->
-          if seen_comp,
-            do: {:error, "recursive call does not descend on a smaller argument"},
-            else: :ok
-      end
-    end
+  defp self_applied(_mode, false, rs, name) do
+    if rs.self == name,
+      do: {:error, "recursive definition must be applied to its arguments"},
+      else: :ok
   end
 
-  defp descend(book, mode, rs, name, [a | as], j, seen_comp) do
-    with {:ok, d} <- lookup_def(book, name),
-         {:ok, q} <- nth_qty(d.type, j) do
-      cond do
-        q == :erased ->
-          descend(book, mode, rs, name, as, j + 1, seen_comp)
-
-        smaller_var?(rs, a) ->
-          :ok
-
-        true ->
-          descend(book, mode, rs, name, as, j + 1, true)
-      end
-    end
+  # The non-erased argument positions of a definition's type, read
+  # syntactically: the candidates for the position a self-call descends on.
+  defp arg_positions({:pi, q, _, b}, j) do
+    if(q == :erased, do: [], else: [j]) ++ arg_positions(b, j + 1)
   end
+
+  defp arg_positions(_, _), do: []
 
   # -- whnf ------------------------------------------------------------------
 
@@ -806,7 +803,54 @@ defmodule Muro.Check do
 
   # -- infer / check ---------------------------------------------------------
 
-  defp infer(k, book, rs, gamma, mode, t) do
+  # ⇒-def, without the self-application test (infer asks it). Also data
+  # formers and bare constructors, which share the name space.
+  defp infer_def(k, book, gamma, m, name) do
+    n = nctx(gamma)
+
+    case lookup_def(book, name) do
+      {:ok, d} ->
+        cond do
+          not allowed_def?(d.mode, m) ->
+            {:error, "no promotion: #{d.mode} definition #{name} in #{m} mode"}
+
+          m == :run ->
+            case run_ty(k, book, d.type) do
+              {:ok, true} -> {:ok, {d.type, u0s(n)}}
+              {:ok, false} -> {:error, "no promotion: definition #{name} has a spec type"}
+              err -> err
+            end
+
+          true ->
+            {:ok, {d.type, u0s(n)}}
+        end
+
+      {:error, _} ->
+        case lookup_data(book, name) do
+          {:ok, d} when m == :spec ->
+            {:ok, {dty_type(d.params, Map.get(d, :indices, [])), u0s(n)}}
+
+          {:ok, _} ->
+            {:error, "no promotion: a data former is an erased term"}
+
+          {:error, _} ->
+            case lookup_ctor(book, name) do
+              {:ok, _} ->
+                {:error, "constructor requires an expected data type"}
+
+              err ->
+                err
+            end
+        end
+    end
+  end
+
+  # head?: the term is the head of an application spine. Only the app and
+  # def cases read it (descent); every other case passes on through
+  # infer/6 and check, which is not a head (Agda: infer′'s Bool).
+  defp infer(k, book, rs, gamma, mode, t), do: infer(k, book, rs, gamma, mode, t, false)
+
+  defp infer(k, book, rs, gamma, mode, t, head?) do
     n = nctx(gamma)
 
     case {mode, t} do
@@ -905,17 +949,18 @@ defmodule Muro.Check do
                  else: :ok
                ),
              {:ok, {b, [u0 | us]}} <-
-               infer(k, book, bind_rec(rs, q), ext(gamma, q, a), m, t1),
+               infer(k, book, lam_rec(rs), ext(gamma, q, a), m, t1),
              :ok <- check_bound(m, q, u0) do
           {:ok, {{:pi, q, a, b}, us}}
         end
 
-      # ⇒-app-aff / ⇒-app-era / ⇒-app-reuse
+      # ⇒-app-aff / ⇒-app-era / ⇒-app-reuse: the head as a head; the
+      # descent check is the outermost app's, on the maximal spine
       {m, {:app, f, a}} ->
-        with {:ok, {ft, fu}} <- infer(k, book, rs, gamma, m, f),
+        with {:ok, {ft, fu}} <- infer(k, book, rs, gamma, m, f, true),
              {:ok, {q, a_ty, b}} <- view_pi(k, book, ft),
              {:ok, uses} <- infer_arg(k, book, rs, gamma, m, q, a_ty, fu, a, f),
-             :ok <- check_rec(book, m, rs, {:app, f, a}) do
+             :ok <- check_rec(m, head?, rs, {:app, f, a}) do
           {:ok, {Subst.inst(b, a), uses}}
         end
 
@@ -979,43 +1024,10 @@ defmodule Muro.Check do
           {:ok, {Subst.inst(p, e), uses}}
         end
 
-      # ⇒-def / ⇒-dty
+      # ⇒-def / ⇒-dty; unapplied, the definition being checked is refused
       {m, {:def, name}} ->
-        case lookup_def(book, name) do
-          {:ok, d} ->
-            cond do
-              not allowed_def?(d.mode, m) ->
-                {:error, "no promotion: #{d.mode} definition #{name} in #{m} mode"}
-
-              m == :run ->
-                case run_ty(k, book, d.type) do
-                  {:ok, true} -> {:ok, {d.type, u0s(n)}}
-                  {:ok, false} -> {:error, "no promotion: definition #{name} has a spec type"}
-                  err -> err
-                end
-
-              true ->
-                {:ok, {d.type, u0s(n)}}
-            end
-
-          {:error, _} ->
-            case lookup_data(book, name) do
-              {:ok, d} when m == :spec ->
-                {:ok, {dty_type(d.params, Map.get(d, :indices, [])), u0s(n)}}
-
-              {:ok, _} ->
-                {:error, "no promotion: a data former is an erased term"}
-
-              {:error, _} ->
-                case lookup_ctor(book, name) do
-                  {:ok, _} ->
-                    {:error, "constructor requires an expected data type"}
-
-                  err ->
-                    err
-                end
-            end
-        end
+        with :ok <- self_applied(m, head?, rs, name),
+             do: infer_def(k, book, gamma, m, name)
 
       # ⇒-ann
       {m, {:ann, e, a}} ->
@@ -1259,7 +1271,7 @@ defmodule Muro.Check do
                    check(
                      k,
                      book,
-                     bind_rec(rs, q),
+                     lam_rec(rs),
                      ext(gamma, q, a1),
                      mode,
                      t,
@@ -1296,7 +1308,7 @@ defmodule Muro.Check do
                check(
                  k,
                  book,
-                 ext_rec(rs, false, rs.next_ok),
+                 ext_rec(rs, false, false),
                  ext(gamma, q, s_ty),
                  mode,
                  t,
@@ -1360,12 +1372,40 @@ defmodule Muro.Check do
 
   def check_def(book, %{kind: :data} = d, fuel), do: check_data(book, d, fuel)
 
-  def check_def(book, %{name: name, mode: mode, type: ty, body: body}, k) do
+  def check_def(book, %{name: name, mode: mode, type: ty, body: body} = d, k) do
     with :ok <- tag("#{name} type", check_ty(k, book, empty_rec(), [], ty)),
-         {:ok, _} <-
-           tag("#{name} body", check(k, book, def_rec(name), [], mode, body, ty)),
+         {:ok, _} <- tag("#{name} body", check_body(k, book, d)),
          :ok <- tag("#{name} productivity", check_nu(mode, ty, body)) do
       :ok
+    end
+  end
+
+  # The body is checked descending on the first non-erased argument; if that
+  # fails, on each later one. A definition with no self-call passes the first
+  # attempt. When every attempt fails, the first attempt's error is reported:
+  # the position only affects the descent check, so a type error is the same
+  # for every position (Agda: checkBody).
+  defp check_body(k, book, %{name: name, mode: mode, type: ty, body: body}) do
+    at = fn p -> check(k, book, def_rec(name, p), [], mode, body, ty) end
+
+    case arg_positions(ty, 0) do
+      [] ->
+        at.(0)
+
+      [p | ps] ->
+        case at.(p) do
+          {:ok, u} -> {:ok, u}
+          {:error, msg} -> retry_body(at, msg, ps)
+        end
+    end
+  end
+
+  defp retry_body(_at, msg, []), do: {:error, msg}
+
+  defp retry_body(at, msg, [p | ps]) do
+    case at.(p) do
+      {:ok, u} -> {:ok, u}
+      {:error, _} -> retry_body(at, msg, ps)
     end
   end
 
@@ -1594,8 +1634,7 @@ defmodule Muro.Check do
 
           {[nil | fs], {:lam, q1, a1, t}} ->
             rec? = sm and is_d_type?(book, dname, a)
-            rs1 = ext_rec(rs, rec?, rec?)
-            rs2 = if q == :erased, do: keep_next(rs, rs1), else: rs1
+            rs2 = ext_rec(rs, rec?, rec?)
             args1 = Enum.map(args, &Subst.wk/1) ++ [{:var, 0}]
 
             with :ok <- if(q == q1, do: :ok, else: {:error, "λ/Π quantity mismatch"}),

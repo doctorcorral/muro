@@ -66,7 +66,7 @@ Muro will not guess.
 2. Every binder is typed. There are no implicit arguments.
 3. Every `match` writes `motive (λ x → …)` in parentheses.
 4. `suc` on a term is `suc(t)` or `suc t`. `suc p` in a pattern is a binder, not an application.
-5. Recursion on `run` or `evidence` must go through `match` and call the function on a smaller variable from the match. Spec does not check descent.
+5. Recursion on `run` or `evidence` must go through `match` on one argument and pass a smaller variable from the match at that argument's position. Spec does not check descent.
 
 A definition is in the book the moment `Parser.parse/1` returns it. The checker sees the whole book. Forward references are allowed.
 
