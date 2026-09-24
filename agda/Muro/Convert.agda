@@ -7,7 +7,7 @@
 --      δ    def i unfolds when allowedDef permits the mode
 --      β    app (lam _ _ t) a ⟶ inst t a
 --      ι    mNat ze / mNat (su _) / mUnit one / rwt rfl /
---           mData (ctor i j a₁ … aₙ) with a j-th branch
+--           letp (pair a b) t / mData (ctor i j a₁ … aₙ) with a j-th branch
 --      ann  ann e A ⟶ e
 --    ⟶ is deterministic (det). Nf / Ne are its normal and neutral
 --    forms; Consistency uses ⟶ for progress.
@@ -21,8 +21,8 @@
 --    different heads are never convertible (≈-shape), and Π / ≡ are
 --    injective up to ≈. No normalisation is assumed anywhere.
 --
--- ≈ does not contain η, or any rule for ν / products / Nx (those
--- terms are inert). Check.conv is the algorithm; it compares subterms
+-- ≈ does not contain η, or any rule for ν / the projections fst, snd /
+-- Nx (those terms are inert). Pairs are eliminated by letp only. Check.conv is the algorithm; it compares subterms
 -- after whnf and is expected to be sound for ≈.
 --
 -- Data. A constructor application ctor i j a₁ … aₙ and a data type
@@ -60,8 +60,6 @@ ok-inj refl = refl
 ------------------------------------------------------------------------
 
 data Foreign {n} : Tm n → Set where
-  f-prod   : ∀ {A B} → Foreign (prod A B)
-  f-pair   : ∀ {a b} → Foreign (pair a b)
   f-fst    : ∀ {t} → Foreign (fst t)
   f-snd    : ∀ {t} → Foreign (snd t)
   f-nu     : ∀ {F} → Foreign (nu F)
@@ -97,6 +95,7 @@ data Ne σ m where
   ne-mEmp    : ∀ {e P} → Ne σ m e → Ne σ m (mEmp e P)
   ne-rwt     : ∀ {eq P t} → Ne σ m eq → Ne σ m (rwt eq P t)
   ne-mData   : ∀ {e P bs} → Ne σ m e → Ne σ m (mData e P bs)
+  ne-letp    : ∀ {e t} → Ne σ m e → Ne σ m (letp e t)
   ne-foreign : ∀ {t} → Foreign t → Ne σ m t
 
 data Nf σ m where
@@ -112,6 +111,8 @@ data Nf σ m where
   nf-empty : Nf σ m empty
   nf-idt   : ∀ {A a b} → Nf σ m (idt A a b)
   nf-rfl   : Nf σ m rfl
+  nf-prod  : ∀ {A B} → Nf σ m (prod A B)
+  nf-pair  : ∀ {a b} → Nf σ m (pair a b)
   nf-ctor  : ∀ {i j as e} → Spine (ctor i j) as e → Nf σ m e
   nf-dty   : ∀ {i as e} → Spine (dty i) as e → Nf σ m e
 
@@ -174,13 +175,18 @@ data _⊢[_]_⟶_ (σ : Sig) (m : Mode) {n} : Tm n → Tm n → Set where
     → σ ⊢[ m ] e ⟶ e′
     → σ ⊢[ m ] mData e P bs ⟶ mData e′ P bs
 
+  ι-letp : ∀ {a b t}
+    → σ ⊢[ m ] letp (pair a b) t ⟶ inst₂ t a b
+
+  letp-e : ∀ {e e′ t}
+    → σ ⊢[ m ] e ⟶ e′
+    → σ ⊢[ m ] letp e t ⟶ letp e′ t
+
 ------------------------------------------------------------------------
 -- Normal forms do not step.
 ------------------------------------------------------------------------
 
 foreign-no-step : ∀ {σ m n} {t u : Tm n} → Foreign t → σ ⊢[ m ] t ⟶ u → ⊥
-foreign-no-step f-prod   ()
-foreign-no-step f-pair   ()
 foreign-no-step f-fst    ()
 foreign-no-step f-snd    ()
 foreign-no-step f-nu     ()
@@ -227,6 +233,8 @@ ne-no-step (ne-rwt (ne-foreign ())) ιrfl
 ne-no-step (ne-rwt ne) (rwt-e s) = ne-no-step ne s
 ne-no-step (ne-mData ne) (ι-data sp _) = ne-Spine ne sp
 ne-no-step (ne-mData ne) (mData-e s) = ne-no-step ne s
+ne-no-step (ne-letp (ne-foreign ())) ι-letp
+ne-no-step (ne-letp ne) (letp-e s) = ne-no-step ne s
 ne-no-step (ne-foreign f) s = foreign-no-step f s
 
 nf-no-step (nf-ne ne) s = ne-no-step ne s
@@ -241,6 +249,8 @@ nf-no-step nf-one ()
 nf-no-step nf-empty ()
 nf-no-step nf-idt ()
 nf-no-step nf-rfl ()
+nf-no-step nf-prod ()
+nf-no-step nf-pair ()
 nf-no-step (nf-ctor sp) s = Spine-no-step dh-ctor sp s
 nf-no-step (nf-dty sp) s = Spine-no-step dh-dty sp s
 
@@ -279,6 +289,10 @@ det (ι-data sp lk) (ι-data sp′ lk′) with Spine-unique head-ctor head-ctor 
 det (ι-data sp _) (mData-e s) = ⊥-elim (Spine-no-step dh-ctor sp s)
 det (mData-e s) (ι-data sp _) = ⊥-elim (Spine-no-step dh-ctor sp s)
 det (mData-e s) (mData-e s′) = cong (λ e → mData e _ _) (det s s′)
+det ι-letp ι-letp = refl
+det ι-letp (letp-e ())
+det (letp-e ()) ι-letp
+det (letp-e s) (letp-e s′) = cong (λ e → letp e _) (det s s′)
 
 ------------------------------------------------------------------------
 -- Reflexive-transitive closure.
@@ -325,6 +339,8 @@ nf-⟶* nf (⟶*-step s _) = ⊥-elim (nf-no-step nf s)
 ⟶⊆⇛ ann-e = ⇛-ann (⇛-refl _)
 ⟶⊆⇛ (ι-data sp lk) = ⇛-ιdata sp lk (⇛L-refl _) (⇛-refl _)
 ⟶⊆⇛ (mData-e s) = ⇛-mData (⟶⊆⇛ s) (⇛-refl _) (⇛L-refl _)
+⟶⊆⇛ ι-letp = ⇛-ιletp (⇛-refl _) (⇛-refl _) (⇛-refl _)
+⟶⊆⇛ (letp-e s) = ⇛-letp (⟶⊆⇛ s) (⇛-refl _)
 
 ⟶*⊆⇛* : ∀ {σ m n} {t u : Tm n} → σ ⊢[ m ] t ⟶* u → σ ⊢[ m ] t ⇛* u
 ⟶*⊆⇛* ⟶*-refl = ⇛*-refl
@@ -425,6 +441,7 @@ join→≈ tv uv = ≈-trans (⇛*→≈ tv) (≈-sym (⇛*→≈ uv))
 
 data Shape : Set where
   s-typ s-pi s-nat s-unit s-empty s-idt s-lam s-ze s-su s-one s-rfl : Shape
+  s-prod s-pair : Shape
 
 data HasShape {n} : Tm n → Shape → Set where
   h-typ   : HasShape typ s-typ
@@ -438,6 +455,8 @@ data HasShape {n} : Tm n → Shape → Set where
   h-su    : ∀ {t} → HasShape (su t) s-su
   h-one   : HasShape one s-one
   h-rfl   : HasShape rfl s-rfl
+  h-prod  : ∀ {A B} → HasShape (prod A B) s-prod
+  h-pair  : ∀ {a b} → HasShape (pair a b) s-pair
 
 shape-⇛* : ∀ {σ m n} {t u : Tm n} {s}
   → HasShape t s → σ ⊢[ m ] t ⇛* u → HasShape u s
@@ -456,6 +475,10 @@ shape-⇛* h-su r with su-⇛* r
 ... | _ , refl , _ = h-su
 shape-⇛* h-one r rewrite one-⇛* r = h-one
 shape-⇛* h-rfl r rewrite rfl-⇛* r = h-rfl
+shape-⇛* h-prod r with prod-⇛* r
+... | _ , _ , refl , _ , _ = h-prod
+shape-⇛* h-pair r with pair-⇛* r
+... | _ , _ , refl , _ , _ = h-pair
 
 shape-unique : ∀ {n} {t : Tm n} {s s′} → HasShape t s → HasShape t s′ → s ≡ s′
 shape-unique h-typ h-typ = refl
@@ -469,6 +492,8 @@ shape-unique h-ze h-ze = refl
 shape-unique h-su h-su = refl
 shape-unique h-one h-one = refl
 shape-unique h-rfl h-rfl = refl
+shape-unique h-prod h-prod = refl
+shape-unique h-pair h-pair = refl
 
 ≈-shape : ∀ {σ m n} {t u : Tm n} {s s′}
   → HasShape t s → HasShape u s′ → σ ⊢[ m ] t ≈ u → s ≡ s′
@@ -482,6 +507,14 @@ shape-unique h-rfl h-rfl = refl
 ... | v , tv , uv with pi-⇛* tv
 ...   | A″ , B″ , refl , rA , rB with pi-⇛* uv
 ...     | _ , _ , refl , rA′ , rB′ = refl , join→≈ rA rA′ , join→≈ rB rB′
+
+≈-prod-inj : ∀ {σ m n} {A A′ B B′ : Tm n}
+  → σ ⊢[ m ] prod A B ≈ prod A′ B′
+  → (σ ⊢[ m ] A ≈ A′) × (σ ⊢[ m ] B ≈ B′)
+≈-prod-inj c with ≈→join c
+... | v , tv , uv with prod-⇛* tv
+...   | _ , _ , refl , rA , rB with prod-⇛* uv
+...     | _ , _ , refl , rA′ , rB′ = join→≈ rA rA′ , join→≈ rB rB′
 
 ≈-idt-inj : ∀ {σ m n} {A A′ a a′ b b′ : Tm n}
   → σ ⊢[ m ] idt A a b ≈ idt A′ a′ b′

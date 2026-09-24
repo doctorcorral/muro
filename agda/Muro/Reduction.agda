@@ -3,7 +3,8 @@
 -- contract any set of the redexes present in t at once. Redexes are
 --   δ    def i             ⇛ closed body      (allowedDef permits m)
 --   β    app (lam q A t) a ⇛ inst t′ a′
---   ι    mNat ze / mNat (su u) / mUnit one / rwt rfl
+--   ι    mNat ze / mNat (su u) / mUnit one / rwt rfl /
+--        letp (pair a b) t  ⇛ inst₂ t′ a′ b′
 --   ann  ann e A           ⇛ e′
 -- and ⇛ is a congruence for every constructor of Tm, so it is closed
 -- under substitution (⇛-sub). Confluence is by the triangle property:
@@ -11,8 +12,8 @@
 -- development of t. Hence ⇛* is confluent, and the conversion that ⇛
 -- generates (Muro.Convert) is joinability.
 --
--- Nothing here is about typing. Terms outside the ⊢ fragment (data, ν,
--- products, Nx) have congruence rules and no redexes.
+-- Nothing here is about typing. Terms outside the ⊢ fragment (ν, the
+-- projections fst / snd, Nx) have congruence rules and no redexes.
 ------------------------------------------------------------------------
 
 {-# OPTIONS --safe #-}
@@ -63,6 +64,10 @@ data _⊢[_]_⇛_ σ m where
   ⇛-ann : ∀ {e e′ A}
     → σ ⊢[ m ] e ⇛ e′
     → σ ⊢[ m ] ann e A ⇛ e′
+  -- let (a, b) = (a₀, b₀) in t: both binders at once
+  ⇛-ιletp : ∀ {a a′ b b′ t t′}
+    → σ ⊢[ m ] a ⇛ a′ → σ ⊢[ m ] b ⇛ b′ → σ ⊢[ m ] t ⇛ t′
+    → σ ⊢[ m ] letp (pair a b) t ⇛ inst₂ t′ a′ b′
   -- match on a constructor application: the j-th branch applied to the
   -- constructor's arguments (Check.dataWhnf)
   ⇛-ιdata : ∀ {i j as as′ e P bs b b′}
@@ -115,6 +120,8 @@ data _⊢[_]_⇛_ σ m where
     → σ ⊢[ m ] pair a b ⇛ pair a′ b′
   ⇛-fst   : ∀ {t t′} → σ ⊢[ m ] t ⇛ t′ → σ ⊢[ m ] fst t ⇛ fst t′
   ⇛-snd   : ∀ {t t′} → σ ⊢[ m ] t ⇛ t′ → σ ⊢[ m ] snd t ⇛ snd t′
+  ⇛-letp  : ∀ {e e′ t t′} → σ ⊢[ m ] e ⇛ e′ → σ ⊢[ m ] t ⇛ t′
+    → σ ⊢[ m ] letp e t ⇛ letp e′ t′
   ⇛-nu    : ∀ {F F′} → σ ⊢[ m ] F ⇛ F′ → σ ⊢[ m ] nu F ⇛ nu F′
   ⇛-unf   : ∀ {s s′ f f′} → σ ⊢[ m ] s ⇛ s′ → σ ⊢[ m ] f ⇛ f′
     → σ ⊢[ m ] unf s f ⇛ unf s′ f′
@@ -170,6 +177,7 @@ mutual
   ⇛-refl (pair a b) = ⇛-pair (⇛-refl a) (⇛-refl b)
   ⇛-refl (fst t) = ⇛-fst (⇛-refl t)
   ⇛-refl (snd t) = ⇛-snd (⇛-refl t)
+  ⇛-refl (letp e t) = ⇛-letp (⇛-refl e) (⇛-refl t)
   ⇛-refl (nu F) = ⇛-nu (⇛-refl F)
   ⇛-refl (unf s f) = ⇛-unf (⇛-refl s) (⇛-refl f)
   ⇛-refl (ucons s) = ⇛-ucons (⇛-refl s)
@@ -199,6 +207,7 @@ mutual
   ⇛-mode h (⇛-ιtt u) = ⇛-ιtt (⇛-mode h u)
   ⇛-mode h (⇛-ιrfl t) = ⇛-ιrfl (⇛-mode h t)
   ⇛-mode h (⇛-ann e) = ⇛-ann (⇛-mode h e)
+  ⇛-mode h (⇛-ιletp a b t) = ⇛-ιletp (⇛-mode h a) (⇛-mode h b) (⇛-mode h t)
   ⇛-mode h (⇛-ιdata sp lk as b) = ⇛-ιdata sp lk (⇛L-mode h as) (⇛-mode h b)
   ⇛-mode h ⇛-var = ⇛-var
   ⇛-mode h ⇛-typ = ⇛-typ
@@ -227,6 +236,7 @@ mutual
   ⇛-mode h (⇛-pair a b) = ⇛-pair (⇛-mode h a) (⇛-mode h b)
   ⇛-mode h (⇛-fst t) = ⇛-fst (⇛-mode h t)
   ⇛-mode h (⇛-snd t) = ⇛-snd (⇛-mode h t)
+  ⇛-mode h (⇛-letp e t) = ⇛-letp (⇛-mode h e) (⇛-mode h t)
   ⇛-mode h (⇛-nu F) = ⇛-nu (⇛-mode h F)
   ⇛-mode h (⇛-unf s f) = ⇛-unf (⇛-mode h s) (⇛-mode h f)
   ⇛-mode h (⇛-ucons s) = ⇛-ucons (⇛-mode h s)
@@ -260,6 +270,8 @@ mutual
   ⇛-ren ρ (⇛-ιtt u) = ⇛-ιtt (⇛-ren ρ u)
   ⇛-ren ρ (⇛-ιrfl t) = ⇛-ιrfl (⇛-ren ρ t)
   ⇛-ren ρ (⇛-ann e) = ⇛-ann (⇛-ren ρ e)
+  ⇛-ren ρ (⇛-ιletp {a′ = a′} {b′ = b′} {t′ = t′} a b t) rewrite ren-inst₂ ρ t′ a′ b′ =
+    ⇛-ιletp (⇛-ren ρ a) (⇛-ren ρ b) (⇛-ren (lift (lift ρ)) t)
   ⇛-ren ρ (⇛-ιdata {as′ = as′} {bs = bs} {b′ = b′} sp lk as b)
     rewrite ren-appsFrom ρ b′ as′ =
     ⇛-ιdata (Spine-ren ρ sp) (lookupList-ren ρ bs _ lk) (⇛L-ren ρ as) (⇛-ren ρ b)
@@ -291,6 +303,7 @@ mutual
   ⇛-ren ρ (⇛-pair a b) = ⇛-pair (⇛-ren ρ a) (⇛-ren ρ b)
   ⇛-ren ρ (⇛-fst t) = ⇛-fst (⇛-ren ρ t)
   ⇛-ren ρ (⇛-snd t) = ⇛-snd (⇛-ren ρ t)
+  ⇛-ren ρ (⇛-letp e t) = ⇛-letp (⇛-ren ρ e) (⇛-ren (lift (lift ρ)) t)
   ⇛-ren ρ (⇛-nu F) = ⇛-nu (⇛-ren (lift ρ) F)
   ⇛-ren ρ (⇛-unf s f) = ⇛-unf (⇛-ren ρ s) (⇛-ren ρ f)
   ⇛-ren ρ (⇛-ucons s) = ⇛-ucons (⇛-ren ρ s)
@@ -332,6 +345,8 @@ mutual
   ⇛-sub h (⇛-ιtt u) = ⇛-ιtt (⇛-sub h u)
   ⇛-sub h (⇛-ιrfl t) = ⇛-ιrfl (⇛-sub h t)
   ⇛-sub h (⇛-ann e) = ⇛-ann (⇛-sub h e)
+  ⇛-sub {τ′ = τ′} h (⇛-ιletp {a′ = a′} {b′ = b′} {t′ = t′} a b t) rewrite sub-inst₂ τ′ t′ a′ b′ =
+    ⇛-ιletp (⇛-sub h a) (⇛-sub h b) (⇛-sub (⇛σ-lifts (⇛σ-lifts h)) t)
   ⇛-sub {τ′ = τ′} h (⇛-ιdata {as′ = as′} {bs = bs} {b′ = b′} sp lk as b)
     rewrite sub-appsFrom τ′ b′ as′ =
     ⇛-ιdata (Spine-sub _ sp) (lookupList-sub _ bs _ lk) (⇛L-sub h as) (⇛-sub h b)
@@ -363,6 +378,7 @@ mutual
   ⇛-sub h (⇛-pair a b) = ⇛-pair (⇛-sub h a) (⇛-sub h b)
   ⇛-sub h (⇛-fst t) = ⇛-fst (⇛-sub h t)
   ⇛-sub h (⇛-snd t) = ⇛-snd (⇛-sub h t)
+  ⇛-sub h (⇛-letp e t) = ⇛-letp (⇛-sub h e) (⇛-sub (⇛σ-lifts (⇛σ-lifts h)) t)
   ⇛-sub h (⇛-nu F) = ⇛-nu (⇛-sub (⇛σ-lifts h) F)
   ⇛-sub h (⇛-unf s f) = ⇛-unf (⇛-sub h s) (⇛-sub h f)
   ⇛-sub h (⇛-ucons s) = ⇛-ucons (⇛-sub h s)
@@ -391,6 +407,11 @@ mutual
 ⇛-inst : ∀ {σ m n} {t t′ : Tm (suc n)} {a a′ : Tm n}
   → σ ⊢[ m ] t ⇛ t′ → σ ⊢[ m ] a ⇛ a′ → σ ⊢[ m ] inst t a ⇛ inst t′ a′
 ⇛-inst dt da = ⇛-sub (⇛σ-inst da) dt
+
+⇛-inst₂ : ∀ {σ m n} {t t′ : Tm (suc (suc n))} {a a′ b b′ : Tm n}
+  → σ ⊢[ m ] t ⇛ t′ → σ ⊢[ m ] a ⇛ a′ → σ ⊢[ m ] b ⇛ b′
+  → σ ⊢[ m ] inst₂ t a b ⇛ inst₂ t′ a′ b′
+⇛-inst₂ dt da db = ⇛-inst (⇛-inst dt (⇛-ren suc db)) da
 
 -- Reduce only the substituted terms, or only the term.
 ⇛-sub-l : ∀ {σ m n k} {τ τ′ : Fin n → Tm k} (t : Tm n)
@@ -459,6 +480,8 @@ mutual
   dev σ m (pair a b) = pair (dev σ m a) (dev σ m b)
   dev σ m (fst t) = fst (dev σ m t)
   dev σ m (snd t) = snd (dev σ m t)
+  dev σ m (letp (pair a b) t) = inst₂ (dev σ m t) (dev σ m a) (dev σ m b)
+  dev σ m (letp e t) = letp (dev σ m e) (dev σ m t)
   dev σ m (nu F) = nu (dev σ m F)
   dev σ m (unf s f) = unf (dev σ m s) (dev σ m f)
   dev σ m (ucons s) = ucons (dev σ m s)
@@ -582,6 +605,7 @@ mutual
   tri (⇛-ιtt u) = tri u
   tri (⇛-ιrfl t) = tri t
   tri (⇛-ann e) = tri e
+  tri (⇛-ιletp a b t) = ⇛-inst₂ (tri t) (tri a) (tri b)
   tri (⇛-ιdata {P = P} sp lk as b) = tri-ιdata {P = P} sp lk (triL as) (tri b)
   tri ⇛-var = ⇛-var
   tri ⇛-typ = ⇛-typ
@@ -609,6 +633,7 @@ mutual
   tri (⇛-pair a b) = ⇛-pair (tri a) (tri b)
   tri (⇛-fst t) = ⇛-fst (tri t)
   tri (⇛-snd t) = ⇛-snd (tri t)
+  tri (⇛-letp e t) = tri-letp e (tri e) (tri t)
   tri (⇛-nu F) = ⇛-nu (tri F)
   tri (⇛-unf s f) = ⇛-unf (tri s) (tri f)
   tri (⇛-ucons s) = ⇛-ucons (tri s)
@@ -686,6 +711,7 @@ mutual
   ... | (pair _ _ , _) = ⇛-mData e* P* bs*
   ... | (fst _ , _) = ⇛-mData e* P* bs*
   ... | (snd _ , _) = ⇛-mData e* P* bs*
+  ... | (letp _ _ , _) = ⇛-mData e* P* bs*
   ... | (nu _ , _) = ⇛-mData e* P* bs*
   ... | (unf _ _ , _) = ⇛-mData e* P* bs*
   ... | (ucons _ , _) = ⇛-mData e* P* bs*
@@ -728,6 +754,7 @@ mutual
   tri-app {f = pair _ _} _ f* a* = ⇛-app f* a*
   tri-app {f = fst _} _ f* a* = ⇛-app f* a*
   tri-app {f = snd _} _ f* a* = ⇛-app f* a*
+  tri-app {f = letp _ _} _ f* a* = ⇛-app f* a*
   tri-app {f = nu _} _ f* a* = ⇛-app f* a*
   tri-app {f = unf _ _} _ f* a* = ⇛-app f* a*
   tri-app {f = ucons _} _ f* a* = ⇛-app f* a*
@@ -771,6 +798,7 @@ mutual
   tri-mNat {e = pair _ _} _ e* P* z* s* = ⇛-mNat e* P* z* s*
   tri-mNat {e = fst _} _ e* P* z* s* = ⇛-mNat e* P* z* s*
   tri-mNat {e = snd _} _ e* P* z* s* = ⇛-mNat e* P* z* s*
+  tri-mNat {e = letp _ _} _ e* P* z* s* = ⇛-mNat e* P* z* s*
   tri-mNat {e = nu _} _ e* P* z* s* = ⇛-mNat e* P* z* s*
   tri-mNat {e = unf _ _} _ e* P* z* s* = ⇛-mNat e* P* z* s*
   tri-mNat {e = ucons _} _ e* P* z* s* = ⇛-mNat e* P* z* s*
@@ -814,6 +842,7 @@ mutual
   tri-mUnit {e = pair _ _} _ e* P* u* = ⇛-mUnit e* P* u*
   tri-mUnit {e = fst _} _ e* P* u* = ⇛-mUnit e* P* u*
   tri-mUnit {e = snd _} _ e* P* u* = ⇛-mUnit e* P* u*
+  tri-mUnit {e = letp _ _} _ e* P* u* = ⇛-mUnit e* P* u*
   tri-mUnit {e = nu _} _ e* P* u* = ⇛-mUnit e* P* u*
   tri-mUnit {e = unf _ _} _ e* P* u* = ⇛-mUnit e* P* u*
   tri-mUnit {e = ucons _} _ e* P* u* = ⇛-mUnit e* P* u*
@@ -825,6 +854,49 @@ mutual
   tri-mUnit {e = addt _ _} _ e* P* u* = ⇛-mUnit e* P* u*
   tri-mUnit {e = toi64 _} _ e* P* u* = ⇛-mUnit e* P* u*
   tri-mUnit {e = packi _ _} _ e* P* u* = ⇛-mUnit e* P* u*
+
+  -- letp: the development contracts the redex iff the scrutinee is a pair.
+  tri-letp : ∀ {σ m n} {e e′ : Tm n} {t t′ : Tm (suc (suc n))}
+    → σ ⊢[ m ] e ⇛ e′ → σ ⊢[ m ] e′ ⇛ dev σ m e → σ ⊢[ m ] t′ ⇛ dev σ m t
+    → σ ⊢[ m ] letp e′ t′ ⇛ dev σ m (letp e t)
+  tri-letp {e = pair a b} (⇛-pair _ _) (⇛-pair a* b*) t* = ⇛-ιletp a* b* t*
+  tri-letp {e = one} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = var _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = typ} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = pi _ _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = lam _ _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = app _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = nat} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = ze} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = su _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = unit} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = empty} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = dty _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = ctor _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = mData _ _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = mNat _ _ _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = mEmp _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = mUnit _ _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = idt _ _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = rfl} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = rwt _ _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = def _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = ann _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = prod _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = fst _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = snd _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = letp _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = nu _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = unf _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = ucons _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = i64} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = f32ty} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = tensor _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = addi _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = muli _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = addt _ _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = toi64 _} _ e* t* = ⇛-letp e* t*
+  tri-letp {e = packi _ _} _ e* t* = ⇛-letp e* t*
 
   -- rwt: the development contracts the redex iff the equation is rfl.
   tri-rwt : ∀ {σ m n} {e e′ : Tm n} {P P′ : Tm (suc n)} {t t′ : Tm n}
@@ -857,6 +929,7 @@ mutual
   tri-rwt {e = pair _ _} _ e* P* t* = ⇛-rwt e* P* t*
   tri-rwt {e = fst _} _ e* P* t* = ⇛-rwt e* P* t*
   tri-rwt {e = snd _} _ e* P* t* = ⇛-rwt e* P* t*
+  tri-rwt {e = letp _ _} _ e* P* t* = ⇛-rwt e* P* t*
   tri-rwt {e = nu _} _ e* P* t* = ⇛-rwt e* P* t*
   tri-rwt {e = unf _ _} _ e* P* t* = ⇛-rwt e* P* t*
   tri-rwt {e = ucons _} _ e* P* t* = ⇛-rwt e* P* t*
@@ -947,6 +1020,20 @@ lam-⇛* : ∀ {σ m n q} {A : Tm n} {t u}
 lam-⇛* ⇛*-refl = _ , _ , refl , ⇛*-refl , ⇛*-refl
 lam-⇛* (⇛*-step (⇛-lam a b) r) with lam-⇛* r
 ... | A′ , t′ , refl , ra , rb = A′ , t′ , refl , ⇛*-step a ra , ⇛*-step b rb
+
+prod-⇛* : ∀ {σ m n} {A B : Tm n} {u}
+  → σ ⊢[ m ] prod A B ⇛* u
+  → ∃ λ A′ → ∃ λ B′ → (u ≡ prod A′ B′) × (σ ⊢[ m ] A ⇛* A′) × (σ ⊢[ m ] B ⇛* B′)
+prod-⇛* ⇛*-refl = _ , _ , refl , ⇛*-refl , ⇛*-refl
+prod-⇛* (⇛*-step (⇛-prod a b) r) with prod-⇛* r
+... | A′ , B′ , refl , ra , rb = A′ , B′ , refl , ⇛*-step a ra , ⇛*-step b rb
+
+pair-⇛* : ∀ {σ m n} {a b : Tm n} {u}
+  → σ ⊢[ m ] pair a b ⇛* u
+  → ∃ λ a′ → ∃ λ b′ → (u ≡ pair a′ b′) × (σ ⊢[ m ] a ⇛* a′) × (σ ⊢[ m ] b ⇛* b′)
+pair-⇛* ⇛*-refl = _ , _ , refl , ⇛*-refl , ⇛*-refl
+pair-⇛* (⇛*-step (⇛-pair a b) r) with pair-⇛* r
+... | a′ , b′ , refl , ra , rb = a′ , b′ , refl , ⇛*-step a ra , ⇛*-step b rb
 
 su-⇛* : ∀ {σ m n} {t : Tm n} {u}
   → σ ⊢[ m ] su t ⇛* u → ∃ λ t′ → (u ≡ su t′) × (σ ⊢[ m ] t ⇛* t′)

@@ -24,7 +24,7 @@ term       ::= atom atom*                  -- juxtaposition is application
              | term ("→" | "->") term      -- non-dependent, = Π (_ : A) → B
              | term "~" term               -- bisimulation (also prefix "bisim")
 atom       ::= "Type" | "Nat" | "I64" | "F32" | "Unit" | "Empty" | "refl" | "tt" | "0"
-             | suc | pi | lam | match | matchEmpty | rewrite | idt
+             | suc | pi | lam | let | match | matchEmpty | rewrite | idt
              | stream | unfold | uncons | "fst" atom | "snd" atom
              | "head" atom | "tail" atom
              | "Tensor" atom atom | "addi" atom atom | "muli" atom atom
@@ -43,6 +43,7 @@ qty        ::= "+" | "-" | ε               -- ε = affine (default)
 binder     ::= "(" qty ident ":" term ")"
 pi         ::= ("Π" | "Pi") binder ("→" | "->") term
 lam        ::= ("λ" | "lam") binder ("→" | "->") term
+let        ::= "let" "(" ident "," ident ")" "=" term "in" term
 
 match      ::= "match" term "motive" mot
                "|" "0" "=>" term

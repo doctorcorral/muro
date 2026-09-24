@@ -48,6 +48,7 @@ mutual
   ren ρ (pair a b)    = pair (ren ρ a) (ren ρ b)
   ren ρ (fst t)       = fst (ren ρ t)
   ren ρ (snd t)       = snd (ren ρ t)
+  ren ρ (letp e t)    = letp (ren ρ e) (ren (lift (lift ρ)) t)
   ren ρ (nu F)        = nu (ren (lift ρ) F)
   ren ρ (unf s f)     = unf (ren ρ s) (ren ρ f)
   ren ρ (ucons s)     = ucons (ren ρ s)
@@ -118,6 +119,7 @@ mutual
   sub σ (pair a b)     = pair (sub σ a) (sub σ b)
   sub σ (fst t)        = fst (sub σ t)
   sub σ (snd t)        = snd (sub σ t)
+  sub σ (letp e t)     = letp (sub σ e) (sub (lifts (lifts σ)) t)
   sub σ (nu F)         = nu (sub (lifts σ) F)
   sub σ (unf s f)      = unf (sub σ s) (sub σ f)
   sub σ (ucons s)      = ucons (sub σ s)
@@ -142,6 +144,10 @@ instσ u (suc i) = var i
 
 inst : ∀ {n} → Tm (suc n) → Tm n → Tm n
 inst t u = sub (instσ u) t
+
+-- Open two binders: (x. y. t)[a, b], y the inner one (var 0).
+inst₂ : ∀ {n} → Tm (suc (suc n)) → Tm n → Tm n → Tm n
+inst₂ t a b = inst (inst t (wk b)) a
 
 motSucσ : ∀ {n} → Fin (suc n) → Tm (suc n)
 motSucσ zero    = su (var zero)
@@ -196,6 +202,8 @@ mutual
   toPHOAS ρ (pair a b)     = pair (toPHOAS ρ a) (toPHOAS ρ b)
   toPHOAS ρ (fst t)        = fst (toPHOAS ρ t)
   toPHOAS ρ (snd t)        = snd (toPHOAS ρ t)
+  toPHOAS ρ (letp e t)     = letp (toPHOAS ρ e)
+                                  (λ a b → toPHOAS (λ { zero → b ; (suc zero) → a ; (suc (suc i)) → ρ i }) t)
   toPHOAS ρ (nu F)         = nu (λ v → toPHOAS (λ { zero → v ; (suc i) → ρ i }) F)
   toPHOAS ρ (unf s f)      = unf (toPHOAS ρ s) (toPHOAS ρ f)
   toPHOAS ρ (ucons s)      = ucons (toPHOAS ρ s)

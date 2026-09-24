@@ -33,6 +33,7 @@ defmodule Muro.Ast do
           | {:pair, named, named}
           | {:fst, named}
           | {:snd, named}
+          | {:letp, named, name, name, named}
           | {:stream, named}
           | {:always, named, named}
           | {:bisim, named, named}
@@ -74,6 +75,7 @@ defmodule Muro.Ast do
           | {:pair, db, db}
           | {:fst, db}
           | {:snd, db}
+          | {:letp, db, db}
           | {:nu, db}
           | {:bisim, db, db}
           | {:unf, db, db}
@@ -196,6 +198,13 @@ defmodule Muro.Ast do
 
   def to_db({:fst, t}, env), do: map1(t, env, &{:fst, &1})
   def to_db({:snd, t}, env), do: map1(t, env, &{:snd, &1})
+
+  # let (a, b) = e in t: b is the nearest binder (0), a is 1.
+  def to_db({:letp, e, a, b, t}, env) do
+    with {:ok, e1} <- to_db(e, env),
+         {:ok, t1} <- to_db(t, [b, a | env]),
+         do: {:ok, {:letp, e1, t1}}
+  end
 
   def to_db({:stream, a}, env) do
     with {:ok, a1} <- to_db(a, env) do

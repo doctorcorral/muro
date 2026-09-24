@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.5.0
+
+A language addition: `let (a, b) = e in t` opens a pair. It is the eliminator an affine pair was missing. `fst p` and `snd p` each use `p`, so a pair-typed variable could never have both components used; `let` uses it once and binds both components, each affine.
+
+### Language
+
+- `let (a, b) = e in t`. `e` is inferred and must have type `A × B`; `t` is checked against the expected type with `a : A` and `b : B` in scope, both affine. `let (a, b) = (u, v) in t` reduces to `t[a := u, b := v]`. `let` only checks: at the head of an application it is refused with `let needs an expected type`.
+- `fst` and `snd` are unchanged.
+
+### Kernel (Agda)
+
+- `Muro.Syntax`: `letp e t`, `t` under two binders (`a` at 1, `b` at 0); `Muro.Subst.inst₂`; renaming and substitution lemmas.
+- `Muro.Reduction` / `Muro.Convert`: `ι-letp`, the `letp` congruence, `dev` / `tri` cases (confluence), `prod` and `pair` are rigid heads with shapes; `≈-prod-inj`.
+- `Muro.Judgement`: `⇒-prod` (spec), `⇒-pair`, `⇐-pair`, `⇐-letp`. `Muro.Typing`: `t-prod`, `t-pair`, `t-letp`; preservation for `ι-letp`. `Muro.Wall`, `Muro.Consistency`: pairs are introduction forms; progress for `let`.
+- `Muro.Frag`: `prod`, `pair`, `letp` join the fragment. `fst` and `snd` stay outside it.
+- `Muro.Check`: `whnf` steps `ι-letp`; `check′` has the `letp` clause; `infer′` refuses it.
+- `Muro.Soundness` (with `Conv`, `Views`): `viewProd-sound`; `infer-sound` / `check-sound` cases for `prod`, `pair`, `letp`. Statements unchanged; still `--safe`, no postulates.
+
+### Elixir mirror
+
+- `Muro.Ast`: named `{:letp, e, a, b, t}`, de Bruijn `{:letp, e, t}`. `Muro.Subst.inst2/3`. Lexer keyword `let`. Parser: `let ( a , b ) = e in t`. `Muro.Check`: `whnf`, conversion, occurrence checks, `check` clause, `infer` refusal. `Muro.Emit`: `({a, b} = e; t)`.
+- `examples/pair.muro`; tests for the accepted and refused forms.
+
+### Manual
+
+- `language.md` (Products), `grammar.md`, `emit.md`, `limits.md`, `extending.md`, `examples.md`.
+
+### Package
+
+- Version 0.5.0.
+
 ## 0.4.2
 
 A kernel fix to the descent check, and its redesign. A definition in `run` or `evidence` now descends on one argument position, the same at every self-call, and the checker finds that position; a self-reference must be applied. Two more ways to write a non-terminating `run` or `evidence` definition are closed, and the "first non-erased argument" rule is gone.

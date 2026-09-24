@@ -85,6 +85,9 @@ mutual
     pair <$> unembedN nxt env a ⊛ unembedN nxt env b
   unembedN nxt env (fst t)        = fst <$> unembedN nxt env t
   unembedN nxt env (snd t)        = snd <$> unembedN nxt env t
+  unembedN nxt env (letp e t)     =
+    letp <$> unembedN nxt env e
+         ⊛ unembedN (suc (suc nxt)) (suc nxt ∷ nxt ∷ env) (t nxt (suc nxt))
   unembedN nxt env (nu F)         =
     nu <$> unembedN (suc nxt) (nxt ∷ env) (F nxt)
   unembedN nxt env (unf s f)      =

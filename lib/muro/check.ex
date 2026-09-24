@@ -309,6 +309,15 @@ defmodule Muro.Check do
     end
   end
 
+  # ι-letp
+  defp whnf(k, book, {:letp, e, t}) do
+    case whnf(k - 1, book, e) do
+      {:ok, {:pair, a, b}} -> whnf(k - 1, book, Subst.inst2(t, a, b))
+      {:ok, e1} -> {:ok, {:letp, e1, t}}
+      err -> err
+    end
+  end
+
   defp whnf(k, book, {:ucons, e}) do
     case whnf(k - 1, book, e) do
       {:ok, {:unf, s, f}} ->
@@ -510,6 +519,11 @@ defmodule Muro.Check do
 
   defp conv_n(k, book, {:fst, t}, {:fst, t1}), do: conv(k, book, t, t1)
   defp conv_n(k, book, {:snd, t}, {:snd, t1}), do: conv(k, book, t, t1)
+
+  defp conv_n(k, book, {:letp, e, t}, {:letp, e1, t1}) do
+    with :ok <- conv(k, book, e, e1), do: conv(k, book, t, t1)
+  end
+
   defp conv_n(k, book, {:nu, f}, {:nu, f1}), do: conv(k, book, f, f1)
 
   defp conv_n(k, book, {:unf, s, f}, {:unf, s1, f1}) do
@@ -715,6 +729,7 @@ defmodule Muro.Check do
   defp has_self?(self, {:pair, a, b}), do: has_self?(self, a) or has_self?(self, b)
   defp has_self?(self, {:fst, t}), do: has_self?(self, t)
   defp has_self?(self, {:snd, t}), do: has_self?(self, t)
+  defp has_self?(self, {:letp, e, t}), do: has_self?(self, e) or has_self?(self, t)
   defp has_self?(self, {:unf, s, f}), do: has_self?(self, s) or has_self?(self, f)
   defp has_self?(self, {:ucons, s}), do: has_self?(self, s)
   defp has_self?(self, {:tensor, d, s}), do: has_self?(self, d) or has_self?(self, s)
@@ -745,6 +760,7 @@ defmodule Muro.Check do
   defp occurs?(x, {:pair, a, b}), do: occurs?(x, a) or occurs?(x, b)
   defp occurs?(x, {:fst, t}), do: occurs?(x, t)
   defp occurs?(x, {:snd, t}), do: occurs?(x, t)
+  defp occurs?(x, {:letp, e, t}), do: occurs?(x, e) or occurs?(x + 2, t)
   defp occurs?(x, {:nu, f}), do: occurs?(x + 1, f)
   defp occurs?(x, {:bisim, s, t}), do: occurs?(x, s) or occurs?(x, t)
 
@@ -1083,6 +1099,10 @@ defmodule Muro.Check do
           {:ok, {{:prod, ta, tb}, uses}}
         end
 
+      # let only checks (⇐-letp): its result type is the expected type.
+      {_m, {:letp, _, _}} ->
+        {:error, "let needs an expected type"}
+
       # ⇒-fst
       {m, {:fst, t1}} ->
         with {:ok, {tt, u}} <- infer(k, book, rs, gamma, m, t1),
@@ -1298,6 +1318,27 @@ defmodule Muro.Check do
              {:ok, au} <- check(k, book, rs, gamma, mode, x, a1),
              {:ok, bu} <- check(k, book, rs, gamma, mode, y, b1),
              do: combine(mode, au, bu)
+
+      # ⇐-letp: the scrutinee is inferred and read as a product; the body
+      # is checked under two affine binders (a at 1, b at 0) against the
+      # expected type weakened twice; each binder's uses are bounded and
+      # the rest combined with the scrutinee's.
+      {:letp, e, t} ->
+        with {:ok, {e_ty, eu}} <- infer(k, book, rs, gamma, mode, e),
+             {:ok, {a1, b1}} <- view_prod(k, book, e_ty),
+             {:ok, [ub, ua | tus]} <-
+               check(
+                 k,
+                 book,
+                 ext_rec(ext_rec(rs, false, false), false, false),
+                 ext(ext(gamma, :affine, a1), :affine, Subst.wk(b1)),
+                 mode,
+                 t,
+                 Subst.wk(Subst.wk(a))
+               ),
+             :ok <- check_bound(mode, :affine, ub),
+             :ok <- check_bound(mode, :affine, ua),
+             do: combine(mode, eu, tus)
 
       # ⇐-unf
       {:unf, seed, {:lam, q, a_ann, t}} ->
@@ -1810,6 +1851,7 @@ defmodule Muro.Check do
   defp occurs_d?(i, {:su, t}), do: occurs_d?(i, t)
   defp occurs_d?(i, {:fst, t}), do: occurs_d?(i, t)
   defp occurs_d?(i, {:snd, t}), do: occurs_d?(i, t)
+  defp occurs_d?(i, {:letp, e, t}), do: occurs_d?(i, e) or occurs_d?(i, t)
   defp occurs_d?(i, {:nu, f}), do: occurs_d?(i, f)
   defp occurs_d?(i, {:unf, s, f}), do: occurs_d?(i, s) or occurs_d?(i, f)
   defp occurs_d?(i, {:ucons, s}), do: occurs_d?(i, s)

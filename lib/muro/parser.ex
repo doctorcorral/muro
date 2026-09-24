@@ -407,6 +407,9 @@ defmodule Muro.Parser do
       word_kw?(s, "uncons") ->
         parse_ucons(s)
 
+      word_kw?(s, "let") ->
+        parse_letp(s)
+
       word_kw?(s, "fst") ->
         parse_unary(s, "fst", :fst)
 
@@ -699,6 +702,22 @@ defmodule Muro.Parser do
          {:ok, rest} <- kw(skip(rest), "in"),
          {:ok, t, rest} <- parse_term(skip(rest), 0) do
       {:ok, {:rwt, eq, x, p, t}, rest}
+    end
+  end
+
+  # let (a, b) = e in t
+  defp parse_letp(s) do
+    with {:ok, rest} <- kw(s, "let"),
+         {:ok, rest} <- tok(skip(rest), "("),
+         {:ok, a, rest} <- ident(skip(rest)),
+         {:ok, rest} <- tok(skip(rest), ","),
+         {:ok, b, rest} <- ident(skip(rest)),
+         {:ok, rest} <- tok(skip(rest), ")"),
+         {:ok, rest} <- tok(skip(rest), "="),
+         {:ok, e, rest} <- parse_term(skip(rest), 0),
+         {:ok, rest} <- kw(skip(rest), "in"),
+         {:ok, t, rest} <- parse_term(skip(rest), 0) do
+      {:ok, {:letp, e, a, b, t}, rest}
     end
   end
 

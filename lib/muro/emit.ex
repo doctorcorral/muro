@@ -118,6 +118,12 @@ defmodule Muro.Emit do
 
   defp emit_db({:pair, a, b}, d, book), do: "{#{emit_db(a, d, book)}, #{emit_db(b, d, book)}}"
   defp emit_db({:fst, t}, d, book), do: "elem(#{emit_db(t, d, book)}, 0)"
+
+  # let (a, b) = e in t: a is x#{d}, b is x#{d + 1}; the body sees both.
+  defp emit_db({:letp, e, t}, d, book) do
+    "({x#{d}, x#{d + 1}} = #{emit_db(e, d, book)}; #{emit_db(t, d + 2, book)})"
+  end
+
   defp emit_db({:snd, t}, d, book), do: "elem(#{emit_db(t, d, book)}, 1)"
 
   defp emit_db({:unf, seed, f}, d, book) do

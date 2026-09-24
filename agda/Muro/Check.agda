@@ -135,6 +135,10 @@ mutual
   ... | ok (pair _ b)   = whnf k σ b
   ... | ok e′           = ok (snd e′)
   whnf (suc k) σ (ucons e) = whnf k σ e >>= uconsWhnf k σ
+  whnf (suc k) σ (letp e t) with whnf k σ e
+  ... | fail m          = fail m
+  ... | ok (pair a b)   = whnf k σ (inst₂ t a b)
+  ... | ok e′           = ok (letp e′ t)
   whnf (suc _) _ t = ok t
 
   uconsWhnf : ∀ {n} → ℕ → Sig → Tm n → Result (Tm n)
@@ -248,6 +252,7 @@ mutual
   synEqD (pair a b)     (pair a′ b′)   = synEq a a′ ∧ synEq b b′
   synEqD (fst t)        (fst t′)       = synEq t t′
   synEqD (snd t)        (snd t′)       = synEq t t′
+  synEqD (letp e t)     (letp e′ t′)   = synEq e e′ ∧ synEq t t′
   synEqD (nu F)         (nu F′)        = synEq F F′
   synEqD (unf s f)      (unf s′ f′)    = synEq s s′ ∧ synEq f f′
   synEqD (ucons s)      (ucons s′)     = synEq s s′
@@ -337,6 +342,7 @@ mutual
   convND k σ (pair a b)    (pair a′ b′)  = conv k σ a a′ >> conv k σ b b′
   convND k σ (fst t)       (fst t′)      = conv k σ t t′
   convND k σ (snd t)       (snd t′)      = conv k σ t t′
+  convND k σ (letp e t)    (letp e′ t′)  = conv k σ e e′ >> conv k σ t t′
   convND k σ (nu F)        (nu F′)       = conv k σ F F′
   convND k σ (unf s f)     (unf s′ f′)   = conv k σ s s′ >> conv k σ f f′
   convND k σ (ucons s)     (ucons s′)    = conv k σ s s′
@@ -372,6 +378,7 @@ data _≈[_]_ {n} : Tm n → Sig → Tm n → Set where
                idt A a b ≈[ σ ] idt A′ a′ b′
   ≈-ιfst : ∀ {σ a b} → fst (pair a b) ≈[ σ ] a
   ≈-ιsnd : ∀ {σ a b} → snd (pair a b) ≈[ σ ] b
+  ≈-ιletp : ∀ {σ a b t} → letp (pair a b) t ≈[ σ ] inst₂ t a b
   ≈-ιuncons : ∀ {σ s f h t} →
               app f s ≈[ σ ] pair h t →
               ucons (unf s f) ≈[ σ ] pair h (unf t f)
@@ -581,6 +588,14 @@ data _,_⊢[_]_⇐_ σ Γ where
     → σ , Γ ⊢[ m ] b ⇐ B
     → σ , Γ ⊢[ m ] pair a b ⇐ prod A B
 
+  -- let (a, b) = e in t: the tensor eliminator. Both components are
+  -- bound affine (a at var 1, b at var 0); the body is checked against
+  -- the expected type weakened past them. let only checks.
+  ⇐-letp : ∀ {m A B e t C}
+    → σ , Γ ⊢[ m ] e ⇒ prod A B
+    → σ , ext (ext Γ affine A) affine (wk B) ⊢[ m ] t ⇐ wk (wk C)
+    → σ , Γ ⊢[ m ] letp e t ⇐ C
+
   ⇐-unf : ∀ {m S F seed f}
     → σ , Γ ⊢[ m ] seed ⇐ S
     → σ , Γ ⊢[ m ] f ⇐ pi affine S (wk (inst F S))
@@ -675,6 +690,7 @@ mutual
   hasSelf s (pair a b)     = hasSelf s a ∨ hasSelf s b
   hasSelf s (fst t)        = hasSelf s t
   hasSelf s (snd t)        = hasSelf s t
+  hasSelf s (letp e t)     = hasSelf s e ∨ hasSelf s t
   hasSelf s (unf u f)      = hasSelf s u ∨ hasSelf s f
   hasSelf s (ucons u)      = hasSelf s u
   hasSelf s (tensor d u)   = hasSelf s d ∨ hasSelf s u
@@ -746,6 +762,7 @@ mutual
   occurs x (pair a b)     = occurs x a ∨ occurs x b
   occurs x (fst t)        = occurs x t
   occurs x (snd t)        = occurs x t
+  occurs x (letp e t)     = occurs x e ∨ occurs (suc (suc x)) t
   occurs x (nu F)         = occurs (suc x) F
   occurs x (unf s f)      = occurs x s ∨ occurs x f
   occurs x (ucons s)      = occurs x s
@@ -793,6 +810,7 @@ mutual
   occursD i (su t)         = occursD i t
   occursD i (fst t)        = occursD i t
   occursD i (snd t)        = occursD i t
+  occursD i (letp e t)     = occursD i e ∨ occursD i t
   occursD i (tensor d s)   = occursD i d ∨ occursD i s
   occursD i (addi a b)     = occursD i a ∨ occursD i b
   occursD i (muli a b)     = occursD i a ∨ occursD i b
@@ -1298,6 +1316,9 @@ mutual
     combine m au bu >>= λ uses →
     ok (prod A B , uses)
 
+  -- let only checks (⇐-letp): its result type is the expected type.
+  infer′ k σ rs Γ (letp _ _) m _ = fail "let needs an expected type"
+
   -- ⇒-fst
   infer′ k σ rs Γ (fst t) m _ =
     infer k σ rs Γ m t >>= λ (T , u) →
@@ -1392,6 +1413,21 @@ mutual
     check k σ rs Γ m a A >>= λ au →
     check k σ rs Γ m b B >>= λ bu →
     combine m au bu
+
+  -- ⇐-letp: the scrutinee is inferred and read as a product; the body
+  -- is checked under two affine binders (a at var 1, b at var 0) against
+  -- the expected type weakened twice; each binder's uses are bounded and
+  -- the rest combined with the scrutinee's.
+  check′ k σ rs Γ m (letp e t) T =
+    infer k σ rs Γ m e >>= λ (E , eu) →
+    viewProd k σ E >>= λ (A , B) →
+    check k σ (extRec (extRec rs false false) false false)
+          (ext (ext Γ affine A) affine (wk B)) m t (wk (wk T)) >>= λ uses →
+    let (ub , us₁) = headTailU uses
+        (ua , tus) = headTailU us₁
+    in checkBound m affine ub >>
+       checkBound m affine ua >>
+       combine m eu tus
 
   -- ⇐-unf (λ may be affine or + on Data)
   check′ k σ rs Γ m (unf seed (lam q A t)) T =

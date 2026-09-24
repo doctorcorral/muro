@@ -1,6 +1,7 @@
 ------------------------------------------------------------------------
 -- The ⊢ fragment as a predicate on terms: the constructors ⊢ has rules
--- for. Products, ν, unfold, I64 / F32 / Tensor are outside. Closed
+-- for. The projections fst / snd, ν, unfold, I64 / F32 / Tensor are
+-- outside. Closed
 -- under renaming and substitution, so under everything Check.whnf does
 -- to a fragment term over a fragment signature.
 ------------------------------------------------------------------------
@@ -46,6 +47,9 @@ data Frag where
   f-rwt   : ∀ {e P t} → Frag e → Frag P → Frag t → Frag (rwt e P t)
   f-def   : ∀ {i} → Frag (def i)
   f-ann   : ∀ {e A} → Frag e → Frag A → Frag (ann e A)
+  f-prod  : ∀ {A B} → Frag A → Frag B → Frag (prod A B)
+  f-pair  : ∀ {a b} → Frag a → Frag b → Frag (pair a b)
+  f-letp  : ∀ {e t} → Frag e → Frag t → Frag (letp e t)
 
 data FragL where
   fl-[] : FragL []
@@ -81,6 +85,9 @@ Frag-ren ρ f-rfl = f-rfl
 Frag-ren ρ (f-rwt e P t) = f-rwt (Frag-ren ρ e) (Frag-ren (lift ρ) P) (Frag-ren ρ t)
 Frag-ren ρ f-def = f-def
 Frag-ren ρ (f-ann e A) = f-ann (Frag-ren ρ e) (Frag-ren ρ A)
+Frag-ren ρ (f-prod A B) = f-prod (Frag-ren ρ A) (Frag-ren ρ B)
+Frag-ren ρ (f-pair a b) = f-pair (Frag-ren ρ a) (Frag-ren ρ b)
+Frag-ren ρ (f-letp e t) = f-letp (Frag-ren ρ e) (Frag-ren (lift (lift ρ)) t)
 
 FragL-ren ρ fl-[] = fl-[]
 FragL-ren ρ (fl-∷ t ts) = fl-∷ (Frag-ren ρ t) (FragL-ren ρ ts)
@@ -125,6 +132,9 @@ Frag-sub s f-rfl = f-rfl
 Frag-sub s (f-rwt e P t) = f-rwt (Frag-sub s e) (Frag-sub (FragS-lifts s) P) (Frag-sub s t)
 Frag-sub s f-def = f-def
 Frag-sub s (f-ann e A) = f-ann (Frag-sub s e) (Frag-sub s A)
+Frag-sub s (f-prod A B) = f-prod (Frag-sub s A) (Frag-sub s B)
+Frag-sub s (f-pair a b) = f-pair (Frag-sub s a) (Frag-sub s b)
+Frag-sub s (f-letp e t) = f-letp (Frag-sub s e) (Frag-sub (FragS-lifts (FragS-lifts s)) t)
 
 FragL-sub s fl-[] = fl-[]
 FragL-sub s (fl-∷ t ts) = fl-∷ (Frag-sub s t) (FragL-sub s ts)
@@ -191,3 +201,6 @@ Frag-dtyType [] (fi-∷ F fi) = f-pi (Frag-closed F) (Frag-dtyType [] fi)
 -- A context in the fragment.
 FragCtx : ∀ {n} → Ctx n → Set
 FragCtx Γ = ∀ x → Frag (typOf Γ x)
+
+Frag-inst₂ : ∀ {n} {t : Tm (ℕ.suc (ℕ.suc n))} {a b} → Frag t → Frag a → Frag b → Frag (inst₂ t a b)
+Frag-inst₂ Ft Fa Fb = Frag-inst (Frag-inst Ft (Frag-wk Fb)) Fa

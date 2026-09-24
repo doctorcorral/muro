@@ -221,6 +221,23 @@ data _,_⊨⁰[_]_∶_ σ Γ where
     → σ , Γ ⊨[ m ] e ∶ A
     → σ , Γ ⊨⁰[ m ] ann e A ∶ A
 
+  t-prod : ∀ {A B}
+    → σ , Γ ⊨[ spec ] A ∶ typ
+    → σ , Γ ⊨[ spec ] B ∶ typ
+    → σ , Γ ⊨⁰[ spec ] prod A B ∶ typ
+
+  t-pair : ∀ {m a b A B}
+    → σ , Γ ⊨[ m ] a ∶ A
+    → σ , Γ ⊨[ m ] b ∶ B
+    → σ , Γ ⊨⁰[ m ] pair a b ∶ prod A B
+
+  -- let (a, b) = e in t: the body under two affine binders, at the
+  -- result type weakened past them.
+  t-letp : ∀ {m e t A B C}
+    → σ , Γ ⊨[ m ] e ∶ prod A B
+    → σ , ext (ext Γ affine A) affine (wk B) ⊨[ m ] t ∶ wk (wk C)
+    → σ , Γ ⊨⁰[ m ] letp e t ∶ C
+
 data _,_⊨[_]_▹_⇝_ σ Γ where
   a-[] : ∀ {m T R}
     → σ ⊢[ spec ] T ≈ R
@@ -266,6 +283,10 @@ conv-≈ (conv D c) c′ = conv D (≈-trans c c′)
 ⊨⁰-≡ : ∀ {σ n} {Γ : Ctx n} {m e A B}
   → A ≡ B → σ , Γ ⊨⁰[ m ] e ∶ A → σ , Γ ⊨⁰[ m ] e ∶ B
 ⊨⁰-≡ refl D = D
+
+⊨-ctx : ∀ {σ n} {Γ Γ′ : Ctx n} {m e A}
+  → Γ ≡ Γ′ → σ , Γ ⊨[ m ] e ∶ A → σ , Γ′ ⊨[ m ] e ∶ A
+⊨-ctx refl D = D
 
 -- The telescope of ▹ may be converted.
 ▹-≈ : ∀ {σ n} {Γ : Ctx n} {m T T′ as R}
@@ -344,6 +365,8 @@ forget-⇒ (⇒-mData De c lk ix lps W Bs _) =
   conv (t-mData (conv-≈ (forget-⇒ De) c) lk ix lps (forget-wf W) (forget-brs Bs)) ≈-refl
 forget-⇒ (⇒-def lk al) = conv (t-def lk al) ≈-refl
 forget-⇒ (⇒-ann W D) = conv (t-ann (forget-wf W) (forget-⇐ D)) ≈-refl
+forget-⇒ (⇒-prod DA DB) = conv (t-prod (forget-⇐ DA) (forget-⇐ DB)) ≈-refl
+forget-⇒ (⇒-pair Da Db _) = conv (t-pair (forget-⇒ Da) (forget-⇒ Db)) ≈-refl
 
 forget-⇐ (⇐-conv D c) = conv-≈ (forget-⇒ D) c
 forget-⇐ (⇐-lam W cT c rok D _) =
@@ -351,6 +374,9 @@ forget-⇐ (⇐-lam W cT c rok D _) =
 forget-⇐ (⇐-refl cT c) = conv (t-rfl c) (≈-sym cT)
 forget-⇐ (⇐-ctor sp c lk lps lidx lkc ip Ar cR) =
   conv (t-ctor sp (ca lk lkc lps lidx ip (▹-R cR (forget-args Ar)))) (≈-sym c)
+forget-⇐ (⇐-pair cT Da Db _) = conv (t-pair (forget-⇐ Da) (forget-⇐ Db)) (≈-sym cT)
+forget-⇐ (⇐-letp De c Dt _ _ _) =
+  conv (t-letp (conv-≈ (forget-⇒ De) c) (forget-⇐ Dt)) ≈-refl
 
 forget-args args-[] = a-[] ≈-refl
 forget-args (args-snoc Ar c Da _) = ▹-snoc (forget-args Ar) c (forget-⇐ Da)
@@ -409,6 +435,9 @@ fieldMode-mono reuse  h = h
   t-mData (⊨-mode h De) lk ix lps W (brs-mode h Bs)
 ⊨⁰-mode h (t-def {d = d} lk al) = t-def lk (allowedDef-mono (Def.dmode d) h al)
 ⊨⁰-mode h (t-ann W D) = t-ann W (⊨-mode h D)
+⊨⁰-mode ≤ᵐ-spec (t-prod DA DB) = t-prod DA DB
+⊨⁰-mode h (t-pair Da Db) = t-pair (⊨-mode h Da) (⊨-mode h Db)
+⊨⁰-mode h (t-letp De Dt) = t-letp (⊨-mode h De) (⊨-mode h Dt)
 
 ▹-mode h (a-[] c) = a-[] c
 ▹-mode h (a-∷ {q = q} c Da ar) = a-∷ c (⊨-mode (fieldMode-mono q h) Da) (▹-mode h ar)
@@ -529,6 +558,13 @@ brs-ren : ∀ {σ n k} {ρ : Fin n → Fin k} {Γ Δ m bs di ps P ci cs}
     (brs-ren r Bs)
 ⊨⁰-ren {ρ = ρ} r (t-def {d = d} lk al) rewrite closed-ren ρ (Def.dtype d) = t-def lk al
 ⊨⁰-ren r (t-ann W D) = t-ann (wf-ren r W) (⊨-ren r D)
+⊨⁰-ren r (t-prod DA DB) = t-prod (⊨-ren r DA) (⊨-ren r DB)
+⊨⁰-ren r (t-pair Da Db) = t-pair (⊨-ren r Da) (⊨-ren r Db)
+⊨⁰-ren {ρ = ρ} r (t-letp {A = A} {B} {C} De Dt) =
+  t-letp (⊨-ren r De)
+    (⊨-≡ (trans (ren-wk (lift ρ) (wk C)) (cong wk (ren-wk ρ C)))
+      (⊨-ctx (cong (ext _ affine) (ren-wk ρ B))
+        (⊨-ren (Ren-lift (Ren-lift r affine A) affine (wk B)) Dt)))
 
 ▹-ren {ρ = ρ} r (a-[] c) = a-[] (≈-ren ρ c)
 ▹-ren {ρ = ρ} r (a-∷ {B = B} {a = a} c Da ar) =
@@ -679,6 +715,15 @@ brs-sub : ∀ {σ n k m₀ m} {τ : Fin n → Tm k} {Γ Δ bs di ps P ci cs}
 ⊨⁰-sub {τ = τ} le lm s (t-def {d = d} lk al) =
   conv (t-def lk al) (≈-≡ (sym (closed-sub τ (Def.dtype d))))
 ⊨⁰-sub le lm s (t-ann W D) = conv (t-ann (wf-sub le s W) (⊨-sub le lm s D)) ≈-refl
+⊨⁰-sub le lm s (t-prod DA DB) =
+  conv (t-prod (⊨-sub le ≤ᵐ-spec-top s DA) (⊨-sub le ≤ᵐ-spec-top s DB)) ≈-refl
+⊨⁰-sub le lm s (t-pair Da Db) = conv (t-pair (⊨-sub le lm s Da) (⊨-sub le lm s Db)) ≈-refl
+⊨⁰-sub {τ = τ} le lm s (t-letp {A = A} {B} {C} De Dt) =
+  conv (t-letp (⊨-sub le lm s De)
+          (⊨-≡ (trans (sub-wk (lifts τ) (wk C)) (cong wk (sub-wk τ C)))
+            (⊨-ctx (cong (ext _ affine) (sub-wk τ B))
+              (⊨-sub le lm (Subst-lifts (Subst-lifts s affine A) affine (wk B)) Dt))))
+    ≈-refl
 
 ▹-sub {τ = τ} le lm s (a-[] c) = a-[] (≈-sub τ c)
 ▹-sub {τ = τ} le lm s (a-∷ {q = q} {B = B} {a = a} c Da ar) =
@@ -776,6 +821,9 @@ ctor-inv () (t-dty _)
 ctor-inv () (t-mData _ _ _ _ _ _)
 ctor-inv () (t-def _ _)
 ctor-inv () (t-ann _ _)
+ctor-inv () (t-prod _ _)
+ctor-inv () (t-pair _ _)
+ctor-inv () (t-letp _ _)
 
 ------------------------------------------------------------------------
 -- Branches: the branch for constructor k.
@@ -900,6 +948,17 @@ pres⁰ wf le (t-mData {P = P} De lk ix lps W Bs) (mData-e s) =
   conv (t-mData (pres wf le De s) lk ix lps W Bs) (≈-inst P (step-≈ s))
 -- ann
 pres⁰ wf le (t-ann W D) ann-e = D
+-- let (a, b) = (a₀, b₀) in t
+pres⁰ {Γ = Γ} wf le (t-letp {t = t} {A = A} {C = C} (conv (t-pair {a = a} {b} Da Db) cp) Dt) ι-letp
+  with ≈-prod-inj cp
+... | cA , cB =
+  ⊨-≡ (inst-wk C a)
+    (⊨-inst le ≤ᵐ-refl
+      (⊨-≡ (inst-wk (wk C) (wk b))
+        (⊨-inst le ≤ᵐ-refl Dt
+          (⊨-ren (Ren-wk Γ affine A) (conv-≈ Db cB))))
+      (conv-≈ Da cA))
+pres⁰ wf le (t-letp De Dt) (letp-e s) = conv (t-letp (pres wf le De s) Dt) ≈-refl
 -- rigid forms do not step
 pres⁰ wf le (t-var _) ()
 pres⁰ wf le t-ze ()
@@ -913,6 +972,8 @@ pres⁰ wf le (t-lam _ _ _ _) ()
 pres⁰ wf le (t-idt _ _ _) ()
 pres⁰ wf le (t-rfl _) ()
 pres⁰ wf le (t-dty _) ()
+pres⁰ wf le (t-prod _ _) ()
+pres⁰ wf le (t-pair _ _) ()
 
 pres* : ∀ {σ n} {Γ : Ctx n} {m m′ e e′ A}
   → WfSig σ → m ≤ᵐ evid
