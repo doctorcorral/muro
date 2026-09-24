@@ -65,6 +65,8 @@ ctor-no-⇐ sp (⇐-conv D _) = ctor-no-⇒ sp D
 ctor-no-⇐ _ (⇐-ctor _ _ lk _ _ _ _ _ _) = fail≢ok lk
 ctor-no-⇐ () (⇐-lam _ _ _ _ _ _)
 ctor-no-⇐ () (⇐-refl _ _)
+ctor-no-⇐ () (⇐-pair _ _ _ _)
+ctor-no-⇐ () (⇐-letp _ _ _ _ _ _)
 
 dty-no-⇒ : ∀ {n} {Γ : Ctx n} {m i as e B u}
   → Spine (dty i) as e → σ-empty , Γ ⊢[ m ] e ⇒ B ⊣ u → ⊥
@@ -79,6 +81,8 @@ dty-no-⇐ sp (⇐-conv D _) = dty-no-⇒ sp D
 dty-no-⇐ _ (⇐-ctor _ _ lk _ _ _ _ _ _) = fail≢ok lk
 dty-no-⇐ () (⇐-lam _ _ _ _ _ _)
 dty-no-⇐ () (⇐-refl _ _)
+dty-no-⇐ () (⇐-pair _ _ _ _)
+dty-no-⇐ () (⇐-letp _ _ _ _ _ _)
 
 ctor-no⊨ : ∀ {n} {Γ : Ctx n} {m i j as e A}
   → Spine (ctor i j) as e → σ-empty , Γ ⊨⁰[ m ] e ∶ A → ⊥
@@ -113,11 +117,12 @@ no-evid-empty-⇐ (⇐-ctor () _ _ _ _ _ _ _ _)
 ------------------------------------------------------------------------
 
 data Intro {n} : Tm n → Set where
-  i-ze  : Intro ze
-  i-su  : ∀ {t} → Intro (su t)
-  i-one : Intro one
-  i-lam : ∀ {q A t} → Intro (lam q A t)
-  i-rfl : Intro rfl
+  i-ze   : Intro ze
+  i-su   : ∀ {t} → Intro (su t)
+  i-one  : Intro one
+  i-lam  : ∀ {q A t} → Intro (lam q A t)
+  i-rfl  : Intro rfl
+  i-pair : ∀ {a b} → Intro (pair a b)
 
 Empty-intro-⇒ : ∀ {σ n} {Γ : Ctx n} {m e B u} →
   Intro e → σ , Γ ⊢[ m ] e ⇒ B ⊣ u → σ ⊢[ spec ] B ≈ empty → ⊥
@@ -130,6 +135,8 @@ Empty-intro-⇒ i-one ⇒-one c with ≈-shape h-unit h-empty c
 Empty-intro-⇒ i-lam (⇒-lam _ _ _ _) c with ≈-shape h-pi h-empty c
 ... | ()
 Empty-intro-⇒ i-rfl () _
+Empty-intro-⇒ i-pair (⇒-pair _ _ _) c with ≈-shape h-prod h-empty c
+... | ()
 
 Empty-intro : ∀ {σ n} {Γ : Ctx n} {m e u} →
   Intro e → σ , Γ ⊢[ m ] e ⇐ empty ⊣ u → ⊥
@@ -138,11 +145,14 @@ Empty-intro i-lam (⇐-lam _ c _ _ _ _) with ≈-shape h-empty h-pi c
 ... | ()
 Empty-intro i-rfl (⇐-refl c _) with ≈-shape h-empty h-idt c
 ... | ()
+Empty-intro i-pair (⇐-pair c _ _ _) with ≈-shape h-empty h-prod c
+... | ()
 Empty-intro i-ze (⇐-ctor () _ _ _ _ _ _ _ _)
 Empty-intro i-su (⇐-ctor () _ _ _ _ _ _ _ _)
 Empty-intro i-one (⇐-ctor () _ _ _ _ _ _ _ _)
 Empty-intro i-lam (⇐-ctor () _ _ _ _ _ _ _ _)
 Empty-intro i-rfl (⇐-ctor () _ _ _ _ _ _ _ _)
+Empty-intro i-pair (⇐-ctor () _ _ _ _ _ _ _ _)
 
 ------------------------------------------------------------------------
 -- Closed neutral terms are not evidence: there is no variable, no
@@ -164,8 +174,7 @@ ne-untyped-⇒ (ne-mUnit ne) (⇒-mUnit D _ _ _) = ne-untyped-⇐ ne D
 ne-untyped-⇒ (ne-mEmp ne) (⇒-mEmp D _) = ne-untyped-⇐ ne D
 ne-untyped-⇒ (ne-rwt ne) (⇒-rwt D _ _ _) = ne-untyped-⇒ ne D
 ne-untyped-⇒ (ne-mData ne) (⇒-mData D _ _ _ _ _ _ _) = ne-untyped-⇒ ne D
-ne-untyped-⇒ (ne-foreign f-prod) ()
-ne-untyped-⇒ (ne-foreign f-pair) ()
+ne-untyped-⇒ (ne-letp _) ()
 ne-untyped-⇒ (ne-foreign f-fst) ()
 ne-untyped-⇒ (ne-foreign f-snd) ()
 ne-untyped-⇒ (ne-foreign f-nu) ()
@@ -184,6 +193,8 @@ ne-untyped-⇐ ne (⇐-conv D _) = ne-untyped-⇒ ne D
 ne-untyped-⇐ _ (⇐-ctor _ _ lk _ _ _ _ _ _) = fail≢ok lk
 ne-untyped-⇐ (ne-foreign ()) (⇐-lam _ _ _ _ _ _)
 ne-untyped-⇐ (ne-foreign ()) (⇐-refl _ _)
+ne-untyped-⇐ (ne-foreign ()) (⇐-pair _ _ _ _)
+ne-untyped-⇐ (ne-letp ne) (⇐-letp D _ _ _ _ _) = ne-untyped-⇒ ne D
 
 ------------------------------------------------------------------------
 -- No closed normal evidence of Empty.
@@ -206,6 +217,8 @@ Empty-nf nf-one D = Empty-intro i-one D
 Empty-nf nf-empty D = no-evid-empty-⇐ D
 Empty-nf nf-idt (⇐-conv () _)
 Empty-nf nf-rfl D = Empty-intro i-rfl D
+Empty-nf nf-prod (⇐-conv () _)
+Empty-nf nf-pair D = Empty-intro i-pair D
 
 ------------------------------------------------------------------------
 -- Progress: a closed well-typed evidence term is normal or steps.
@@ -242,6 +255,9 @@ nf-fun nf-unit () _
 nf-fun nf-empty () _
 nf-fun nf-idt () _
 nf-fun nf-rfl () _
+nf-fun nf-prod () _
+nf-fun nf-pair (⇒-pair _ _ _) c with ≈-shape h-prod h-pi c
+... | ()
 
 nf-nat-prog : ∀ {e P z s u} →
   Nf σ-empty evid e → σ-empty , ε ⊢[ evid ] e ⇐ nat ⊣ u →
@@ -267,6 +283,11 @@ nf-nat-prog nf-unit (⇐-conv () _)
 nf-nat-prog nf-empty (⇐-conv () _)
 nf-nat-prog nf-idt (⇐-conv () _)
 nf-nat-prog nf-rfl (⇐-conv () _)
+nf-nat-prog nf-prod (⇐-conv () _)
+nf-nat-prog nf-pair (⇐-conv (⇒-pair _ _ _) c) with ≈-shape h-prod h-nat c
+... | ()
+nf-nat-prog nf-pair (⇐-pair c _ _ _) with ≈-shape h-nat h-prod c
+... | ()
 
 nf-unit-prog : ∀ {e P t u} →
   Nf σ-empty evid e → σ-empty , ε ⊢[ evid ] e ⇐ unit ⊣ u →
@@ -293,6 +314,11 @@ nf-unit-prog nf-unit (⇐-conv () _)
 nf-unit-prog nf-empty (⇐-conv () _)
 nf-unit-prog nf-idt (⇐-conv () _)
 nf-unit-prog nf-rfl (⇐-conv () _)
+nf-unit-prog nf-prod (⇐-conv () _)
+nf-unit-prog nf-pair (⇐-conv (⇒-pair _ _ _) c) with ≈-shape h-prod h-unit c
+... | ()
+nf-unit-prog nf-pair (⇐-pair c _ _ _) with ≈-shape h-unit h-prod c
+... | ()
 
 nf-eq-prog : ∀ {eq E A l r P t u} →
   Nf σ-empty evid eq → σ-empty , ε ⊢[ evid ] eq ⇒ E ⊣ u →
@@ -315,6 +341,33 @@ nf-eq-prog nf-nat () _
 nf-eq-prog nf-unit () _
 nf-eq-prog nf-empty () _
 nf-eq-prog nf-idt () _
+nf-eq-prog nf-prod () _
+nf-eq-prog nf-pair (⇒-pair _ _ _) c with ≈-shape h-prod h-idt c
+... | ()
+
+nf-prod-prog : ∀ {e E A B t u} →
+  Nf σ-empty evid e → σ-empty , ε ⊢[ evid ] e ⇒ E ⊣ u →
+  σ-empty ⊢[ spec ] E ≈ prod A B → Prog (letp e t)
+nf-prod-prog (nf-ne ne) D _ = ⊥-elim (ne-untyped-⇒ ne D)
+nf-prod-prog (nf-ctor sp) D _ = ⊥-elim (ctor-no-⇒ sp D)
+nf-prod-prog (nf-dty sp) D _ = ⊥-elim (dty-no-⇒ sp D)
+nf-prod-prog nf-pair _ _ = inj₂ (_ , ι-letp)
+nf-prod-prog nf-ze ⇒-ze c with ≈-shape h-nat h-prod c
+... | ()
+nf-prod-prog nf-su (⇒-su _) c with ≈-shape h-nat h-prod c
+... | ()
+nf-prod-prog nf-one ⇒-one c with ≈-shape h-unit h-prod c
+... | ()
+nf-prod-prog nf-lam (⇒-lam _ _ _ _) c with ≈-shape h-pi h-prod c
+... | ()
+nf-prod-prog nf-typ () _
+nf-prod-prog nf-pi () _
+nf-prod-prog nf-nat () _
+nf-prod-prog nf-unit () _
+nf-prod-prog nf-empty () _
+nf-prod-prog nf-idt () _
+nf-prod-prog nf-rfl () _
+nf-prod-prog nf-prod () _
 
 progress-⇒ : ∀ {e B u} → σ-empty , ε ⊢[ evid ] e ⇒ B ⊣ u → Prog e
 progress-⇐ : ∀ {e A u} → σ-empty , ε ⊢[ evid ] e ⇐ A ⊣ u → Prog e
@@ -323,6 +376,10 @@ progress-⇐ (⇐-conv D _) = progress-⇒ D
 progress-⇐ (⇐-ctor _ _ lk _ _ _ _ _ _) = ⊥-elim (fail≢ok lk)
 progress-⇐ (⇐-lam _ _ _ _ _ _) = inj₁ nf-lam
 progress-⇐ (⇐-refl _ _) = inj₁ nf-rfl
+progress-⇐ (⇐-pair _ _ _ _) = inj₁ nf-pair
+progress-⇐ (⇐-letp De c _ _ _ _) with progress-⇒ De
+... | inj₂ (_ , s) = inj₂ (_ , letp-e s)
+... | inj₁ nf = nf-prod-prog nf De c
 
 progress-⇒ (⇒-var-evid {x = ()} _)
 progress-⇒ ⇒-ze = inj₁ nf-ze
@@ -356,6 +413,7 @@ progress-⇒ (⇒-mUnit De _ _ _) with progress-⇐ De
 progress-⇒ (⇒-mData _ _ lk _ _ _ _ _) = ⊥-elim (fail≢ok lk)
 progress-⇒ (⇒-def lk _) = ⊥-elim (fail≢ok lk)
 progress-⇒ (⇒-ann _ _) = inj₂ (_ , ann-e)
+progress-⇒ (⇒-pair _ _ _) = inj₁ nf-pair
 
 ------------------------------------------------------------------------
 -- The same canonical-forms argument for the declarative judgment ⊨,
@@ -378,6 +436,7 @@ ne-untyped⁰ (ne-mUnit ne) (t-mUnit De _ _) = ne-untyped⊨ ne De
 ne-untyped⁰ (ne-mEmp ne) (t-mEmp De _) = ne-untyped⊨ ne De
 ne-untyped⁰ (ne-rwt ne) (t-rwt Deq _ _) = ne-untyped⊨ ne Deq
 ne-untyped⁰ (ne-mData ne) (t-mData De _ _ _ _ _) = ne-untyped⊨ ne De
+ne-untyped⁰ (ne-letp ne) (t-letp De _) = ne-untyped⊨ ne De
 ne-untyped⁰ (ne-foreign ()) t-ze
 ne-untyped⁰ (ne-foreign ()) (t-su _)
 ne-untyped⁰ (ne-foreign ()) t-one
@@ -389,6 +448,8 @@ ne-untyped⁰ (ne-foreign ()) (t-lam _ _ _ _)
 ne-untyped⁰ (ne-foreign ()) (t-idt _ _ _)
 ne-untyped⁰ (ne-foreign ()) (t-rfl _)
 ne-untyped⁰ (ne-foreign ()) (t-ann _ _)
+ne-untyped⁰ (ne-foreign ()) (t-prod _ _)
+ne-untyped⁰ (ne-foreign ()) (t-pair _ _)
 
 -- t-ctor is the one rule whose subject is a variable: the term must
 -- then be a constructor spine.
@@ -417,6 +478,10 @@ Empty-nf⊨ nf-idt (conv (t-ctor () _) _)
 Empty-nf⊨ nf-rfl (conv (t-rfl _) c) with ≈-shape h-idt h-empty c
 ... | ()
 Empty-nf⊨ nf-rfl (conv (t-ctor () _) _)
+Empty-nf⊨ nf-prod (conv (t-ctor () _) _)
+Empty-nf⊨ nf-pair (conv (t-pair _ _) c) with ≈-shape h-prod h-empty c
+... | ()
+Empty-nf⊨ nf-pair (conv (t-ctor () _) _)
 
 ------------------------------------------------------------------------
 -- Preservation, specialised. A corollary of Muro.Typing.pres.

@@ -54,11 +54,13 @@ data Tm (n : ℕ) : Set where
   rwt   : (eq : Tm n) (mot : Tm (suc n)) (body : Tm n) → Tm n
   def   : ℕ → Tm n                             -- global definition
   ann   : Tm n → Tm n → Tm n                   -- {e : A}
-  -- products, sufficient for uncons : Stream A → A × Stream A
+  -- products: A × B, (a, b), the projections, and the tensor eliminator
+  -- let (a, b) = e in t (t binds a at var 1 and b at var 0)
   prod  : Tm n → Tm n → Tm n
   pair  : Tm n → Tm n → Tm n
   fst   : Tm n → Tm n
   snd   : Tm n → Tm n
+  letp  : Tm n → Tm (suc (suc n)) → Tm n
   -- ν X. F  (F binds X at var 0). Stream A = ν X. A × X.
   nu    : Tm (suc n) → Tm n
   unf   : Tm n → Tm n → Tm n                   -- unfold seed (λ s → (head, next))
@@ -105,6 +107,7 @@ data PTm (V : Set) : Set where
   pair  : PTm V → PTm V → PTm V
   fst   : PTm V → PTm V
   snd   : PTm V → PTm V
+  letp  : PTm V → (V → V → PTm V) → PTm V
   nu    : (V → PTm V) → PTm V
   unf   : PTm V → PTm V → PTm V
   ucons : PTm V → PTm V
@@ -175,6 +178,7 @@ showTm (prod A B)   = "(" ++ showTm A ++ " × " ++ showTm B ++ ")"
 showTm (pair a b)   = "(" ++ showTm a ++ ", " ++ showTm b ++ ")"
 showTm (fst t)      = "fst(" ++ showTm t ++ ")"
 showTm (snd t)      = "snd(" ++ showTm t ++ ")"
+showTm (letp e t)   = "let (_, _) = " ++ showTm e ++ " in " ++ showTm t
 showTm (nu F)       = "ν(" ++ showTm F ++ ")"
 showTm (unf s f)    = "unfold " ++ showTm s ++ " " ++ showTm f
 showTm (ucons s)    = "uncons " ++ showTm s

@@ -91,6 +91,9 @@ defmodule Muro.Subst do
       {:snd, t} ->
         {:snd, ren(rho, t)}
 
+      {:letp, e, t} ->
+        {:letp, ren(rho, e), ren(lift(lift(rho)), t)}
+
       {:nu, f} ->
         {:nu, ren(lift(rho), f)}
 
@@ -215,6 +218,9 @@ defmodule Muro.Subst do
       {:snd, t} ->
         {:snd, sub(sigma, t)}
 
+      {:letp, e, t} ->
+        {:letp, sub(sigma, e), sub(lifts(lifts(sigma)), t)}
+
       {:nu, f} ->
         {:nu, sub(lifts(sigma), f)}
 
@@ -262,6 +268,9 @@ defmodule Muro.Subst do
       t
     )
   end
+
+  # Open two binders at once (Agda: inst₂): the inner one (0) gets b.
+  def inst2(t, a, b), do: inst(inst(t, wk(b)), a)
 
   def inst_n(t, args) do
     Enum.reduce(Enum.reverse(args), t, fn a, acc -> inst(acc, a) end)

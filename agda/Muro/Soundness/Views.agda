@@ -30,7 +30,7 @@ open import Muro.Reduction
 open import Muro.Convert
 open import Muro.Data hiding (subst₂)
 open import Muro.Check
-  using (whnf; apps; viewPi; viewId; viewData; splitData; isData; isDataN; allData;
+  using (whnf; apps; viewPi; viewId; viewProd; viewData; splitData; isData; isDataN; allData;
          dataParamsData; instParams; analyzeForces; forcePairs; forcesFor; countPis;
          wkForces; lookupForce; matchIdxs; nparamsOf)
 open import Muro.Typing using (typ-ext-suc)
@@ -98,6 +98,7 @@ viewPi-sound k σ () | ok (prod _ _)
 viewPi-sound k σ () | ok (pair _ _)
 viewPi-sound k σ () | ok (fst _)
 viewPi-sound k σ () | ok (snd _)
+viewPi-sound k σ () | ok (letp _ _)
 viewPi-sound k σ () | ok (nu _)
 viewPi-sound k σ () | ok (unf _ _)
 viewPi-sound k σ () | ok (ucons _)
@@ -109,6 +110,50 @@ viewPi-sound k σ () | ok (muli _ _)
 viewPi-sound k σ () | ok (addt _ _)
 viewPi-sound k σ () | ok (toi64 _)
 viewPi-sound k σ () | ok (packi _ _)
+
+viewProd-sound : ∀ k σ {n} {T : Tm n} {A B}
+  → viewProd k σ T ≡ ok (A , B) → whnf k σ T ≡ ok (prod A B)
+viewProd-sound k σ {T = T} eq with whnf k σ T
+viewProd-sound k σ () | fail _
+viewProd-sound k σ eq | ok (prod _ _) with ok-inj eq
+... | refl = refl
+viewProd-sound k σ () | ok (var _)
+viewProd-sound k σ () | ok (typ)
+viewProd-sound k σ () | ok (pi _ _ _)
+viewProd-sound k σ () | ok (lam _ _ _)
+viewProd-sound k σ () | ok (app _ _)
+viewProd-sound k σ () | ok (nat)
+viewProd-sound k σ () | ok (ze)
+viewProd-sound k σ () | ok (su _)
+viewProd-sound k σ () | ok (unit)
+viewProd-sound k σ () | ok (one)
+viewProd-sound k σ () | ok (empty)
+viewProd-sound k σ () | ok (dty _)
+viewProd-sound k σ () | ok (ctor _ _)
+viewProd-sound k σ () | ok (mData _ _ _)
+viewProd-sound k σ () | ok (mNat _ _ _ _)
+viewProd-sound k σ () | ok (mEmp _ _)
+viewProd-sound k σ () | ok (mUnit _ _ _)
+viewProd-sound k σ () | ok (idt _ _ _)
+viewProd-sound k σ () | ok (rfl)
+viewProd-sound k σ () | ok (rwt _ _ _)
+viewProd-sound k σ () | ok (def _)
+viewProd-sound k σ () | ok (ann _ _)
+viewProd-sound k σ () | ok (pair _ _)
+viewProd-sound k σ () | ok (fst _)
+viewProd-sound k σ () | ok (snd _)
+viewProd-sound k σ () | ok (letp _ _)
+viewProd-sound k σ () | ok (nu _)
+viewProd-sound k σ () | ok (unf _ _)
+viewProd-sound k σ () | ok (ucons _)
+viewProd-sound k σ () | ok (i64)
+viewProd-sound k σ () | ok (f32ty)
+viewProd-sound k σ () | ok (tensor _ _)
+viewProd-sound k σ () | ok (addi _ _)
+viewProd-sound k σ () | ok (muli _ _)
+viewProd-sound k σ () | ok (addt _ _)
+viewProd-sound k σ () | ok (toi64 _)
+viewProd-sound k σ () | ok (packi _ _)
 
 viewId-sound : ∀ k σ {n} {T : Tm n} {A a b}
   → viewId k σ T ≡ ok (A , a , b) → whnf k σ T ≡ ok (idt A a b)
@@ -141,6 +186,7 @@ viewId-sound k σ () | ok (prod _ _)
 viewId-sound k σ () | ok (pair _ _)
 viewId-sound k σ () | ok (fst _)
 viewId-sound k σ () | ok (snd _)
+viewId-sound k σ () | ok (letp _ _)
 viewId-sound k σ () | ok (nu _)
 viewId-sound k σ () | ok (unf _ _)
 viewId-sound k σ () | ok (ucons _)
@@ -301,6 +347,9 @@ isDataN-sound k σ fs Ft eq | ((fst _) , _) = ⊥-elim (false≢true (ok-inj eq)
   where false≢true : false ≡ true → ⊥
         false≢true ()
 isDataN-sound k σ fs Ft eq | ((snd _) , _) = ⊥-elim (false≢true (ok-inj eq))
+  where false≢true : false ≡ true → ⊥
+        false≢true ()
+isDataN-sound k σ fs Ft eq | ((letp _ _) , _) = ⊥-elim (false≢true (ok-inj eq))
   where false≢true : false ≡ true → ⊥
         false≢true ()
 isDataN-sound k σ fs Ft eq | ((nu _) , _) = ⊥-elim (false≢true (ok-inj eq))

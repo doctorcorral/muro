@@ -86,6 +86,12 @@ Binary trees of structure (no payloads). `size` descends on both children.
 
 See [Data](data.md) and [Indexed data](indexed.md).
 
+## pair.muro
+
+`let (x, y) = p in plus x y` opens an affine pair once. `addPair`, `swap` (run); `three-ok` and `swap-ok` are `refl`. `let` emits a pattern match.
+
+See [Terms](language.md).
+
 ## nx_add.muro
 
 `I64` and `Tensor`. `doubled` is `[2, 4]` after `Nx.to_flat_list/1`. Nat stays Peano.

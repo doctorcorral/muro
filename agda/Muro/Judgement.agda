@@ -11,11 +11,13 @@
 --     a dty spine), match on a non-indexed data type,
 --   def lookup (allowedDef),
 --   annotation,
+--   A × B / (a, b) / let (a, b) = e in t (the tensor eliminator; it
+--     only checks, like λ and refl),
 --   uses as in Check (spec forgets; run/evid count).
 --
 -- omitted = indexed data (match with forced indices) / ν / Tensor /
---   I64 / F32 / products / pairs. dty and constructors of an indexed
---   type are typed; match on one is not.
+--   I64 / F32 / the projections fst, snd. dty and constructors of an
+--   indexed type are typed; match on one is not.
 -- ⊢ does not track RecSt descent and does not use fuel. It does not
 -- check the data declarations of σ (Check.checkData); Muro.Typing
 -- states what preservation needs of them.
@@ -38,15 +40,16 @@ open import Data.Bool.Base using (Bool; true; false; if_then_else_)
 open import Data.Empty using (⊥)
 open import Data.List.Base as List using (List; []; _∷_; _++_; length)
 open import Data.Unit.Base using (tt)
+open import Data.Fin.Base as Fin using ()
 open import Data.Nat.Base using (ℕ; zero; suc)
 open import Data.Vec.Base as Vec using ([]; _∷_)
 open import Relation.Binary.PropositionalEquality.Core using (_≡_; refl)
 
 open import Muro.Base
 open import Muro.Syntax
-open import Muro.Subst using (inst; motSuc; closed; appsFrom)
+open import Muro.Subst using (inst; motSuc; closed; appsFrom; wk)
 open import Muro.Env
-open import Muro.Convert using (_⊢[_]_≈_; ≈-trans; ≈-sym)
+open import Muro.Convert using (_⊢[_]_≈_; ≈-trans; ≈-sym; ≈-ren)
 open import Muro.Spine using (Spine)
 open import Muro.Data
 
@@ -219,6 +222,18 @@ data _,_⊢[_]_⇒_⊣_ σ Γ where
     → σ , Γ ⊢[ m ] e ⇐ A ⊣ u
     → σ , Γ ⊢[ m ] ann e A ⇒ A ⊣ u
 
+  -- A × B is small, an erased term: spec only (Check: no promotion).
+  ⇒-prod : ∀ {A B ua ub}
+    → σ , Γ ⊢[ spec ] A ⇐ typ ⊣ ua
+    → σ , Γ ⊢[ spec ] B ⇐ typ ⊣ ub
+    → σ , Γ ⊢[ spec ] prod A B ⇒ typ ⊣ u0s
+
+  ⇒-pair : ∀ {m a b A B au bu uses}
+    → σ , Γ ⊢[ m ] a ⇒ A ⊣ au
+    → σ , Γ ⊢[ m ] b ⇒ B ⊣ bu
+    → combine m au bu ≡ ok uses
+    → σ , Γ ⊢[ m ] pair a b ⇒ prod A B ⊣ uses
+
 data _,_⊢[_]_⇐_⊣_ σ Γ where
   ⇐-conv : ∀ {m e A B u}
     → σ , Γ ⊢[ m ] e ⇒ B ⊣ u
@@ -240,6 +255,29 @@ data _,_⊢[_]_⇐_⊣_ σ Γ where
     → σ ⊢[ spec ] T ≈ idt A a b
     → σ ⊢[ spec ] a ≈ b
     → σ , Γ ⊢[ m ] rfl ⇐ T ⊣ u0s
+
+  -- The expected type is read through ≈ (Check: viewProd).
+  ⇐-pair : ∀ {m T A B a b au bu uses}
+    → σ ⊢[ spec ] T ≈ prod A B
+    → σ , Γ ⊢[ m ] a ⇐ A ⊣ au
+    → σ , Γ ⊢[ m ] b ⇐ B ⊣ bu
+    → combine m au bu ≡ ok uses
+    → σ , Γ ⊢[ m ] pair a b ⇐ T ⊣ uses
+
+  -- let (a, b) = e in t. The scrutinee's type is read through ≈ as a
+  -- product (Check: viewProd); the body is checked under two affine
+  -- binders (a at var 1, b at var 0) against the expected type weakened
+  -- twice; each binder's uses are bounded and the rest combined with
+  -- the scrutinee's. There is no ⇒ rule: like λ and refl, let only
+  -- checks.
+  ⇐-letp : ∀ {m e E A B t C eu ua ub tus uses}
+    → σ , Γ ⊢[ m ] e ⇒ E ⊣ eu
+    → σ ⊢[ spec ] E ≈ prod A B
+    → σ , ext (ext Γ affine A) affine (wk B) ⊢[ m ] t ⇐ wk (wk C) ⊣ (ub ∷ ua ∷ tus)
+    → checkBound m affine ub ≡ ok tt
+    → checkBound m affine ua ≡ ok tt
+    → combine m eu tus ≡ ok uses
+    → σ , Γ ⊢[ m ] letp e t ⇐ C ⊣ uses
 
   -- A constructor application ctor di ci a₁ … aₙ is checked against a
   -- data type (Check: viewData on the expected type, then
@@ -297,6 +335,9 @@ data _,_⊢[_]_brs⟨_,_,_,_⟩_⊣_ σ Γ where
 ⇐-≈ (⇐-lam W c cA rok D b) c′ = ⇐-lam W (≈-trans (≈-sym c′) c) cA rok D b
 ⇐-≈ (⇐-refl c cab) c′ = ⇐-refl (≈-trans (≈-sym c′) c) cab
 ⇐-≈ (⇐-ctor sp c lk lps lidx lkc ip Ar cR) c′ = ⇐-ctor sp (≈-trans (≈-sym c′) c) lk lps lidx lkc ip Ar cR
+⇐-≈ (⇐-pair c Da Db cu) c′ = ⇐-pair (≈-trans (≈-sym c′) c) Da Db cu
+⇐-≈ (⇐-letp De c Dt bb ba cu) c′ =
+  ⇐-letp De c (⇐-≈ Dt (≈-ren Fin.suc (≈-ren Fin.suc c′))) bb ba cu
 
 σ-empty : Sig
 σ-empty = mkSig [] []

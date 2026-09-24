@@ -70,6 +70,7 @@ mutual
   ren-ext h (pair a b) rewrite ren-ext h a | ren-ext h b = refl
   ren-ext h (fst t) rewrite ren-ext h t = refl
   ren-ext h (snd t) rewrite ren-ext h t = refl
+  ren-ext h (letp e t) rewrite ren-ext h e | ren-ext (lift-ext (lift-ext h)) t = refl
   ren-ext h (nu F) rewrite ren-ext (lift-ext h) F = refl
   ren-ext h (unf s f) rewrite ren-ext h s | ren-ext h f = refl
   ren-ext h (ucons s) rewrite ren-ext h s = refl
@@ -121,6 +122,7 @@ mutual
   sub-ext h (pair a b) rewrite sub-ext h a | sub-ext h b = refl
   sub-ext h (fst t) rewrite sub-ext h t = refl
   sub-ext h (snd t) rewrite sub-ext h t = refl
+  sub-ext h (letp e t) rewrite sub-ext h e | sub-ext (lifts-ext (lifts-ext h)) t = refl
   sub-ext h (nu F) rewrite sub-ext (lifts-ext h) F = refl
   sub-ext h (unf s f) rewrite sub-ext h s | sub-ext h f = refl
   sub-ext h (ucons s) rewrite sub-ext h s = refl
@@ -179,6 +181,8 @@ mutual
   ren-id (pair a b) rewrite ren-id a | ren-id b = refl
   ren-id (fst t) rewrite ren-id t = refl
   ren-id (snd t) rewrite ren-id t = refl
+  ren-id (letp e t)
+    rewrite ren-id e | ren-ext (lift-ext lift-id) t | ren-ext lift-id t | ren-id t = refl
   ren-id (nu F) rewrite ren-ext lift-id F | ren-id F = refl
   ren-id (unf s f) rewrite ren-id s | ren-id f = refl
   ren-id (ucons s) rewrite ren-id s = refl
@@ -245,6 +249,9 @@ mutual
   ren-ren ρ ρ′ (pair a b) rewrite ren-ren ρ ρ′ a | ren-ren ρ ρ′ b = refl
   ren-ren ρ ρ′ (fst t) rewrite ren-ren ρ ρ′ t = refl
   ren-ren ρ ρ′ (snd t) rewrite ren-ren ρ ρ′ t = refl
+  ren-ren ρ ρ′ (letp e t)
+    rewrite ren-ren ρ ρ′ e | ren-ren (lift (lift ρ)) (lift (lift ρ′)) t
+          | ren-ext (lift-∘ (lift ρ) (lift ρ′)) t | ren-ext (lift-ext (lift-∘ ρ ρ′)) t = refl
   ren-ren ρ ρ′ (nu F)
     rewrite ren-ren (lift ρ) (lift ρ′) F | ren-ext (lift-∘ ρ ρ′) F = refl
   ren-ren ρ ρ′ (unf s f) rewrite ren-ren ρ ρ′ s | ren-ren ρ ρ′ f = refl
@@ -313,6 +320,9 @@ mutual
   sub-ren σ ρ (pair a b) rewrite sub-ren σ ρ a | sub-ren σ ρ b = refl
   sub-ren σ ρ (fst t) rewrite sub-ren σ ρ t = refl
   sub-ren σ ρ (snd t) rewrite sub-ren σ ρ t = refl
+  sub-ren σ ρ (letp e t)
+    rewrite sub-ren σ ρ e | sub-ren (lifts (lifts σ)) (lift (lift ρ)) t
+          | sub-ext (lifts-lift (lifts σ) (lift ρ)) t | sub-ext (lifts-ext (lifts-lift σ ρ)) t = refl
   sub-ren σ ρ (nu F)
     rewrite sub-ren (lifts σ) (lift ρ) F | sub-ext (lifts-lift σ ρ) F = refl
   sub-ren σ ρ (unf s f) rewrite sub-ren σ ρ s | sub-ren σ ρ f = refl
@@ -382,6 +392,9 @@ mutual
   ren-sub ρ σ (pair a b) rewrite ren-sub ρ σ a | ren-sub ρ σ b = refl
   ren-sub ρ σ (fst t) rewrite ren-sub ρ σ t = refl
   ren-sub ρ σ (snd t) rewrite ren-sub ρ σ t = refl
+  ren-sub ρ σ (letp e t)
+    rewrite ren-sub ρ σ e | ren-sub (lift (lift ρ)) (lifts (lifts σ)) t
+          | sub-ext (lift-lifts (lift ρ) (lifts σ)) t | sub-ext (lifts-ext (lift-lifts ρ σ)) t = refl
   ren-sub ρ σ (nu F)
     rewrite ren-sub (lift ρ) (lifts σ) F | sub-ext (lift-lifts ρ σ) F = refl
   ren-sub ρ σ (unf s f) rewrite ren-sub ρ σ s | ren-sub ρ σ f = refl
@@ -451,6 +464,9 @@ mutual
   sub-sub σ τ (pair a b) rewrite sub-sub σ τ a | sub-sub σ τ b = refl
   sub-sub σ τ (fst t) rewrite sub-sub σ τ t = refl
   sub-sub σ τ (snd t) rewrite sub-sub σ τ t = refl
+  sub-sub σ τ (letp e t)
+    rewrite sub-sub σ τ e | sub-sub (lifts (lifts σ)) (lifts (lifts τ)) t
+          | sub-ext (lifts-lifts (lifts σ) (lifts τ)) t | sub-ext (lifts-ext (lifts-lifts σ τ)) t = refl
   sub-sub σ τ (nu F)
     rewrite sub-sub (lifts σ) (lifts τ) F | sub-ext (lifts-lifts σ τ) F = refl
   sub-sub σ τ (unf s f) rewrite sub-sub σ τ s | sub-sub σ τ f = refl
@@ -520,6 +536,9 @@ mutual
   ren-is-sub ρ (pair a b) rewrite ren-is-sub ρ a | ren-is-sub ρ b = refl
   ren-is-sub ρ (fst t) rewrite ren-is-sub ρ t = refl
   ren-is-sub ρ (snd t) rewrite ren-is-sub ρ t = refl
+  ren-is-sub ρ (letp e t)
+    rewrite ren-is-sub ρ e | ren-is-sub (lift (lift ρ)) t
+          | sub-ext (lift-var (lift ρ)) t | sub-ext (lifts-ext (lift-var ρ)) t = refl
   ren-is-sub ρ (nu F)
     rewrite ren-is-sub (lift ρ) F | sub-ext (lift-var ρ) F = refl
   ren-is-sub ρ (unf s f) rewrite ren-is-sub ρ s | ren-is-sub ρ f = refl
@@ -622,3 +641,17 @@ ren-motSuc ρ P =
     h : (λ x → ren (lift ρ) (motSucσ x)) ≗ (λ x → motSucσ (lift ρ x))
     h zero    = refl
     h (suc i) = refl
+
+-- Two binders at once (the tensor eliminator).
+inst₂-wk₂ : ∀ {n} (C : Tm n) (a b : Tm n) → inst₂ (wk (wk C)) a b ≡ C
+inst₂-wk₂ C a b rewrite inst-wk (wk C) (wk b) = inst-wk C a
+
+sub-inst₂ : ∀ {n m} (σ : Fin n → Tm m) (t : Tm (suc (suc n))) (a b : Tm n)
+  → sub σ (inst₂ t a b) ≡ inst₂ (sub (lifts (lifts σ)) t) (sub σ a) (sub σ b)
+sub-inst₂ σ t a b
+  rewrite sub-inst σ (inst t (wk b)) a | sub-inst (lifts σ) t (wk b) | sub-wk σ b = refl
+
+ren-inst₂ : ∀ {n m} (ρ : Fin n → Fin m) (t : Tm (suc (suc n))) (a b : Tm n)
+  → ren ρ (inst₂ t a b) ≡ inst₂ (ren (lift (lift ρ)) t) (ren ρ a) (ren ρ b)
+ren-inst₂ ρ t a b
+  rewrite ren-inst ρ (inst t (wk b)) a | ren-inst (lift ρ) t (wk b) | ren-wk ρ b = refl

@@ -51,6 +51,8 @@ defmodule Foo do
 | 0-argument ctor (`nil`, `nothing`, `leaf`) | atom (`:nil`, `:nothing`, `:leaf`) |
 | n-argument ctor | `{:ctor, args…}` |
 | `left n` / `right t` | `{:left, n}` / `{:right, t}` |
+| `(a, b)` | `{a, b}` |
+| `let (a, b) = e in t` | `({a, b} = e; t)` |
 | `run` Stream | `Stream.unfold/2` |
 | `addi` / `addt` / `packI` | `Nx.add` / `Nx.stack` / `Nx.tensor` |
 

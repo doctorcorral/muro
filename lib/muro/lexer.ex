@@ -36,6 +36,7 @@ defmodule Muro.Lexer do
     "match",
     "data",
     "lam",
+    "let",
     "def",
     "Pi",
     "nu",

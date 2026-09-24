@@ -44,7 +44,7 @@ open import Muro.Reduction
 open import Muro.Convert
 open import Muro.Data hiding (subst₂)
 open import Muro.Check
-  using (whnf; conv; apps; viewPi; viewId; viewData; isData; instParams; isRunType;
+  using (whnf; conv; apps; viewPi; viewId; viewProd; viewData; isData; instParams; isRunType;
          infer; check; checkTy; checkAgainst; checkCtorApp; inferCtorSpine; inferConv;
          checkLam; checkBr; checkBrPi; checkBranches; checkMotive; firstMotLam; nparamsOf;
          analyzeForces; forcePairs; countPis; wkForces; RecSt; extRec; lamRec; scrutOk; checkRec; selfApplied;
@@ -97,6 +97,15 @@ viewId-Frag : ∀ k σ {n} {T : Tm n} {A a b} → FragSig σ → Frag T
   → viewId k σ T ≡ ok (A , a , b) → Frag A × Frag a × Frag b
 viewId-Frag k σ fs FT eq with whnf-Frag k σ fs FT (viewId-sound k σ eq)
 ... | f-idt FA Fa Fb = FA , Fa , Fb
+
+viewProd-≈ : ∀ k σ {n} {T : Tm n} {A B} → FragSig σ → Frag T
+  → viewProd k σ T ≡ ok (A , B) → σ ⊢[ spec ] T ≈ prod A B
+viewProd-≈ k σ fs FT eq = whnf-≈ k σ fs FT (viewProd-sound k σ eq)
+
+viewProd-Frag : ∀ k σ {n} {T : Tm n} {A B} → FragSig σ → Frag T
+  → viewProd k σ T ≡ ok (A , B) → Frag A × Frag B
+viewProd-Frag k σ fs FT eq with whnf-Frag k σ fs FT (viewProd-sound k σ eq)
+... | f-prod FA FB = FA , FB
 
 ------------------------------------------------------------------------
 -- The checker is sound for ⊢. If infer / check / checkTy say yes on
@@ -479,6 +488,32 @@ infer-sound k σ rs {Γ = Γ} m hd G FΓ (f-ann {e = e} {A = A} Fe FA) eq with c
       , ⇒-ann (checkTy-sound k σ rs G FΓ FA teq) (check-sound k σ rs m G FΓ Fe FA ceq)
       , ≈-refl
 
+-- products: A × B is spec-only; a pair infers a product of the
+-- components' types
+infer-sound k σ rs run hd G FΓ (f-prod _ _) eq = ⊥-elim (fail≢ok eq)
+infer-sound k σ rs evid hd G FΓ (f-prod _ _) eq = ⊥-elim (fail≢ok eq)
+infer-sound k σ rs {Γ = Γ} spec hd G FΓ (f-prod {A = A} {B = B} FA FB) eq with check k σ rs Γ spec A typ in aeq
+... | fail _ = ⊥-elim (fail≢ok eq)
+... | ok _ with check k σ rs Γ spec B typ in beq
+...   | fail _ = ⊥-elim (fail≢ok eq)
+...   | ok _ with ok-inj eq
+...     | refl = f-typ , _
+      , ⇒-prod (check-sound k σ rs spec G FΓ FA f-typ aeq) (check-sound k σ rs spec G FΓ FB f-typ beq)
+      , ≈-refl
+infer-sound k σ rs {Γ = Γ} m hd G FΓ (f-pair {a = a} {b = b} Fa Fb) eq with infer k σ rs Γ m a in aeq
+... | fail _ = ⊥-elim (fail≢ok eq)
+... | ok (A , au) with infer k σ rs Γ m b in beq
+...   | fail _ = ⊥-elim (fail≢ok eq)
+...   | ok (B , bu) with combine m au bu in ceq
+...     | fail _ = ⊥-elim (fail≢ok eq)
+...     | ok uses with ok-inj eq
+...       | refl with infer-sound k σ rs m false G FΓ Fa aeq | infer-sound k σ rs m false G FΓ Fb beq
+...         | FA , A′ , Da , cA | FB , B′ , Db , cB =
+  f-prod FA FB , _ , ⇒-pair Da Db ceq , ≈-prod cA cB
+
+-- let only checks
+infer-sound k σ rs m hd G FΓ (f-letp _ _) eq = ⊥-elim (fail≢ok eq)
+
 ------------------------------------------------------------------------
 -- check
 ------------------------------------------------------------------------
@@ -498,6 +533,39 @@ check-sound k σ rs {Γ = Γ} m {A = T} G FΓ f-rfl FT eq with viewId k σ T in 
 ...     | ok tt with ok-inj eq
 ...       | refl with viewId-Frag k σ (GoodSig.frag G) FT veq
 ...         | FA , Fa , Fb = ⇐-refl (viewId-≈ k σ (GoodSig.frag G) FT veq) (conv-sound k σ (GoodSig.frag G) Fa Fb ceq)
+
+-- pair against a type: viewProd, then the components
+check-sound k σ rs {Γ = Γ} m {A = T} G FΓ (f-pair {a = a} {b = b} Fa Fb) FT eq with viewProd k σ T in veq
+... | fail _ = ⊥-elim (fail≢ok eq)
+... | ok (A , B) with check k σ rs Γ m a A in aeq
+...   | fail _ = ⊥-elim (fail≢ok eq)
+...   | ok au with check k σ rs Γ m b B in beq
+...     | fail _ = ⊥-elim (fail≢ok eq)
+...     | ok bu with viewProd-Frag k σ (GoodSig.frag G) FT veq
+...       | FA , FB =
+  ⇐-pair (viewProd-≈ k σ (GoodSig.frag G) FT veq)
+    (check-sound k σ rs m G FΓ Fa FA aeq) (check-sound k σ rs m G FΓ Fb FB beq) eq
+
+-- let (a, b) = e in t against a type: the scrutinee is inferred and
+-- viewed as a product, the body checked under the two binders
+check-sound k σ rs {Γ = Γ} m {A = T} G FΓ (f-letp {e = e} {t = t} Fe Ft) FT eq with infer k σ rs Γ m e in ieq
+... | fail _ = ⊥-elim (fail≢ok eq)
+... | ok (E , eu) with viewProd k σ E in veq
+...   | fail _ = ⊥-elim (fail≢ok eq)
+...   | ok (A , B) with check k σ (extRec (extRec rs false false) false false)
+                             (ext (ext Γ affine A) affine (wk B)) m t (wk (wk T)) in teq
+...     | fail _ = ⊥-elim (fail≢ok eq)
+...     | ok (ub Vec.∷ ua Vec.∷ tus) with checkBound m affine ub in bb
+...       | fail _ = ⊥-elim (fail≢ok eq)
+...       | ok tt with checkBound m affine ua in ba
+...         | fail _ = ⊥-elim (fail≢ok eq)
+...         | ok tt with infer-sound k σ rs m false G FΓ Fe ieq
+...           | FE , E′ , De , c with viewProd-Frag k σ (GoodSig.frag G) FE veq
+...             | FA , FB =
+  ⇐-letp De (≈-trans c (viewProd-≈ k σ (GoodSig.frag G) FE veq))
+    (check-sound k σ (extRec (extRec rs false false) false false) m G
+      (FragCtx-ext (FragCtx-ext FΓ FA) (Frag-wk FB)) Ft (Frag-wk (Frag-wk FT)) teq)
+    bb ba eq
 
 -- everything else: checkAgainst (the clauses match the term so that
 -- the witness stays a variable and is passed on whole)
@@ -521,6 +589,7 @@ check-sound k σ rs m {e = idt _ _ _} G FΓ Fe FA eq = checkAgainst-sound k σ r
 check-sound k σ rs m {e = rwt _ _ _} G FΓ Fe FA eq = checkAgainst-sound k σ rs m G FΓ Fe FA eq
 check-sound k σ rs m {e = def _} G FΓ Fe FA eq = checkAgainst-sound k σ rs m G FΓ Fe FA eq
 check-sound k σ rs m {e = ann _ _} G FΓ Fe FA eq = checkAgainst-sound k σ rs m G FΓ Fe FA eq
+check-sound k σ rs m {e = prod _ _} G FΓ Fe FA eq = checkAgainst-sound k σ rs m G FΓ Fe FA eq
 
 ------------------------------------------------------------------------
 -- checkLam: the λ's fragment witness is matched here, once the view of
@@ -568,6 +637,9 @@ checkLam-sound k σ rs m G FΓ f-rfl FT (ok _) peq eq = ⊥-elim (fail≢ok eq)
 checkLam-sound k σ rs m G FΓ (f-rwt _ _ _) FT (ok _) peq eq = ⊥-elim (fail≢ok eq)
 checkLam-sound k σ rs m G FΓ f-def FT (ok _) peq eq = ⊥-elim (fail≢ok eq)
 checkLam-sound k σ rs m G FΓ (f-ann _ _) FT (ok _) peq eq = ⊥-elim (fail≢ok eq)
+checkLam-sound k σ rs m G FΓ (f-prod _ _) FT (ok _) peq eq = ⊥-elim (fail≢ok eq)
+checkLam-sound k σ rs m G FΓ (f-pair _ _) FT (ok _) peq eq = ⊥-elim (fail≢ok eq)
+checkLam-sound k σ rs m G FΓ (f-letp _ _) FT (ok _) peq eq = ⊥-elim (fail≢ok eq)
 
 ------------------------------------------------------------------------
 -- checkAgainst: a constructor spine against a data type, else infer.
@@ -657,6 +729,9 @@ inferCtorSpine-sound k σ rs m G FΓ f-rfl Fps leq eq = ⊥-elim (fail≢ok eq)
 inferCtorSpine-sound k σ rs m G FΓ (f-rwt _ _ _) Fps leq eq = ⊥-elim (fail≢ok eq)
 inferCtorSpine-sound k σ rs m G FΓ f-def Fps leq eq = ⊥-elim (fail≢ok eq)
 inferCtorSpine-sound k σ rs m G FΓ (f-ann _ _) Fps leq eq = ⊥-elim (fail≢ok eq)
+inferCtorSpine-sound k σ rs m G FΓ (f-prod _ _) Fps leq eq = ⊥-elim (fail≢ok eq)
+inferCtorSpine-sound k σ rs m G FΓ (f-pair _ _) Fps leq eq = ⊥-elim (fail≢ok eq)
+inferCtorSpine-sound k σ rs m G FΓ (f-letp _ _) Fps leq eq = ⊥-elim (fail≢ok eq)
 
 checkCtorApp-sound k σ rs {Γ = Γ} m {di} {ps} {e} {X} G FΓ Fe Fps FX leq eq
   with inferCtorSpine k σ rs Γ m di ps e in seq
@@ -745,6 +820,9 @@ checkBrPi-sound k σ rs m di ci sm G FΓ FA FB f-rfl FD FP Fargs tl npeq eq = �
 checkBrPi-sound k σ rs m di ci sm G FΓ FA FB (f-rwt _ _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
 checkBrPi-sound k σ rs m di ci sm G FΓ FA FB f-def FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
 checkBrPi-sound k σ rs m di ci sm G FΓ FA FB (f-ann _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB (f-prod _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB (f-pair _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
+checkBrPi-sound k σ rs m di ci sm G FΓ FA FB (f-letp _ _) FD FP Fargs tl npeq eq = ⊥-elim (fail≢ok eq)
 
 ------------------------------------------------------------------------
 -- checkBranches: one branch per constructor, in order.
@@ -836,6 +914,14 @@ checkTy-sound k σ rs {Γ = Γ} {A = A@(def _)} G FΓ Fe eq with infer k σ rs �
 checkTy-sound k σ rs {Γ = Γ} {A = A@(ann _ _)} G FΓ Fe eq with infer k σ rs Γ spec A in ieq
 ... | fail _ = ⊥-elim (fail≢ok eq)
 ... | ok (T , _) = checkTy-el k σ rs G FΓ Fe ieq eq
+checkTy-sound k σ rs {Γ = Γ} {A = A@(prod _ _)} G FΓ Fe eq with infer k σ rs Γ spec A in ieq
+... | fail _ = ⊥-elim (fail≢ok eq)
+... | ok (T , _) = checkTy-el k σ rs G FΓ Fe ieq eq
+checkTy-sound k σ rs {Γ = Γ} {A = A@(pair _ _)} G FΓ Fe eq with infer k σ rs Γ spec A in ieq
+... | fail _ = ⊥-elim (fail≢ok eq)
+... | ok (T , _) = checkTy-el k σ rs G FΓ Fe ieq eq
+-- infer′ refuses a let outright, so checkTy on one is fail.
+checkTy-sound k σ rs {A = letp _ _} G FΓ Fe eq = ⊥-elim (fail≢ok eq)
 
 ------------------------------------------------------------------------
 -- The corollaries for a definition and for a signature.

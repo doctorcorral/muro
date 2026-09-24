@@ -83,6 +83,14 @@ no-evid-idt : ∀ {σ n} {Γ : Ctx n} {A a b T u} →
   σ , Γ ⊢[ evid ] idt A a b ⇒ T ⊣ u → ⊥
 no-evid-idt ()
 
+no-run-prod : ∀ {σ n} {Γ : Ctx n} {A B T u} →
+  σ , Γ ⊢[ run ] prod A B ⇒ T ⊣ u → ⊥
+no-run-prod ()
+
+no-evid-prod : ∀ {σ n} {Γ : Ctx n} {A B T u} →
+  σ , Γ ⊢[ evid ] prod A B ⇒ T ⊣ u → ⊥
+no-evid-prod ()
+
 no-run-dty : ∀ {σ n} {Γ : Ctx n} {i T u} →
   σ , Γ ⊢[ run ] dty i ⇒ T ⊣ u → ⊥
 no-run-dty ()
@@ -163,12 +171,16 @@ spec-⇒-uses (⇒-dty _) = refl
 spec-⇒-uses (⇒-mData _ _ _ _ _ _ _ eq) = sym (ok-inj eq)
 spec-⇒-uses (⇒-def _ _) = refl
 spec-⇒-uses (⇒-ann _ D) = spec-⇐-uses D
+spec-⇒-uses (⇒-prod _ _) = refl
+spec-⇒-uses (⇒-pair _ _ eq) = sym (ok-inj eq)
 
 spec-⇐-uses (⇐-conv D _) = spec-⇒-uses D
 spec-⇐-uses (⇐-lam _ _ _ _ D _) with spec-⇐-uses D
 ... | refl = refl
 spec-⇐-uses (⇐-refl _ _) = refl
 spec-⇐-uses (⇐-ctor _ _ _ _ _ _ _ Ar _) = spec-args-uses Ar
+spec-⇐-uses (⇐-pair _ _ _ eq) = sym (ok-inj eq)
+spec-⇐-uses (⇐-letp _ _ _ _ _ eq) = sym (ok-inj eq)
 
 -- combineArg at spec: an erased argument gives u0s outright; the others
 -- go through combine spec, which forgets.

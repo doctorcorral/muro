@@ -1,0 +1,21 @@
+-- pair.muro — let (a, b) = e in t consumes an affine pair once.
+-- `plus (fst p) (snd p)` is refused: p is used twice. let opens p once.
+
+def plus : run Π (n : Nat) → Π (m : Nat) → Nat :=
+  λ (n : Nat) → λ (m : Nat) →
+    match n motive (λ _ → Nat)
+      | 0 => m
+      | suc np => suc(plus np m)
+
+def addPair : run Π (p : Nat × Nat) → Nat :=
+  λ (p : Nat × Nat) → let (x, y) = p in plus x y
+
+def swap : run Π (p : Nat × Nat) → Nat × Nat :=
+  λ (p : Nat × Nat) → let (x, y) = p in (y, x)
+
+def three : run Nat := addPair (suc(0), suc(suc(0)))
+
+def three-ok : evidence {three ≡ suc(suc(suc(0))) : Nat} := refl
+
+def swap-ok : evidence Π (a : Nat) → Π (b : Nat) → {swap (a, b) ≡ (b, a) : Nat × Nat} :=
+  λ (a : Nat) → λ (b : Nat) → refl

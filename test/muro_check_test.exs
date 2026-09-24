@@ -136,6 +136,68 @@ defmodule Muro.CheckTest do
     refute out =~ "head_zeros"
   end
 
+  test "pair.muro: let (a, b) = e in t checks, emits a pattern match, and runs" do
+    src = File.read!("examples/pair.muro")
+    assert {:ok, book} = Parser.parse(src)
+    assert Check.check_sig(book) == :ok
+
+    out = Emit.emit_module(Muro.PairLet, book)
+    assert out =~ ~r/\bdef addPair\b/
+    assert out =~ ~r/\{x1, x2\} = x0;/
+    refute out =~ "swap-ok"
+    Code.eval_string(out)
+
+    assert Muro.PairLet.addPair({{:suc, 0}, {:suc, {:suc, 0}}}) ==
+             {:suc, {:suc, {:suc, 0}}}
+
+    assert Muro.PairLet.swap({1, 2}) == {2, 1}
+  end
+
+  test "let opens an affine pair once; both projections use it twice" do
+    plus =
+      "def plus : run Π (n : Nat) → Π (m : Nat) → Nat := λ (n : Nat) → λ (m : Nat) → n\n"
+
+    both_proj =
+      plus <>
+        "def f : run Π (p : Nat × Nat) → Nat := λ (p : Nat × Nat) → plus (fst p) (snd p)"
+
+    assert {:ok, book} = Parser.parse(both_proj)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "affine variable used twice"
+
+    with_let =
+      plus <>
+        "def f : run Π (p : Nat × Nat) → Nat := λ (p : Nat × Nat) → let (x, y) = p in plus x y"
+
+    assert {:ok, book} = Parser.parse(with_let)
+    assert Check.check_sig(book) == :ok
+
+    # the components are affine too
+    twice =
+      plus <>
+        "def f : run Π (p : Nat × Nat) → Nat := λ (p : Nat × Nat) → let (x, y) = p in plus x x"
+
+    assert {:ok, book} = Parser.parse(twice)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "affine variable used twice"
+
+    # let only checks: as the head of an application it has no expected type
+    head =
+      plus <>
+        "def f : run Π (p : (Π (n : Nat) → Nat) × Nat) → Nat := " <>
+        "λ (p : (Π (n : Nat) → Nat) × Nat) → (let (g, y) = p in g) 0"
+
+    assert {:ok, book} = Parser.parse(head)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "let needs an expected type"
+
+    # the scrutinee must be a product
+    not_prod = plus <> "def f : run Π (n : Nat) → Nat := λ (n : Nat) → let (x, y) = n in x"
+    assert {:ok, book} = Parser.parse(not_prod)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "expected ×"
+  end
+
   test "nats.muro parses, checks, and emits natsFrom" do
     src = File.read!("examples/nats.muro")
     assert {:ok, book} = Parser.parse(src)

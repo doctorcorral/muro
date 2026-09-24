@@ -109,7 +109,15 @@ Motives are written in parentheses. Nested λ in the motive cover index binders 
 
 ## Products
 
-`A × B` (ASCII `*`) is a pair type. `(a, b)` is a pair. `fst` and `snd` project. `head s` is `fst (uncons s)`; `tail s` is `snd (uncons s)`.
+`A × B` (ASCII `*`) is a pair type. `(a, b)` is a pair. A pair is opened with `let`:
+
+```
+let (a, b) = e in t
+```
+
+`e` must have a pair type `A × B`; `t` is checked against the expected type with `a : A` and `b : B` in scope, each affine. `let (a, b) = (u, v) in t` reduces to `t` with `a := u`, `b := v`. Like `λ`, a `let` has no type of its own: it is checked against an expected type, so it may not be the head of an application.
+
+`let` is the way to consume an affine pair: a pair-typed variable `p` may be used once, and `plus (fst p) (snd p)` uses it twice. `let (x, y) = p in plus x y` uses it once and both components once. `fst` and `snd` still project; `head s` is `fst (uncons s)` and `tail s` is `snd (uncons s)`. The projections are accepted by the checker but are outside the fragment the Agda proofs cover; `let` is inside it (see [Limits](limits.md)).
 
 ## Recursion and descent
 

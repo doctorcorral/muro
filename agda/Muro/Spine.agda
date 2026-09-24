@@ -130,6 +130,7 @@ unspine→Spine (prod _ _) acc refl = [] , refl , sp-[]
 unspine→Spine (pair _ _) acc refl = [] , refl , sp-[]
 unspine→Spine (fst _) acc refl = [] , refl , sp-[]
 unspine→Spine (snd _) acc refl = [] , refl , sp-[]
+unspine→Spine (letp _ _) acc refl = [] , refl , sp-[]
 unspine→Spine (nu _) acc refl = [] , refl , sp-[]
 unspine→Spine (unf _ _) acc refl = [] , refl , sp-[]
 unspine→Spine (ucons _) acc refl = [] , refl , sp-[]
@@ -270,6 +271,7 @@ ctorSpine-just () | ((prod _ _) , _)
 ctorSpine-just () | ((pair _ _) , _)
 ctorSpine-just () | ((fst _) , _)
 ctorSpine-just () | ((snd _) , _)
+ctorSpine-just () | ((letp _ _) , _)
 ctorSpine-just () | ((nu _) , _)
 ctorSpine-just () | ((unf _ _) , _)
 ctorSpine-just () | ((ucons _) , _)
@@ -317,6 +319,7 @@ dtyArgs-just () | ((prod _ _) , _)
 dtyArgs-just () | ((pair _ _) , _)
 dtyArgs-just () | ((fst _) , _)
 dtyArgs-just () | ((snd _) , _)
+dtyArgs-just () | ((letp _ _) , _)
 dtyArgs-just () | ((nu _) , _)
 dtyArgs-just () | ((unf _ _) , _)
 dtyArgs-just () | ((ucons _) , _)
@@ -365,6 +368,7 @@ defArgs-just () | ((prod _ _) , _)
 defArgs-just () | ((pair _ _) , _)
 defArgs-just () | ((fst _) , _)
 defArgs-just () | ((snd _) , _)
+defArgs-just () | ((letp _ _) , _)
 defArgs-just () | ((nu _) , _)
 defArgs-just () | ((unf _ _) , _)
 defArgs-just () | ((ucons _) , _)

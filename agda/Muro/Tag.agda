@@ -50,6 +50,7 @@ tmTag (muli _ _) = 33
 tmTag (addt _ _) = 34
 tmTag (toi64 _) = 35
 tmTag (packi _ _) = 36
+tmTag (letp _ _) = 37
 
 data TmShape {n} : ℕ → Tm n → Set where
   sh-var : ∀ {a} → TmShape 0 (var a)
@@ -89,6 +90,7 @@ data TmShape {n} : ℕ → Tm n → Set where
   sh-addt : ∀ {a b} → TmShape 34 (addt a b)
   sh-toi64 : ∀ {a} → TmShape 35 (toi64 a)
   sh-packi : ∀ {a b} → TmShape 36 (packi a b)
+  sh-letp : ∀ {a b} → TmShape 37 (letp a b)
 
 shape : ∀ {n} (t : Tm n) → TmShape (tmTag t) t
 shape (var _) = sh-var
@@ -128,3 +130,4 @@ shape (muli _ _) = sh-muli
 shape (addt _ _) = sh-addt
 shape (toi64 _) = sh-toi64
 shape (packi _ _) = sh-packi
+shape (letp _ _) = sh-letp

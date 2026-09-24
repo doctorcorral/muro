@@ -75,6 +75,11 @@ mData-e* : ∀ {σ m n} {e e′ : Tm n} {P bs} → σ ⊢[ m ] e ⟶* e′
 mData-e* ⟶*-refl = ⟶*-refl
 mData-e* (⟶*-step s r) = ⟶*-step (mData-e s) (mData-e* r)
 
+letp-e* : ∀ {σ m n} {e e′ : Tm n} {t} → σ ⊢[ m ] e ⟶* e′
+  → σ ⊢[ m ] letp e t ⟶* letp e′ t
+letp-e* ⟶*-refl = ⟶*-refl
+letp-e* (⟶*-step s r) = ⟶*-step (letp-e s) (letp-e* r)
+
 ------------------------------------------------------------------------
 -- whnf. On a fragment term over a fragment signature, whnf k σ t is
 -- reached from t by ⟶ in spec (all defs unfold) and is again in the
@@ -139,10 +144,12 @@ whnf-sound (suc k) σ fs (f-app Ff Fa) eq | ok (def _) with whnf-sound k σ fs F
 ...   | r , F | refl = app-f* r , f-app F Fa
 whnf-sound (suc k) σ fs (f-app Ff Fa) eq | ok (ann _ _) with whnf-sound k σ fs Ff feq | ok-inj eq
 ...   | r , F | refl = app-f* r , f-app F Fa
-whnf-sound (suc k) σ fs (f-app Ff Fa) eq | ok (prod _ _) with whnf-sound k σ fs Ff feq
-...   | _ , ()
-whnf-sound (suc k) σ fs (f-app Ff Fa) eq | ok (pair _ _) with whnf-sound k σ fs Ff feq
-...   | _ , ()
+whnf-sound (suc k) σ fs (f-app Ff Fa) eq | ok (letp _ _) with whnf-sound k σ fs Ff feq | ok-inj eq
+...   | r , F | refl = app-f* r , f-app F Fa
+whnf-sound (suc k) σ fs (f-app Ff Fa) eq | ok (prod _ _) with whnf-sound k σ fs Ff feq | ok-inj eq
+...   | r , F | refl = app-f* r , f-app F Fa
+whnf-sound (suc k) σ fs (f-app Ff Fa) eq | ok (pair _ _) with whnf-sound k σ fs Ff feq | ok-inj eq
+...   | r , F | refl = app-f* r , f-app F Fa
 whnf-sound (suc k) σ fs (f-app Ff Fa) eq | ok (fst _) with whnf-sound k σ fs Ff feq
 ...   | _ , ()
 whnf-sound (suc k) σ fs (f-app Ff Fa) eq | ok (snd _) with whnf-sound k σ fs Ff feq
@@ -218,10 +225,12 @@ whnf-sound (suc k) σ fs (f-mNat Fe FP Fz Fs) eq | ok (def _) with whnf-sound k 
 ...   | r , F | refl = mNat-e* r , f-mNat F FP Fz Fs
 whnf-sound (suc k) σ fs (f-mNat Fe FP Fz Fs) eq | ok (ann _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
 ...   | r , F | refl = mNat-e* r , f-mNat F FP Fz Fs
-whnf-sound (suc k) σ fs (f-mNat Fe FP Fz Fs) eq | ok (prod _ _) with whnf-sound k σ fs Fe eeq
-...   | _ , ()
-whnf-sound (suc k) σ fs (f-mNat Fe FP Fz Fs) eq | ok (pair _ _) with whnf-sound k σ fs Fe eeq
-...   | _ , ()
+whnf-sound (suc k) σ fs (f-mNat Fe FP Fz Fs) eq | ok (letp _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = mNat-e* r , f-mNat F FP Fz Fs
+whnf-sound (suc k) σ fs (f-mNat Fe FP Fz Fs) eq | ok (prod _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = mNat-e* r , f-mNat F FP Fz Fs
+whnf-sound (suc k) σ fs (f-mNat Fe FP Fz Fs) eq | ok (pair _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = mNat-e* r , f-mNat F FP Fz Fs
 whnf-sound (suc k) σ fs (f-mNat Fe FP Fz Fs) eq | ok (fst _) with whnf-sound k σ fs Fe eeq
 ...   | _ , ()
 whnf-sound (suc k) σ fs (f-mNat Fe FP Fz Fs) eq | ok (snd _) with whnf-sound k σ fs Fe eeq
@@ -296,10 +305,12 @@ whnf-sound (suc k) σ fs (f-mUnit Fe FP Fu) eq | ok (def _) with whnf-sound k σ
 ...   | r , F | refl = mUnit-e* r , f-mUnit F FP Fu
 whnf-sound (suc k) σ fs (f-mUnit Fe FP Fu) eq | ok (ann _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
 ...   | r , F | refl = mUnit-e* r , f-mUnit F FP Fu
-whnf-sound (suc k) σ fs (f-mUnit Fe FP Fu) eq | ok (prod _ _) with whnf-sound k σ fs Fe eeq
-...   | _ , ()
-whnf-sound (suc k) σ fs (f-mUnit Fe FP Fu) eq | ok (pair _ _) with whnf-sound k σ fs Fe eeq
-...   | _ , ()
+whnf-sound (suc k) σ fs (f-mUnit Fe FP Fu) eq | ok (letp _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = mUnit-e* r , f-mUnit F FP Fu
+whnf-sound (suc k) σ fs (f-mUnit Fe FP Fu) eq | ok (prod _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = mUnit-e* r , f-mUnit F FP Fu
+whnf-sound (suc k) σ fs (f-mUnit Fe FP Fu) eq | ok (pair _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = mUnit-e* r , f-mUnit F FP Fu
 whnf-sound (suc k) σ fs (f-mUnit Fe FP Fu) eq | ok (fst _) with whnf-sound k σ fs Fe eeq
 ...   | _ , ()
 whnf-sound (suc k) σ fs (f-mUnit Fe FP Fu) eq | ok (snd _) with whnf-sound k σ fs Fe eeq
@@ -345,6 +356,86 @@ whnf-sound (suc k) σ fs (f-mData {bs = bs} Fe FP Fbs) eq | ok e′ | r , Fe′ 
 whnf-sound (suc k) σ fs (f-mData {bs = bs} Fe FP Fbs) eq | ok e′ | r , Fe′ | just (i , ci , args) | ok b with ctorSpine-just ceq
 ...         | sp with whnf-sound k σ fs (Frag-appsFrom (FragL-lookup Fbs leq) (proj₂ (Frag-Spine sp Fe′))) eq
 ...           | r′ , F′ = ⟶*-trans (mData-e* r) (⟶*-step (ι-data sp leq) r′) , F′
+-- letp: ι when the scrutinee normalises to a pair
+whnf-sound (suc k) σ fs (f-letp {e} {t} Fe Ft) eq with whnf k σ e in eeq
+... | fail _ = ⊥-elim (fail≢ok eq)
+... | ok (pair a b) with whnf-sound k σ fs Fe eeq
+...   | r , f-pair Fa Fb with whnf-sound k σ fs (Frag-inst₂ Ft Fa Fb) eq
+...     | r′ , F′ = ⟶*-trans (letp-e* r) (⟶*-step ι-letp r′) , F′
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (var _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (typ) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (pi _ _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (lam _ _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (app _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (nat) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (ze) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (su _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (unit) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (one) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (empty) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (dty _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (ctor _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (mData _ _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (mNat _ _ _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (mEmp _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (mUnit _ _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (idt _ _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (rfl) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (rwt _ _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (def _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (ann _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (prod _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (fst _) with whnf-sound k σ fs Fe eeq
+...   | _ , ()
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (snd _) with whnf-sound k σ fs Fe eeq
+...   | _ , ()
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (letp _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
+...   | r , F | refl = letp-e* r , f-letp F Ft
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (nu _) with whnf-sound k σ fs Fe eeq
+...   | _ , ()
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (unf _ _) with whnf-sound k σ fs Fe eeq
+...   | _ , ()
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (ucons _) with whnf-sound k σ fs Fe eeq
+...   | _ , ()
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (i64) with whnf-sound k σ fs Fe eeq
+...   | _ , ()
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (f32ty) with whnf-sound k σ fs Fe eeq
+...   | _ , ()
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (tensor _ _) with whnf-sound k σ fs Fe eeq
+...   | _ , ()
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (addi _ _) with whnf-sound k σ fs Fe eeq
+...   | _ , ()
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (muli _ _) with whnf-sound k σ fs Fe eeq
+...   | _ , ()
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (addt _ _) with whnf-sound k σ fs Fe eeq
+...   | _ , ()
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (toi64 _) with whnf-sound k σ fs Fe eeq
+...   | _ , ()
+whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (packi _ _) with whnf-sound k σ fs Fe eeq
+...   | _ , ()
 -- δ: every def unfolds in spec
 whnf-sound (suc k) σ fs (f-def {i}) eq with lookupDef σ i in leq
 ... | fail _ with ok-inj eq
@@ -370,6 +461,8 @@ whnf-sound (suc k) σ fs f-ctor refl = ⟶*-refl , f-ctor
 whnf-sound (suc k) σ fs (f-idt FA Fa Fb) refl = ⟶*-refl , f-idt FA Fa Fb
 whnf-sound (suc k) σ fs f-rfl refl = ⟶*-refl , f-rfl
 whnf-sound (suc k) σ fs (f-rwt Fe FP Ft) refl = ⟶*-refl , f-rwt Fe FP Ft
+whnf-sound (suc k) σ fs (f-prod FA FB) refl = ⟶*-refl , f-prod FA FB
+whnf-sound (suc k) σ fs (f-pair Fa Fb) refl = ⟶*-refl , f-pair Fa Fb
 
 whnf-⟶* : ∀ k σ {n} {t u : Tm n} → FragSig σ → Frag t → whnf k σ t ≡ ok u → σ ⊢[ spec ] t ⟶* u
 whnf-⟶* k σ fs Ft eq = proj₁ (whnf-sound k σ fs Ft eq)
@@ -495,6 +588,8 @@ synEqD-sound (pair a b) (pair a′ b′) sh-pair sh-pair eq with ∧-true eq
 ... | e1 , e2 = cong₂ pair (synEq-sound a a′ e1) (synEq-sound b b′ e2)
 synEqD-sound (fst a) (fst a′) sh-fst sh-fst eq = cong fst (synEq-sound a a′ eq)
 synEqD-sound (snd a) (snd a′) sh-snd sh-snd eq = cong snd (synEq-sound a a′ eq)
+synEqD-sound (letp a b) (letp a′ b′) sh-letp sh-letp eq with ∧-true eq
+... | e1 , e2 = cong₂ letp (synEq-sound a a′ e1) (synEq-sound b b′ e2)
 synEqD-sound (nu a) (nu a′) sh-nu sh-nu eq = cong nu (synEq-sound a a′ eq)
 synEqD-sound (unf a b) (unf a′ b′) sh-unf sh-unf eq with ∧-true eq
 ... | e1 , e2 = cong₂ unf (synEq-sound a a′ e1) (synEq-sound b b′ e2)
@@ -584,6 +679,24 @@ synEqD-sound (packi a b) (packi a′ b′) sh-packi sh-packi eq with ∧-true eq
 ≈-ann {e′ = e′} {A} ce cA =
   ≈-trans (≈-map (λ x → ann x A) (λ d → ⇛-annc d (⇛-refl _)) ce)
           (≈-map (λ x → ann e′ x) (λ d → ⇛-annc (⇛-refl _) d) cA)
+
+≈-prod : ∀ {σ m n} {A A′ B B′ : Tm n}
+  → σ ⊢[ m ] A ≈ A′ → σ ⊢[ m ] B ≈ B′ → σ ⊢[ m ] prod A B ≈ prod A′ B′
+≈-prod {A′ = A′} {B} cA cB =
+  ≈-trans (≈-map (λ x → prod x B) (λ d → ⇛-prod d (⇛-refl _)) cA)
+          (≈-map (λ x → prod A′ x) (λ d → ⇛-prod (⇛-refl _) d) cB)
+
+≈-pair : ∀ {σ m n} {a a′ b b′ : Tm n}
+  → σ ⊢[ m ] a ≈ a′ → σ ⊢[ m ] b ≈ b′ → σ ⊢[ m ] pair a b ≈ pair a′ b′
+≈-pair {a′ = a′} {b} ca cb =
+  ≈-trans (≈-map (λ x → pair x b) (λ d → ⇛-pair d (⇛-refl _)) ca)
+          (≈-map (λ x → pair a′ x) (λ d → ⇛-pair (⇛-refl _) d) cb)
+
+≈-letp : ∀ {σ m n} {e e′ : Tm n} {t t′}
+  → σ ⊢[ m ] e ≈ e′ → σ ⊢[ m ] t ≈ t′ → σ ⊢[ m ] letp e t ≈ letp e′ t′
+≈-letp {e′ = e′} {t} ce ct =
+  ≈-trans (≈-map (λ x → letp x t) (λ d → ⇛-letp d (⇛-refl _)) ce)
+          (≈-map (λ x → letp e′ x) (λ d → ⇛-letp (⇛-refl _) d) ct)
 
 ⇛L-++ˡ : ∀ {σ m n} (pre : List (Tm n)) {xs ys}
   → σ ⊢[ m ] xs ⇛L ys → σ ⊢[ m ] pre ++ xs ⇛L pre ++ ys
@@ -708,8 +821,12 @@ convND-sound k σ (sh-def {i}) (sh-def {j}) fs _ _ eq with ≡ᵇ-sound {i} {j} 
 ... | refl = ≈-refl
 convND-sound k σ sh-ann sh-ann fs (f-ann Fe FA) (f-ann Fe′ FA′) eq with >>-ok eq
 ... | (_ , ce) , cA = ≈-ann (conv-sound k σ fs Fe Fe′ ce) (conv-sound k σ fs FA FA′ cA)
-convND-sound k σ sh-prod sh-prod fs () _ _
-convND-sound k σ sh-pair sh-pair fs () _ _
+convND-sound k σ sh-prod sh-prod fs (f-prod FA FB) (f-prod FA′ FB′) eq with >>-ok eq
+... | (_ , cA) , cB = ≈-prod (conv-sound k σ fs FA FA′ cA) (conv-sound k σ fs FB FB′ cB)
+convND-sound k σ sh-pair sh-pair fs (f-pair Fa Fb) (f-pair Fa′ Fb′) eq with >>-ok eq
+... | (_ , ca) , cb = ≈-pair (conv-sound k σ fs Fa Fa′ ca) (conv-sound k σ fs Fb Fb′ cb)
+convND-sound k σ sh-letp sh-letp fs (f-letp Fe Ft) (f-letp Fe′ Ft′) eq with >>-ok eq
+... | (_ , ce) , ct = ≈-letp (conv-sound k σ fs Fe Fe′ ce) (conv-sound k σ fs Ft Ft′ ct)
 convND-sound k σ sh-fst sh-fst fs () _ _
 convND-sound k σ sh-snd sh-snd fs () _ _
 convND-sound k σ sh-nu sh-nu fs () _ _
