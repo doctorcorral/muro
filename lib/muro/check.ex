@@ -195,10 +195,13 @@ defmodule Muro.Check do
 
   # A maximal application spine headed by the definition being checked (run
   # and evidence; spec is not checked): the argument at pos must be a
-  # smaller variable. A shorter spine has no such argument (Agda: checkRec).
-  defp check_rec(:spec, _rs, _t), do: :ok
+  # smaller variable. A shorter spine has no such argument. head? is
+  # infer's: an inner application (the head of a larger spine) is not the
+  # maximal spine and is not checked (Agda: checkRec).
+  defp check_rec(:spec, _head?, _rs, _t), do: :ok
+  defp check_rec(_mode, true, _rs, _t), do: :ok
 
-  defp check_rec(mode, rs, t) when mode in [:run, :evidence] do
+  defp check_rec(mode, false, rs, t) when mode in [:run, :evidence] do
     case apps(t) do
       {{:def, name}, args} when rs.self == name ->
         case Enum.at(args, rs.pos) do
@@ -212,10 +215,12 @@ defmodule Muro.Check do
   end
 
   # The definition being checked may not occur unapplied in run or evidence:
-  # passed along, it could be applied to anything (Agda: selfApplied).
-  defp self_applied(:spec, _rs, _name), do: :ok
+  # passed along, it could be applied to anything. head? is infer's: at the
+  # head of a spine it is applied (Agda: selfApplied).
+  defp self_applied(:spec, _head?, _rs, _name), do: :ok
+  defp self_applied(_mode, true, _rs, _name), do: :ok
 
-  defp self_applied(_mode, rs, name) do
+  defp self_applied(_mode, false, rs, name) do
     if rs.self == name,
       do: {:error, "recursive definition must be applied to its arguments"},
       else: :ok
@@ -840,24 +845,12 @@ defmodule Muro.Check do
     end
   end
 
-  # An application, its head inferred as a head. The descent check is the
-  # outermost app's (infer), on the maximal spine (Agda: inferApp).
-  defp infer_app(k, book, rs, gamma, m, f, a) do
-    with {:ok, {ft, fu}} <- infer_head(k, book, rs, gamma, m, f),
-         {:ok, {q, a_ty, b}} <- view_pi(k, book, ft),
-         {:ok, uses} <- infer_arg(k, book, rs, gamma, m, q, a_ty, fu, a, f) do
-      {:ok, {Subst.inst(b, a), uses}}
-    end
-  end
+  # head?: the term is the head of an application spine. Only the app and
+  # def cases read it (descent); every other case passes on through
+  # infer/6 and check, which is not a head (Agda: infer′'s Bool).
+  defp infer(k, book, rs, gamma, mode, t), do: infer(k, book, rs, gamma, mode, t, false)
 
-  # The head of an application spine: the definition being checked is
-  # applied here, so self_applied is not asked; an inner app is not the
-  # maximal spine, so check_rec is not run (Agda: inferHead).
-  defp infer_head(k, book, rs, gamma, m, {:app, f, a}), do: infer_app(k, book, rs, gamma, m, f, a)
-  defp infer_head(k, book, _rs, gamma, m, {:def, name}), do: infer_def(k, book, gamma, m, name)
-  defp infer_head(k, book, rs, gamma, m, t), do: infer(k, book, rs, gamma, m, t)
-
-  defp infer(k, book, rs, gamma, mode, t) do
+  defp infer(k, book, rs, gamma, mode, t, head?) do
     n = nctx(gamma)
 
     case {mode, t} do
@@ -961,12 +954,14 @@ defmodule Muro.Check do
           {:ok, {{:pi, q, a, b}, us}}
         end
 
-      # ⇒-app-aff / ⇒-app-era / ⇒-app-reuse: the head as a head, then the
-      # descent check on the maximal spine
+      # ⇒-app-aff / ⇒-app-era / ⇒-app-reuse: the head as a head; the
+      # descent check is the outermost app's, on the maximal spine
       {m, {:app, f, a}} ->
-        with {:ok, r} <- infer_app(k, book, rs, gamma, m, f, a),
-             :ok <- check_rec(m, rs, {:app, f, a}) do
-          {:ok, r}
+        with {:ok, {ft, fu}} <- infer(k, book, rs, gamma, m, f, true),
+             {:ok, {q, a_ty, b}} <- view_pi(k, book, ft),
+             {:ok, uses} <- infer_arg(k, book, rs, gamma, m, q, a_ty, fu, a, f),
+             :ok <- check_rec(m, head?, rs, {:app, f, a}) do
+          {:ok, {Subst.inst(b, a), uses}}
         end
 
       {m, {:idt, _, _, _}} when m in [:run, :evidence] ->
@@ -1029,10 +1024,10 @@ defmodule Muro.Check do
           {:ok, {Subst.inst(p, e), uses}}
         end
 
-      # ⇒-def / ⇒-dty
-      # ⇒-def
+      # ⇒-def / ⇒-dty; unapplied, the definition being checked is refused
       {m, {:def, name}} ->
-        with :ok <- self_applied(m, rs, name), do: infer_def(k, book, gamma, m, name)
+        with :ok <- self_applied(m, head?, rs, name),
+             do: infer_def(k, book, gamma, m, name)
 
       # ⇒-ann
       {m, {:ann, e, a}} ->
