@@ -52,7 +52,7 @@ natsTailTy : Tm 0
 natsTailTy =
   pi affine nat
     (bisim nat
-      (snd (ucons (app (def 0) (var zero))))
+      (sndTm (ucons (app (def 0) (var zero))))
       (app (def 0) (su (var zero))))
 
 natsTailTm : Tm 0

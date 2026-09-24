@@ -68,8 +68,6 @@ mutual
   ren-ext h (ann e A) rewrite ren-ext h e | ren-ext h A = refl
   ren-ext h (prod A B) rewrite ren-ext h A | ren-ext h B = refl
   ren-ext h (pair a b) rewrite ren-ext h a | ren-ext h b = refl
-  ren-ext h (fst t) rewrite ren-ext h t = refl
-  ren-ext h (snd t) rewrite ren-ext h t = refl
   ren-ext h (letp e t) rewrite ren-ext h e | ren-ext (lift-ext (lift-ext h)) t = refl
   ren-ext h (nu F) rewrite ren-ext (lift-ext h) F = refl
   ren-ext h (unf s f) rewrite ren-ext h s | ren-ext h f = refl
@@ -120,8 +118,6 @@ mutual
   sub-ext h (ann e A) rewrite sub-ext h e | sub-ext h A = refl
   sub-ext h (prod A B) rewrite sub-ext h A | sub-ext h B = refl
   sub-ext h (pair a b) rewrite sub-ext h a | sub-ext h b = refl
-  sub-ext h (fst t) rewrite sub-ext h t = refl
-  sub-ext h (snd t) rewrite sub-ext h t = refl
   sub-ext h (letp e t) rewrite sub-ext h e | sub-ext (lifts-ext (lifts-ext h)) t = refl
   sub-ext h (nu F) rewrite sub-ext (lifts-ext h) F = refl
   sub-ext h (unf s f) rewrite sub-ext h s | sub-ext h f = refl
@@ -179,8 +175,6 @@ mutual
   ren-id (ann e A) rewrite ren-id e | ren-id A = refl
   ren-id (prod A B) rewrite ren-id A | ren-id B = refl
   ren-id (pair a b) rewrite ren-id a | ren-id b = refl
-  ren-id (fst t) rewrite ren-id t = refl
-  ren-id (snd t) rewrite ren-id t = refl
   ren-id (letp e t)
     rewrite ren-id e | ren-ext (lift-ext lift-id) t | ren-ext lift-id t | ren-id t = refl
   ren-id (nu F) rewrite ren-ext lift-id F | ren-id F = refl
@@ -247,8 +241,6 @@ mutual
   ren-ren ρ ρ′ (ann e A) rewrite ren-ren ρ ρ′ e | ren-ren ρ ρ′ A = refl
   ren-ren ρ ρ′ (prod A B) rewrite ren-ren ρ ρ′ A | ren-ren ρ ρ′ B = refl
   ren-ren ρ ρ′ (pair a b) rewrite ren-ren ρ ρ′ a | ren-ren ρ ρ′ b = refl
-  ren-ren ρ ρ′ (fst t) rewrite ren-ren ρ ρ′ t = refl
-  ren-ren ρ ρ′ (snd t) rewrite ren-ren ρ ρ′ t = refl
   ren-ren ρ ρ′ (letp e t)
     rewrite ren-ren ρ ρ′ e | ren-ren (lift (lift ρ)) (lift (lift ρ′)) t
           | ren-ext (lift-∘ (lift ρ) (lift ρ′)) t | ren-ext (lift-ext (lift-∘ ρ ρ′)) t = refl
@@ -318,8 +310,6 @@ mutual
   sub-ren σ ρ (ann e A) rewrite sub-ren σ ρ e | sub-ren σ ρ A = refl
   sub-ren σ ρ (prod A B) rewrite sub-ren σ ρ A | sub-ren σ ρ B = refl
   sub-ren σ ρ (pair a b) rewrite sub-ren σ ρ a | sub-ren σ ρ b = refl
-  sub-ren σ ρ (fst t) rewrite sub-ren σ ρ t = refl
-  sub-ren σ ρ (snd t) rewrite sub-ren σ ρ t = refl
   sub-ren σ ρ (letp e t)
     rewrite sub-ren σ ρ e | sub-ren (lifts (lifts σ)) (lift (lift ρ)) t
           | sub-ext (lifts-lift (lifts σ) (lift ρ)) t | sub-ext (lifts-ext (lifts-lift σ ρ)) t = refl
@@ -390,8 +380,6 @@ mutual
   ren-sub ρ σ (ann e A) rewrite ren-sub ρ σ e | ren-sub ρ σ A = refl
   ren-sub ρ σ (prod A B) rewrite ren-sub ρ σ A | ren-sub ρ σ B = refl
   ren-sub ρ σ (pair a b) rewrite ren-sub ρ σ a | ren-sub ρ σ b = refl
-  ren-sub ρ σ (fst t) rewrite ren-sub ρ σ t = refl
-  ren-sub ρ σ (snd t) rewrite ren-sub ρ σ t = refl
   ren-sub ρ σ (letp e t)
     rewrite ren-sub ρ σ e | ren-sub (lift (lift ρ)) (lifts (lifts σ)) t
           | sub-ext (lift-lifts (lift ρ) (lifts σ)) t | sub-ext (lifts-ext (lift-lifts ρ σ)) t = refl
@@ -462,8 +450,6 @@ mutual
   sub-sub σ τ (ann e A) rewrite sub-sub σ τ e | sub-sub σ τ A = refl
   sub-sub σ τ (prod A B) rewrite sub-sub σ τ A | sub-sub σ τ B = refl
   sub-sub σ τ (pair a b) rewrite sub-sub σ τ a | sub-sub σ τ b = refl
-  sub-sub σ τ (fst t) rewrite sub-sub σ τ t = refl
-  sub-sub σ τ (snd t) rewrite sub-sub σ τ t = refl
   sub-sub σ τ (letp e t)
     rewrite sub-sub σ τ e | sub-sub (lifts (lifts σ)) (lifts (lifts τ)) t
           | sub-ext (lifts-lifts (lifts σ) (lifts τ)) t | sub-ext (lifts-ext (lifts-lifts σ τ)) t = refl
@@ -534,8 +520,6 @@ mutual
   ren-is-sub ρ (ann e A) rewrite ren-is-sub ρ e | ren-is-sub ρ A = refl
   ren-is-sub ρ (prod A B) rewrite ren-is-sub ρ A | ren-is-sub ρ B = refl
   ren-is-sub ρ (pair a b) rewrite ren-is-sub ρ a | ren-is-sub ρ b = refl
-  ren-is-sub ρ (fst t) rewrite ren-is-sub ρ t = refl
-  ren-is-sub ρ (snd t) rewrite ren-is-sub ρ t = refl
   ren-is-sub ρ (letp e t)
     rewrite ren-is-sub ρ e | ren-is-sub (lift (lift ρ)) t
           | sub-ext (lift-var (lift ρ)) t | sub-ext (lifts-ext (lift-var ρ)) t = refl
@@ -655,3 +639,96 @@ ren-inst₂ : ∀ {n m} (ρ : Fin n → Fin m) (t : Tm (suc (suc n))) (a b : Tm 
   → ren ρ (inst₂ t a b) ≡ inst₂ (ren (lift (lift ρ)) t) (ren ρ a) (ren ρ b)
 ren-inst₂ ρ t a b
   rewrite ren-inst ρ (inst t (wk b)) a | ren-inst (lift ρ) t (wk b) | ren-wk ρ b = refl
+
+------------------------------------------------------------------------
+-- Partial renaming is sound: when renM ρ? t succeeds with u, and ρ is a
+-- left inverse of ρ? where it is defined, ren ρ u is t again.
+------------------------------------------------------------------------
+
+Inv : ∀ {n m} → (Fin n → Result (Fin m)) → (Fin m → Fin n) → Set
+Inv ρ? ρ = ∀ i j → ρ? i ≡ ok j → ρ j ≡ i
+
+liftM-inv : ∀ {n m} (ρ? : Fin n → Result (Fin m)) (ρ : Fin m → Fin n)
+  → Inv ρ? ρ → Inv (liftM ρ?) (lift ρ)
+liftM-inv ρ? ρ h zero zero eq = refl
+liftM-inv ρ? ρ h (suc i) j eq with ρ? i in e
+liftM-inv ρ? ρ h (suc i) .(suc j′) refl | ok j′ = cong suc (h i j′ e)
+
+mutual
+  renM-sound : ∀ {n m} (ρ? : Fin n → Result (Fin m)) (ρ : Fin m → Fin n) → Inv ρ? ρ
+    → (t : Tm n) {u : Tm m} → renM ρ? t ≡ ok u → ren ρ u ≡ t
+  renM-sound ρ? ρ h (var i) eq with ρ? i in e
+  renM-sound ρ? ρ h (var i) refl | ok j = cong var (h i j e)
+  renM-sound ρ? ρ h typ refl = refl
+  renM-sound ρ? ρ h (pi q A B) eq with renM ρ? A in eA | renM (liftM ρ?) B in eB
+  renM-sound ρ? ρ h (pi q A B) refl | ok A′ | ok B′ = cong₂ (pi q) (renM-sound ρ? ρ h A eA) (renM-sound (liftM ρ?) (lift ρ) (liftM-inv ρ? ρ h) B eB)
+  renM-sound ρ? ρ h (lam q A t) eq with renM ρ? A in eA | renM (liftM ρ?) t in et
+  renM-sound ρ? ρ h (lam q A t) refl | ok A′ | ok t′ = cong₂ (lam q) (renM-sound ρ? ρ h A eA) (renM-sound (liftM ρ?) (lift ρ) (liftM-inv ρ? ρ h) t et)
+  renM-sound ρ? ρ h (app f a) eq with renM ρ? f in ef | renM ρ? a in ea
+  renM-sound ρ? ρ h (app f a) refl | ok f′ | ok a′ = cong₂ app (renM-sound ρ? ρ h f ef) (renM-sound ρ? ρ h a ea)
+  renM-sound ρ? ρ h nat refl = refl
+  renM-sound ρ? ρ h ze refl = refl
+  renM-sound ρ? ρ h (su t) eq with renM ρ? t in et
+  renM-sound ρ? ρ h (su t) refl | ok t′ = cong su (renM-sound ρ? ρ h t et)
+  renM-sound ρ? ρ h unit refl = refl
+  renM-sound ρ? ρ h one refl = refl
+  renM-sound ρ? ρ h empty refl = refl
+  renM-sound ρ? ρ h (dty i) refl = refl
+  renM-sound ρ? ρ h (ctor i j) refl = refl
+  renM-sound ρ? ρ h (mData e P bs) eq with renM ρ? e in ee | renM (liftM ρ?) P in eP | renMList ρ? bs in ebs
+  renM-sound ρ? ρ h (mData e P bs) refl | ok e′ | ok P′ | ok bs′ rewrite (renM-sound ρ? ρ h e ee) | (renM-sound (liftM ρ?) (lift ρ) (liftM-inv ρ? ρ h) P eP) | (renMList-sound ρ? ρ h bs ebs) = refl
+  renM-sound ρ? ρ h (mNat e P z s) eq with renM ρ? e in ee | renM (liftM ρ?) P in eP | renM ρ? z in ez | renM (liftM ρ?) s in es
+  renM-sound ρ? ρ h (mNat e P z s) refl | ok e′ | ok P′ | ok z′ | ok s′ rewrite (renM-sound ρ? ρ h e ee) | (renM-sound (liftM ρ?) (lift ρ) (liftM-inv ρ? ρ h) P eP) | (renM-sound ρ? ρ h z ez) | (renM-sound (liftM ρ?) (lift ρ) (liftM-inv ρ? ρ h) s es) = refl
+  renM-sound ρ? ρ h (mEmp e P) eq with renM ρ? e in ee | renM (liftM ρ?) P in eP
+  renM-sound ρ? ρ h (mEmp e P) refl | ok e′ | ok P′ = cong₂ mEmp (renM-sound ρ? ρ h e ee) (renM-sound (liftM ρ?) (lift ρ) (liftM-inv ρ? ρ h) P eP)
+  renM-sound ρ? ρ h (mUnit e P u) eq with renM ρ? e in ee | renM (liftM ρ?) P in eP | renM ρ? u in eu
+  renM-sound ρ? ρ h (mUnit e P u) refl | ok e′ | ok P′ | ok u′ rewrite (renM-sound ρ? ρ h e ee) | (renM-sound (liftM ρ?) (lift ρ) (liftM-inv ρ? ρ h) P eP) | (renM-sound ρ? ρ h u eu) = refl
+  renM-sound ρ? ρ h (idt A a b) eq with renM ρ? A in eA | renM ρ? a in ea | renM ρ? b in eb
+  renM-sound ρ? ρ h (idt A a b) refl | ok A′ | ok a′ | ok b′ rewrite (renM-sound ρ? ρ h A eA) | (renM-sound ρ? ρ h a ea) | (renM-sound ρ? ρ h b eb) = refl
+  renM-sound ρ? ρ h rfl refl = refl
+  renM-sound ρ? ρ h (rwt e P t) eq with renM ρ? e in ee | renM (liftM ρ?) P in eP | renM ρ? t in et
+  renM-sound ρ? ρ h (rwt e P t) refl | ok e′ | ok P′ | ok t′ rewrite (renM-sound ρ? ρ h e ee) | (renM-sound (liftM ρ?) (lift ρ) (liftM-inv ρ? ρ h) P eP) | (renM-sound ρ? ρ h t et) = refl
+  renM-sound ρ? ρ h (def i) refl = refl
+  renM-sound ρ? ρ h (ann e A) eq with renM ρ? e in ee | renM ρ? A in eA
+  renM-sound ρ? ρ h (ann e A) refl | ok e′ | ok A′ = cong₂ ann (renM-sound ρ? ρ h e ee) (renM-sound ρ? ρ h A eA)
+  renM-sound ρ? ρ h (prod A B) eq with renM ρ? A in eA | renM ρ? B in eB
+  renM-sound ρ? ρ h (prod A B) refl | ok A′ | ok B′ = cong₂ prod (renM-sound ρ? ρ h A eA) (renM-sound ρ? ρ h B eB)
+  renM-sound ρ? ρ h (pair a b) eq with renM ρ? a in ea | renM ρ? b in eb
+  renM-sound ρ? ρ h (pair a b) refl | ok a′ | ok b′ = cong₂ pair (renM-sound ρ? ρ h a ea) (renM-sound ρ? ρ h b eb)
+  renM-sound ρ? ρ h (letp e t) eq with renM ρ? e in ee | renM (liftM (liftM ρ?)) t in et
+  renM-sound ρ? ρ h (letp e t) refl | ok e′ | ok t′ = cong₂ letp (renM-sound ρ? ρ h e ee) (renM-sound (liftM (liftM ρ?)) (lift (lift ρ)) (liftM-inv (liftM ρ?) (lift ρ) (liftM-inv ρ? ρ h)) t et)
+  renM-sound ρ? ρ h (nu F) eq with renM (liftM ρ?) F in eF
+  renM-sound ρ? ρ h (nu F) refl | ok F′ = cong nu (renM-sound (liftM ρ?) (lift ρ) (liftM-inv ρ? ρ h) F eF)
+  renM-sound ρ? ρ h (unf s f) eq with renM ρ? s in es | renM ρ? f in ef
+  renM-sound ρ? ρ h (unf s f) refl | ok s′ | ok f′ = cong₂ unf (renM-sound ρ? ρ h s es) (renM-sound ρ? ρ h f ef)
+  renM-sound ρ? ρ h (ucons s) eq with renM ρ? s in es
+  renM-sound ρ? ρ h (ucons s) refl | ok s′ = cong ucons (renM-sound ρ? ρ h s es)
+  renM-sound ρ? ρ h i64 refl = refl
+  renM-sound ρ? ρ h f32ty refl = refl
+  renM-sound ρ? ρ h (tensor d s) eq with renM ρ? d in ed | renM ρ? s in es
+  renM-sound ρ? ρ h (tensor d s) refl | ok d′ | ok s′ = cong₂ tensor (renM-sound ρ? ρ h d ed) (renM-sound ρ? ρ h s es)
+  renM-sound ρ? ρ h (addi x y) eq with renM ρ? x in ex | renM ρ? y in ey
+  renM-sound ρ? ρ h (addi x y) refl | ok x′ | ok y′ = cong₂ addi (renM-sound ρ? ρ h x ex) (renM-sound ρ? ρ h y ey)
+  renM-sound ρ? ρ h (muli x y) eq with renM ρ? x in ex | renM ρ? y in ey
+  renM-sound ρ? ρ h (muli x y) refl | ok x′ | ok y′ = cong₂ muli (renM-sound ρ? ρ h x ex) (renM-sound ρ? ρ h y ey)
+  renM-sound ρ? ρ h (addt t u) eq with renM ρ? t in et | renM ρ? u in eu
+  renM-sound ρ? ρ h (addt t u) refl | ok t′ | ok u′ = cong₂ addt (renM-sound ρ? ρ h t et) (renM-sound ρ? ρ h u eu)
+  renM-sound ρ? ρ h (toi64 t) eq with renM ρ? t in et
+  renM-sound ρ? ρ h (toi64 t) refl | ok t′ = cong toi64 (renM-sound ρ? ρ h t et)
+  renM-sound ρ? ρ h (packi x y) eq with renM ρ? x in ex | renM ρ? y in ey
+  renM-sound ρ? ρ h (packi x y) refl | ok x′ | ok y′ = cong₂ packi (renM-sound ρ? ρ h x ex) (renM-sound ρ? ρ h y ey)
+
+  renMList-sound : ∀ {n m} (ρ? : Fin n → Result (Fin m)) (ρ : Fin m → Fin n) → Inv ρ? ρ
+    → (ts : List (Tm n)) {us : List (Tm m)} → renMList ρ? ts ≡ ok us → renList ρ us ≡ ts
+  renMList-sound ρ? ρ h [] refl = refl
+  renMList-sound ρ? ρ h (t ∷ ts) eq with renM ρ? t in et | renMList ρ? ts in ets
+  renMList-sound ρ? ρ h (t ∷ ts) refl | ok t′ | ok ts′ = cong₂ _∷_ (renM-sound ρ? ρ h t et) (renMList-sound ρ? ρ h ts ets)
+
+unwk₂-inv : ∀ {n} → Inv (unwk₂ {n}) (λ i → suc (suc i))
+unwk₂-inv (suc (suc i)) j refl = refl
+
+-- strengthen₂ T = ok C means T is C weakened twice.
+strengthen₂-sound : ∀ {n} (T : Tm (suc (suc n))) {C : Tm n}
+  → strengthen₂ T ≡ ok C → T ≡ wk (wk C)
+strengthen₂-sound T {C} eq =
+  trans (sym (renM-sound unwk₂ (λ i → suc (suc i)) unwk₂-inv T eq)) (sym (ren-ren suc suc C))

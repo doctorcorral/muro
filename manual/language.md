@@ -115,9 +115,11 @@ Motives are written in parentheses. Nested λ in the motive cover index binders 
 let (a, b) = e in t
 ```
 
-`e` must have a pair type `A × B`; `t` is checked against the expected type with `a : A` and `b : B` in scope, each affine. `let (a, b) = (u, v) in t` reduces to `t` with `a := u`, `b := v`. Like `λ`, a `let` has no type of its own: it is checked against an expected type, so it may not be the head of an application.
+`e` must have a pair type `A × B`; `t` is checked against the expected type with `a : A` and `b : B` in scope, each affine. `let (a, b) = (u, v) in t` reduces to `t` with `a := u`, `b := v`. A `let` is also inferred when its body's type does not mention `a` or `b`, so it may be the head of an application, the seed of an `unfold`, or the argument of `uncons`; a body whose type depends on a component (`Fin x` for a component `x`) is refused with `let: the body's type mentions a component of the pair`.
 
-`let` is the way to consume an affine pair: a pair-typed variable `p` may be used once, and `plus (fst p) (snd p)` uses it twice. `let (x, y) = p in plus x y` uses it once and both components once. `fst` and `snd` still project; `head s` is `fst (uncons s)` and `tail s` is `snd (uncons s)`. The projections are accepted by the checker but are outside the fragment the Agda proofs cover; `let` is inside it (see [Limits](limits.md)).
+`let` is the way to consume an affine pair: a pair-typed variable `p` may be used once, and `plus (fst p) (snd p)` uses it twice. `let (x, y) = p in plus x y` uses it once and both components once.
+
+`fst t` and `snd t` are sugar: `fst t` is `let (a, b) = t in a` and `snd t` is `let (a, b) = t in b`; `head s` is `fst (uncons s)` and `tail s` is `snd (uncons s)`. The kernel has one pair eliminator, `let`, and it is inside the fragment the Agda proofs cover (see [Limits](limits.md)).
 
 ## Recursion and descent
 

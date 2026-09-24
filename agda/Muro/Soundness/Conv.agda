@@ -150,10 +150,6 @@ whnf-sound (suc k) σ fs (f-app Ff Fa) eq | ok (prod _ _) with whnf-sound k σ f
 ...   | r , F | refl = app-f* r , f-app F Fa
 whnf-sound (suc k) σ fs (f-app Ff Fa) eq | ok (pair _ _) with whnf-sound k σ fs Ff feq | ok-inj eq
 ...   | r , F | refl = app-f* r , f-app F Fa
-whnf-sound (suc k) σ fs (f-app Ff Fa) eq | ok (fst _) with whnf-sound k σ fs Ff feq
-...   | _ , ()
-whnf-sound (suc k) σ fs (f-app Ff Fa) eq | ok (snd _) with whnf-sound k σ fs Ff feq
-...   | _ , ()
 whnf-sound (suc k) σ fs (f-app Ff Fa) eq | ok (nu _) with whnf-sound k σ fs Ff feq
 ...   | _ , ()
 whnf-sound (suc k) σ fs (f-app Ff Fa) eq | ok (unf _ _) with whnf-sound k σ fs Ff feq
@@ -231,10 +227,6 @@ whnf-sound (suc k) σ fs (f-mNat Fe FP Fz Fs) eq | ok (prod _ _) with whnf-sound
 ...   | r , F | refl = mNat-e* r , f-mNat F FP Fz Fs
 whnf-sound (suc k) σ fs (f-mNat Fe FP Fz Fs) eq | ok (pair _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
 ...   | r , F | refl = mNat-e* r , f-mNat F FP Fz Fs
-whnf-sound (suc k) σ fs (f-mNat Fe FP Fz Fs) eq | ok (fst _) with whnf-sound k σ fs Fe eeq
-...   | _ , ()
-whnf-sound (suc k) σ fs (f-mNat Fe FP Fz Fs) eq | ok (snd _) with whnf-sound k σ fs Fe eeq
-...   | _ , ()
 whnf-sound (suc k) σ fs (f-mNat Fe FP Fz Fs) eq | ok (nu _) with whnf-sound k σ fs Fe eeq
 ...   | _ , ()
 whnf-sound (suc k) σ fs (f-mNat Fe FP Fz Fs) eq | ok (unf _ _) with whnf-sound k σ fs Fe eeq
@@ -311,10 +303,6 @@ whnf-sound (suc k) σ fs (f-mUnit Fe FP Fu) eq | ok (prod _ _) with whnf-sound k
 ...   | r , F | refl = mUnit-e* r , f-mUnit F FP Fu
 whnf-sound (suc k) σ fs (f-mUnit Fe FP Fu) eq | ok (pair _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
 ...   | r , F | refl = mUnit-e* r , f-mUnit F FP Fu
-whnf-sound (suc k) σ fs (f-mUnit Fe FP Fu) eq | ok (fst _) with whnf-sound k σ fs Fe eeq
-...   | _ , ()
-whnf-sound (suc k) σ fs (f-mUnit Fe FP Fu) eq | ok (snd _) with whnf-sound k σ fs Fe eeq
-...   | _ , ()
 whnf-sound (suc k) σ fs (f-mUnit Fe FP Fu) eq | ok (nu _) with whnf-sound k σ fs Fe eeq
 ...   | _ , ()
 whnf-sound (suc k) σ fs (f-mUnit Fe FP Fu) eq | ok (unf _ _) with whnf-sound k σ fs Fe eeq
@@ -408,10 +396,6 @@ whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (ann _ _) with whnf-sound k σ f
 ...   | r , F | refl = letp-e* r , f-letp F Ft
 whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (prod _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
 ...   | r , F | refl = letp-e* r , f-letp F Ft
-whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (fst _) with whnf-sound k σ fs Fe eeq
-...   | _ , ()
-whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (snd _) with whnf-sound k σ fs Fe eeq
-...   | _ , ()
 whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (letp _ _) with whnf-sound k σ fs Fe eeq | ok-inj eq
 ...   | r , F | refl = letp-e* r , f-letp F Ft
 whnf-sound (suc k) σ fs (f-letp Fe Ft) eq | ok (nu _) with whnf-sound k σ fs Fe eeq
@@ -586,8 +570,6 @@ synEqD-sound (prod a b) (prod a′ b′) sh-prod sh-prod eq with ∧-true eq
 ... | e1 , e2 = cong₂ prod (synEq-sound a a′ e1) (synEq-sound b b′ e2)
 synEqD-sound (pair a b) (pair a′ b′) sh-pair sh-pair eq with ∧-true eq
 ... | e1 , e2 = cong₂ pair (synEq-sound a a′ e1) (synEq-sound b b′ e2)
-synEqD-sound (fst a) (fst a′) sh-fst sh-fst eq = cong fst (synEq-sound a a′ eq)
-synEqD-sound (snd a) (snd a′) sh-snd sh-snd eq = cong snd (synEq-sound a a′ eq)
 synEqD-sound (letp a b) (letp a′ b′) sh-letp sh-letp eq with ∧-true eq
 ... | e1 , e2 = cong₂ letp (synEq-sound a a′ e1) (synEq-sound b b′ e2)
 synEqD-sound (nu a) (nu a′) sh-nu sh-nu eq = cong nu (synEq-sound a a′ eq)
@@ -827,8 +809,6 @@ convND-sound k σ sh-pair sh-pair fs (f-pair Fa Fb) (f-pair Fa′ Fb′) eq with
 ... | (_ , ca) , cb = ≈-pair (conv-sound k σ fs Fa Fa′ ca) (conv-sound k σ fs Fb Fb′ cb)
 convND-sound k σ sh-letp sh-letp fs (f-letp Fe Ft) (f-letp Fe′ Ft′) eq with >>-ok eq
 ... | (_ , ce) , ct = ≈-letp (conv-sound k σ fs Fe Fe′ ce) (conv-sound k σ fs Ft Ft′ ct)
-convND-sound k σ sh-fst sh-fst fs () _ _
-convND-sound k σ sh-snd sh-snd fs () _ _
 convND-sound k σ sh-nu sh-nu fs () _ _
 convND-sound k σ sh-unf sh-unf fs () _ _
 convND-sound k σ sh-ucons sh-ucons fs () _ _

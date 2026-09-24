@@ -92,6 +92,12 @@ See [Data](data.md) and [Indexed data](indexed.md).
 
 See [Terms](language.md).
 
+## result.muro
+
+`Result E A` with constructors `ok` and `error`: a failing `run` function returns a sum, and the constructor names are the Elixir tags `{:ok, _}` / `{:error, _}`. `pred`, `orZero` (run); `pred-two` and `pred-zero` are `refl`.
+
+See [Emit](emit.md).
+
 ## nx_add.muro
 
 `I64` and `Tensor`. `doubled` is `[2, 4]` after `Nx.to_flat_list/1`. Nat stays Peano.

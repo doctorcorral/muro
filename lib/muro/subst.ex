@@ -85,12 +85,6 @@ defmodule Muro.Subst do
       {:pair, a, b} ->
         {:pair, ren(rho, a), ren(rho, b)}
 
-      {:fst, t} ->
-        {:fst, ren(rho, t)}
-
-      {:snd, t} ->
-        {:snd, ren(rho, t)}
-
       {:letp, e, t} ->
         {:letp, ren(rho, e), ren(lift(lift(rho)), t)}
 
@@ -133,6 +127,22 @@ defmodule Muro.Subst do
   end
 
   def wk(t), do: ren(fn i -> i + 1 end, t)
+
+  # Undo a double weakening (Agda: strengthen₂ = renM unwk₂). The renaming
+  # refuses the two nearest variables; ren carries the refusal out.
+  def strengthen2(t) do
+    {:ok,
+     ren(
+       fn
+         i when i < 2 -> throw({__MODULE__, :bound})
+         i -> i - 2
+       end,
+       t
+     )}
+  catch
+    {__MODULE__, :bound} ->
+      {:error, "let: the body's type mentions a component of the pair"}
+  end
 
   def closed(t), do: t
 
@@ -211,12 +221,6 @@ defmodule Muro.Subst do
 
       {:pair, a, b} ->
         {:pair, sub(sigma, a), sub(sigma, b)}
-
-      {:fst, t} ->
-        {:fst, sub(sigma, t)}
-
-      {:snd, t} ->
-        {:snd, sub(sigma, t)}
 
       {:letp, e, t} ->
         {:letp, sub(sigma, e), sub(lifts(lifts(sigma)), t)}

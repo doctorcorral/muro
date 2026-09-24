@@ -25,7 +25,8 @@ term       ::= atom atom*                  -- juxtaposition is application
              | term "~" term               -- bisimulation (also prefix "bisim")
 atom       ::= "Type" | "Nat" | "I64" | "F32" | "Unit" | "Empty" | "refl" | "tt" | "0"
              | suc | pi | lam | let | match | matchEmpty | rewrite | idt
-             | stream | unfold | uncons | "fst" atom | "snd" atom
+             | stream | unfold | uncons
+             | "fst" atom | "snd" atom          -- sugar for let
              | "head" atom | "tail" atom
              | "Tensor" atom atom | "addi" atom atom | "muli" atom atom
              | "addt" atom atom | "toI64" atom | "packI" atom atom
@@ -64,6 +65,8 @@ space      ::= [ \t\n\r] | comment
 ## Notes the grammar does not say loudly enough
 
 Application is juxtaposition (`f a b`). `motive`, `in`, and `def` never start an argument. Digits start atoms, so `| 0 =>` parses.
+
+Inside a `data` block each constructor declaration `ident ":" term` begins on its own line; that is how an application stops before the next constructor. On one line, `f x : Nat` inside `{ … }` is the application `f x` followed by the type.
 
 The parser only accepts `ν Stream` with constructor `uncons`. Other names are an error.
 

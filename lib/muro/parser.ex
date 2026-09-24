@@ -243,7 +243,7 @@ defmodule Muro.Parser do
           parse_infix(rest, {:bisim, left, right}, min_bp)
         end
 
-      starts_atom?(s0) and min_bp <= 20 and not ctor_decl_start?(s0) ->
+      starts_atom?(s0) and min_bp <= 20 and not ctor_decl_start?(s, s0) ->
         with {:ok, arg, rest} <- parse_atom(s0) do
           parse_infix(rest, {:app, left, arg}, min_bp)
         end
@@ -294,15 +294,21 @@ defmodule Muro.Parser do
   end
 
   # Next constructor in a data block: `name : type`, not `:=` or `::`.
-  defp ctor_decl_start?(s) do
-    case ident(skip(s)) do
-      {:ok, _, rest} ->
-        rest = skip(rest)
-        has_prefix?(rest, ":") and not has_prefix?(rest, ":=") and not has_prefix?(rest, "::")
+  # `ident :` at the start of a line ends an application: it is the next
+  # constructor declaration of a data block. On the same line it is an
+  # argument (`{0 == f x : Nat}`).
+  defp ctor_decl_start?(s, s0) do
+    skipped = binary_part(s, 0, byte_size(s) - byte_size(s0))
 
-      _ ->
-        false
-    end
+    String.contains?(skipped, "\n") and
+      case ident(s0) do
+        {:ok, _, rest} ->
+          rest = skip(rest)
+          has_prefix?(rest, ":") and not has_prefix?(rest, ":=") and not has_prefix?(rest, "::")
+
+        _ ->
+          false
+      end
   end
 
   defp starts_atom?(s) do
@@ -410,20 +416,25 @@ defmodule Muro.Parser do
       word_kw?(s, "let") ->
         parse_letp(s)
 
+      # fst / snd are sugar for let: fst t = let (a, b) = t in a.
       word_kw?(s, "fst") ->
-        parse_unary(s, "fst", :fst)
+        with {:ok, e, rest} <- parse_unary_arg(s, "fst") do
+          {:ok, fst_sugar(e), rest}
+        end
 
       word_kw?(s, "snd") ->
-        parse_unary(s, "snd", :snd)
+        with {:ok, e, rest} <- parse_unary_arg(s, "snd") do
+          {:ok, snd_sugar(e), rest}
+        end
 
       word_kw?(s, "head") ->
         with {:ok, e, rest} <- parse_unary_arg(s, "head") do
-          {:ok, {:fst, {:ucons, e}}, rest}
+          {:ok, fst_sugar({:ucons, e}), rest}
         end
 
       word_kw?(s, "tail") ->
         with {:ok, e, rest} <- parse_unary_arg(s, "tail") do
-          {:ok, {:snd, {:ucons, e}}, rest}
+          {:ok, snd_sugar({:ucons, e}), rest}
         end
 
       has_prefix?(s, "Π") or has_prefix?(s, "Pi") ->
@@ -704,6 +715,9 @@ defmodule Muro.Parser do
       {:ok, {:rwt, eq, x, p, t}, rest}
     end
   end
+
+  defp fst_sugar(e), do: {:letp, e, "a", "b", {:var, "a"}}
+  defp snd_sugar(e), do: {:letp, e, "a", "b", {:var, "b"}}
 
   # let (a, b) = e in t
   defp parse_letp(s) do

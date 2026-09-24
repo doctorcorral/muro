@@ -21,9 +21,9 @@
 --    different heads are never convertible (≈-shape), and Π / ≡ are
 --    injective up to ≈. No normalisation is assumed anywhere.
 --
--- ≈ does not contain η, or any rule for ν / the projections fst, snd /
--- Nx (those terms are inert). Pairs are eliminated by letp only. Check.conv is the algorithm; it compares subterms
--- after whnf and is expected to be sound for ≈.
+-- ≈ does not contain η, or any rule for ν / Nx (those terms are inert).
+-- Pairs are eliminated by letp only. Check.conv is the algorithm; it
+-- compares subterms after whnf and is expected to be sound for ≈.
 --
 -- Data. A constructor application ctor i j a₁ … aₙ and a data type
 -- dty i p₁ … pₙ are spines (Muro.Spine) with a rigid head: they are
@@ -60,8 +60,6 @@ ok-inj refl = refl
 ------------------------------------------------------------------------
 
 data Foreign {n} : Tm n → Set where
-  f-fst    : ∀ {t} → Foreign (fst t)
-  f-snd    : ∀ {t} → Foreign (snd t)
   f-nu     : ∀ {F} → Foreign (nu F)
   f-unf    : ∀ {s f} → Foreign (unf s f)
   f-ucons  : ∀ {s} → Foreign (ucons s)
@@ -187,8 +185,6 @@ data _⊢[_]_⟶_ (σ : Sig) (m : Mode) {n} : Tm n → Tm n → Set where
 ------------------------------------------------------------------------
 
 foreign-no-step : ∀ {σ m n} {t u : Tm n} → Foreign t → σ ⊢[ m ] t ⟶ u → ⊥
-foreign-no-step f-fst    ()
-foreign-no-step f-snd    ()
 foreign-no-step f-nu     ()
 foreign-no-step f-unf    ()
 foreign-no-step f-ucons  ()

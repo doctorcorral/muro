@@ -37,8 +37,6 @@ tmTag (def _) = 20
 tmTag (ann _ _) = 21
 tmTag (prod _ _) = 22
 tmTag (pair _ _) = 23
-tmTag (fst _) = 24
-tmTag (snd _) = 25
 tmTag (nu _) = 26
 tmTag (unf _ _) = 27
 tmTag (ucons _) = 28
@@ -77,8 +75,6 @@ data TmShape {n} : ℕ → Tm n → Set where
   sh-ann : ∀ {a b} → TmShape 21 (ann a b)
   sh-prod : ∀ {a b} → TmShape 22 (prod a b)
   sh-pair : ∀ {a b} → TmShape 23 (pair a b)
-  sh-fst : ∀ {a} → TmShape 24 (fst a)
-  sh-snd : ∀ {a} → TmShape 25 (snd a)
   sh-nu : ∀ {a} → TmShape 26 (nu a)
   sh-unf : ∀ {a b} → TmShape 27 (unf a b)
   sh-ucons : ∀ {a} → TmShape 28 (ucons a)
@@ -117,8 +113,6 @@ shape (def _) = sh-def
 shape (ann _ _) = sh-ann
 shape (prod _ _) = sh-prod
 shape (pair _ _) = sh-pair
-shape (fst _) = sh-fst
-shape (snd _) = sh-snd
 shape (nu _) = sh-nu
 shape (unf _ _) = sh-unf
 shape (ucons _) = sh-ucons

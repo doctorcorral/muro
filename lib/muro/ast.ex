@@ -31,8 +31,6 @@ defmodule Muro.Ast do
           | {:ann, named, named}
           | {:prod, named, named}
           | {:pair, named, named}
-          | {:fst, named}
-          | {:snd, named}
           | {:letp, named, name, name, named}
           | {:stream, named}
           | {:always, named, named}
@@ -73,8 +71,6 @@ defmodule Muro.Ast do
           | {:ann, db, db}
           | {:prod, db, db}
           | {:pair, db, db}
-          | {:fst, db}
-          | {:snd, db}
           | {:letp, db, db}
           | {:nu, db}
           | {:bisim, db, db}
@@ -196,9 +192,6 @@ defmodule Muro.Ast do
          do: {:ok, {:pair, a1, b1}}
   end
 
-  def to_db({:fst, t}, env), do: map1(t, env, &{:fst, &1})
-  def to_db({:snd, t}, env), do: map1(t, env, &{:snd, &1})
-
   # let (a, b) = e in t: b is the nearest binder (0), a is 1.
   def to_db({:letp, e, a, b, t}, env) do
     with {:ok, e1} <- to_db(e, env),
@@ -215,7 +208,7 @@ defmodule Muro.Ast do
   def to_db({:always, p, s}, env) do
     with {:ok, p1} <- to_db(p, env),
          {:ok, s1} <- to_db(s, env) do
-      payload = {:app, p1, {:fst, {:ucons, s1}}}
+      payload = {:app, p1, {:letp, {:ucons, s1}, {:var, 1}}}
       {:ok, {:nu, {:prod, Muro.Subst.wk(payload), {:var, 0}}}}
     end
   end

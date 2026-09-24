@@ -1,8 +1,6 @@
 ------------------------------------------------------------------------
 -- The ⊢ fragment as a predicate on terms: the constructors ⊢ has rules
--- for. The projections fst / snd, ν, unfold, I64 / F32 / Tensor are
--- outside. Closed
--- under renaming and substitution, so under everything Check.whnf does
+-- for. ν, unfold, I64 / F32 / Tensor are outside. Closed under renaming and substitution, so under everything Check.whnf does
 -- to a fragment term over a fragment signature.
 ------------------------------------------------------------------------
 
@@ -94,6 +92,42 @@ FragL-ren ρ (fl-∷ t ts) = fl-∷ (Frag-ren ρ t) (FragL-ren ρ ts)
 
 Frag-wk : ∀ {n} {t : Tm n} → Frag t → Frag (wk t)
 Frag-wk = Frag-ren suc
+
+-- The fragment does not look at variables, so it is also closed under
+-- un-renaming: what Soundness needs of strengthen₂.
+Frag-unren : ∀ {n k} (ρ : Fin n → Fin k) (t : Tm n) → Frag (ren ρ t) → Frag t
+FragL-unren : ∀ {n k} (ρ : Fin n → Fin k) (ts : List (Tm n)) → FragL (renList ρ ts) → FragL ts
+Frag-unren ρ (var _) f-var = f-var
+Frag-unren ρ typ f-typ = f-typ
+Frag-unren ρ (pi q A B) (f-pi FA FB) = f-pi (Frag-unren ρ A FA) (Frag-unren (lift ρ) B FB)
+Frag-unren ρ (lam q A t) (f-lam FA Ft) = f-lam (Frag-unren ρ A FA) (Frag-unren (lift ρ) t Ft)
+Frag-unren ρ (app f a) (f-app Ff Fa) = f-app (Frag-unren ρ f Ff) (Frag-unren ρ a Fa)
+Frag-unren ρ nat f-nat = f-nat
+Frag-unren ρ ze f-ze = f-ze
+Frag-unren ρ (su t) (f-su Ft) = f-su (Frag-unren ρ t Ft)
+Frag-unren ρ unit f-unit = f-unit
+Frag-unren ρ one f-one = f-one
+Frag-unren ρ empty f-empty = f-empty
+Frag-unren ρ (dty _) f-dty = f-dty
+Frag-unren ρ (ctor _ _) f-ctor = f-ctor
+Frag-unren ρ (mData e P bs) (f-mData Fe FP Fbs) =
+  f-mData (Frag-unren ρ e Fe) (Frag-unren (lift ρ) P FP) (FragL-unren ρ bs Fbs)
+Frag-unren ρ (mNat e P z s) (f-mNat Fe FP Fz Fs) =
+  f-mNat (Frag-unren ρ e Fe) (Frag-unren (lift ρ) P FP) (Frag-unren ρ z Fz) (Frag-unren (lift ρ) s Fs)
+Frag-unren ρ (mEmp e P) (f-mEmp Fe FP) = f-mEmp (Frag-unren ρ e Fe) (Frag-unren (lift ρ) P FP)
+Frag-unren ρ (mUnit e P u) (f-mUnit Fe FP Fu) =
+  f-mUnit (Frag-unren ρ e Fe) (Frag-unren (lift ρ) P FP) (Frag-unren ρ u Fu)
+Frag-unren ρ (idt A a b) (f-idt FA Fa Fb) = f-idt (Frag-unren ρ A FA) (Frag-unren ρ a Fa) (Frag-unren ρ b Fb)
+Frag-unren ρ rfl f-rfl = f-rfl
+Frag-unren ρ (rwt e P t) (f-rwt Fe FP Ft) =
+  f-rwt (Frag-unren ρ e Fe) (Frag-unren (lift ρ) P FP) (Frag-unren ρ t Ft)
+Frag-unren ρ (def _) f-def = f-def
+Frag-unren ρ (ann e A) (f-ann Fe FA) = f-ann (Frag-unren ρ e Fe) (Frag-unren ρ A FA)
+Frag-unren ρ (prod A B) (f-prod FA FB) = f-prod (Frag-unren ρ A FA) (Frag-unren ρ B FB)
+Frag-unren ρ (pair a b) (f-pair Fa Fb) = f-pair (Frag-unren ρ a Fa) (Frag-unren ρ b Fb)
+Frag-unren ρ (letp e t) (f-letp Fe Ft) = f-letp (Frag-unren ρ e Fe) (Frag-unren (lift (lift ρ)) t Ft)
+FragL-unren ρ [] fl-[] = fl-[]
+FragL-unren ρ (t ∷ ts) (fl-∷ Ft Fts) = fl-∷ (Frag-unren ρ t Ft) (FragL-unren ρ ts Fts)
 
 Frag-closed : ∀ {n} {t : Tm 0} → Frag t → Frag (closed {n} t)
 Frag-closed = Frag-ren fromZero

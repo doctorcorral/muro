@@ -11,12 +11,12 @@
 --     a dty spine), match on a non-indexed data type,
 --   def lookup (allowedDef),
 --   annotation,
---   A × B / (a, b) / let (a, b) = e in t (the tensor eliminator; it
---     only checks, like λ and refl),
+--   A × B / (a, b) / let (a, b) = e in t (the tensor eliminator, in
+--     both modes; fst / snd are surface sugar for it),
 --   uses as in Check (spec forgets; run/evid count).
 --
 -- omitted = indexed data (match with forced indices) / ν / Tensor /
---   I64 / F32 / the projections fst, snd. dty and constructors of an
+--   I64 / F32. dty and constructors of an
 --   indexed type are typed; match on one is not.
 -- ⊢ does not track RecSt descent and does not use fuel. It does not
 -- check the data declarations of σ (Check.checkData); Muro.Typing
@@ -234,6 +234,20 @@ data _,_⊢[_]_⇒_⊣_ σ Γ where
     → combine m au bu ≡ ok uses
     → σ , Γ ⊢[ m ] pair a b ⇒ prod A B ⊣ uses
 
+  -- let (a, b) = e in t in inference mode. The body is inferred under
+  -- the two affine binders and its type must be convertible to a type
+  -- that does not mention them, wk (wk C) (Check: strengthen₂ on the
+  -- inferred type). Its uses are treated as in ⇐-letp.
+  ⇒-letp : ∀ {m e E A B t T C eu ua ub tus uses}
+    → σ , Γ ⊢[ m ] e ⇒ E ⊣ eu
+    → σ ⊢[ spec ] E ≈ prod A B
+    → σ , ext (ext Γ affine A) affine (wk B) ⊢[ m ] t ⇒ T ⊣ (ub ∷ ua ∷ tus)
+    → σ ⊢[ spec ] T ≈ wk (wk C)
+    → checkBound m affine ub ≡ ok tt
+    → checkBound m affine ua ≡ ok tt
+    → combine m eu tus ≡ ok uses
+    → σ , Γ ⊢[ m ] letp e t ⇒ C ⊣ uses
+
 data _,_⊢[_]_⇐_⊣_ σ Γ where
   ⇐-conv : ∀ {m e A B u}
     → σ , Γ ⊢[ m ] e ⇒ B ⊣ u
@@ -268,8 +282,8 @@ data _,_⊢[_]_⇐_⊣_ σ Γ where
   -- product (Check: viewProd); the body is checked under two affine
   -- binders (a at var 1, b at var 0) against the expected type weakened
   -- twice; each binder's uses are bounded and the rest combined with
-  -- the scrutinee's. There is no ⇒ rule: like λ and refl, let only
-  -- checks.
+  -- the scrutinee's. A let whose body has a type not mentioning the
+  -- binders is also inferred (⇒-letp).
   ⇐-letp : ∀ {m e E A B t C eu ua ub tus uses}
     → σ , Γ ⊢[ m ] e ⇒ E ⊣ eu
     → σ ⊢[ spec ] E ≈ prod A B

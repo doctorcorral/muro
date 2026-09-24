@@ -1,0 +1,22 @@
+-- result.muro — a function that can fail returns a sum. Its constructors
+-- are the Elixir tags: ok a is {:ok, a}, error e is {:error, e}. Nothing
+-- in the kernel knows the convention; the names do the work.
+data Result (E : Type) (A : Type) : Type where
+  ok    : A → Result E A
+  error : E → Result E A
+
+def pred : run Π (n : Nat) → Result Unit Nat :=
+  λ (n : Nat) →
+    match n motive (λ _ → Result Unit Nat)
+      | 0 => error tt
+      | suc p => ok p
+
+def orZero : run Π (r : Result Unit Nat) → Nat :=
+  λ (r : Result Unit Nat) →
+    match r motive (λ _ → Nat)
+      | ok n => n
+      | error _ => 0
+
+def pred-two : evidence {pred suc(suc(0)) ≡ ok suc(0) : Result Unit Nat} := refl
+
+def pred-zero : evidence {pred 0 ≡ error tt : Result Unit Nat} := refl
