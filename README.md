@@ -19,7 +19,7 @@ The language book is [`manual/`](manual/index.md). That is what [muro-lang.dev](
 ```elixir
 def deps do
   [
-    {:muro, "~> 0.2"}
+    {:muro, "~> 0.5"}
   ]
 end
 ```
