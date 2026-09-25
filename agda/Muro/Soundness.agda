@@ -448,7 +448,7 @@ infer-sound k σ rs {Γ = Γ} spec hd G FΓ (f-idt {A = A} {a = a} {b = b} FA Fa
               (check-sound k σ rs spec G FΓ Fb FA beq)
           , ≈-refl
 infer-sound k σ rs m hd G FΓ f-rfl eq = ⊥-elim (fail≢ok eq)
-infer-sound k σ rs {Γ = Γ} m hd G FΓ (f-rwt {e = e} {P = P} {t = t} Fe FP Ft) eq with infer k σ rs Γ evid e in ieq
+infer-sound k σ rs {Γ = Γ} m hd G FΓ (f-rwt {e = e} {P = P} {t = t} Fe FP Ft) eq with infer k σ rs Γ (rwtMode m) e in ieq
 ... | fail _ = ⊥-elim (fail≢ok eq)
 ... | ok (et , eu) with viewId k σ et in veq
 ...   | fail _ = ⊥-elim (fail≢ok eq)
@@ -457,7 +457,7 @@ infer-sound k σ rs {Γ = Γ} m hd G FΓ (f-rwt {e = e} {P = P} {t = t} Fe FP Ft
 ...     | ok tt with check k σ rs Γ m t (inst P r) in teq
 ...       | fail _ = ⊥-elim (fail≢ok eq)
 ...       | ok tu with ok-inj eq
-...         | refl with infer-sound k σ rs evid false G FΓ Fe ieq
+...         | refl with infer-sound k σ rs (rwtMode m) false G FΓ Fe ieq
 ...           | Fet , E′ , De , c with viewId-Frag k σ (GoodSig.frag G) Fet veq
 ...             | FA , Fl , Fr = Frag-inst FP Fl , _
               , ⇒-rwt De (≈-trans c (viewId-≈ k σ (GoodSig.frag G) Fet veq))

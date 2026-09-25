@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.8.0
+
+Preservation holds in every mode. The one premise that was not monotone in the mode, the equation of a `rewrite`, now is: it is checked in evidence inside a run or evidence term and in spec inside a spec term (`rwtMode`). A type may therefore rewrite along an erased equation; a run or evidence body still needs evidence.
+
+### Language
+
+- `rewrite eq motive P in t` inside a spec term (a type, an erased argument) checks `eq` in spec. `Π (-e : {n ≡ m : Nat}) → Vec A (rewrite e motive (λ _ → Nat) in m)` is well-formed; before, an erased variable in the equation was refused in every mode. In run and evidence terms nothing changes.
+
+### Kernel (Agda)
+
+- `Muro.Env`: `rwtMode` (`spec ↦ spec`, otherwise `evid`), `≤ᵐ-rwtMode`, `rwtMode-mono`.
+- `Muro.Judgement` `⇒-rwt`, `Muro.Typing` `t-rwt`: the equation at `rwtMode m`.
+- `Muro.Typing`: the substitution lemmas (`⊨-sub`, `wf-sub`, `▹-sub`, `ca-sub`, `brs-sub`, `mot-sub`, `⊨-inst`) no longer require the substituted terms' mode to be at most evidence; `pres` / `pres*` no longer require the derivation's mode to be at most evidence. `Muro.Consistency` follows.
+- `Muro.Check` `infer′` on `rwt`, `Muro.Soundness` `infer-sound`: the equation at `rwtMode m`. `--safe`, no postulates.
+
+### Elixir mirror
+
+- `Muro.Check`: `rwt_mode/1`; the `{:rwt, …}` clause of `infer` uses it. A test for the accepted spec form and the refused run form.
+
+### Manual
+
+- `identity.md` (the mode of the equation), `limits.md`, `extending.md` (positions are monotone in the mode).
+
+### Package
+
+- Version 0.8.0.
+
 ## 0.7.0
 
 `match` on an indexed data type is in ⊢, with preservation and checker soundness. A branch is typed at its constructor's own indices: the checker no longer substitutes a scrutinee index for a constructor argument in the branch (no forcing). A constructor whose numeral index clashes with the scrutinee's (`0` against `suc(…)`, under any number of matching `suc`) is skipped, as before. What a branch needs to know about the scrutinee's indices it states in the motive as an equation and uses with `rewrite`; `examples/vec.muro` does this for `lookup`, with `inj-suc` as the evidence that `suc` is injective.

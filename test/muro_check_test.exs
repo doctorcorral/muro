@@ -468,6 +468,42 @@ defmodule Muro.CheckTest do
     assert Muro.Vecs.lookup({:fzero, 0}, ones1) == {:suc, 0}
   end
 
+  # The equation of a rewrite is evidence, or spec inside a spec term: a
+  # type may rewrite along an erased equation; a run body may not.
+  test "a spec rewrite reads a spec equation; a run rewrite still needs evidence" do
+    vec = """
+    data Vec (A : Type) : Nat → Type where
+      vnil  : Vec A 0
+      vcons : Π (n : Nat) → A → Vec A n → Vec A suc(n)
+    """
+
+    good =
+      vec <>
+        """
+        def castLen : run Π (-A : Type) → Π (-n : Nat) → Π (-m : Nat) → Π (-e : {n ≡ m : Nat}) →
+                            Π (xs : Vec A (rewrite e motive (λ _ → Nat) in m)) →
+                            Vec A (rewrite e motive (λ _ → Nat) in m) :=
+          λ (-A : Type) → λ (-n : Nat) → λ (-m : Nat) → λ (-e : {n ≡ m : Nat}) →
+          λ (xs : Vec A (rewrite e motive (λ _ → Nat) in m)) → xs
+        """
+
+    assert {:ok, book} = Parser.parse(good)
+    assert Check.check_sig(book) == :ok
+
+    bad =
+      vec <>
+        """
+        def castBad : run Π (-A : Type) → Π (-n : Nat) → Π (-m : Nat) → Π (-e : {n ≡ m : Nat}) →
+                            Π (xs : Vec A m) → Vec A n :=
+          λ (-A : Type) → λ (-n : Nat) → λ (-m : Nat) → λ (-e : {n ≡ m : Nat}) →
+          λ (xs : Vec A m) → rewrite e motive (λ z → Vec A z) in xs
+        """
+
+    assert {:ok, book2} = Parser.parse(bad)
+    assert {:error, msg} = Check.check_sig(book2)
+    assert msg =~ "erased variable in evidence mode"
+  end
+
   # A branch is typed at its constructor's own indices: nothing is
   # substituted for p. Without the equation in the motive, as : Vec A p is
   # not a Vec A m, and the recursive call lookup A p j as has j : Fin m

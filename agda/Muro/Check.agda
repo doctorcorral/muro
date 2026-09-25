@@ -445,7 +445,7 @@ data _,_⊢[_]_⇒_ σ Γ where
     → σ , Γ ⊢[ spec ] idt A a b ⇒ typ
 
   ⇒-rwt : ∀ {m A l r eq P t}
-    → σ , Γ ⊢[ spec ] eq ⇒ idt A l r
+    → σ , Γ ⊢[ rwtMode m ] eq ⇒ idt A l r
     → σ , ext Γ affine A ⊢ P wf
     → σ , Γ ⊢[ m ] t ⇐ inst P r
     → σ , Γ ⊢[ m ] rwt eq P t ⇒ inst P l
@@ -1156,7 +1156,7 @@ mutual
 
   -- ⇒-rwt
   infer′ k σ rs Γ (rwt eq P t) m _ =
-    infer k σ rs Γ evid eq >>= λ (et , _) →
+    infer k σ rs Γ (rwtMode m) eq >>= λ (et , _) →
     viewId k σ et >>= λ (A , l , r) →
     checkTy k σ (extRec rs false false) (ext Γ affine A) P >>
     check k σ rs Γ m t (inst P r) >>= λ tu →

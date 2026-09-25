@@ -492,7 +492,7 @@ preservation : ∀ {e e′} →
   σ-empty , ε ⊨[ evid ] e ∶ empty →
   σ-empty ⊢[ evid ] e ⟶ e′ →
   σ-empty , ε ⊨[ evid ] e′ ∶ empty
-preservation D s = pres WfSig-empty ≤ᵐ-evid D s
+preservation D s = pres WfSig-empty D s
 
 ------------------------------------------------------------------------
 -- The remaining obligation, as a hypothesis. Not postulated.
@@ -507,4 +507,4 @@ Normalising = ∀ {e u} →
 Empty-evid-from : Normalising →
   ∀ {e u} → σ-empty , ε ⊢[ evid ] e ⇐ empty ⊣ u → ⊥
 Empty-evid-from norm D with norm D
-... | v , r , nf = Empty-nf⊨ nf (pres* WfSig-empty ≤ᵐ-evid (forget-⇐ D) r)
+... | v , r , nf = Empty-nf⊨ nf (pres* WfSig-empty (forget-⇐ D) r)
