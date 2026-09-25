@@ -218,6 +218,26 @@ data _≤ᵐ_ : Mode → Mode → Set where
 ≤ᵐ-spec-top {evid} = ≤ᵐ-evsp
 ≤ᵐ-spec-top {spec} = ≤ᵐ-spec
 
+-- The mode of the equation of a rewrite in mode m: evidence, except
+-- that a spec rewrite reads a spec equation. Every premise of every
+-- rule is then in a mode ≥ the mode of its conclusion.
+rwtMode : Mode → Mode
+rwtMode spec = spec
+rwtMode _    = evid
+
+≤ᵐ-rwtMode : ∀ m → m ≤ᵐ rwtMode m
+≤ᵐ-rwtMode run  = ≤ᵐ-run
+≤ᵐ-rwtMode evid = ≤ᵐ-evid
+≤ᵐ-rwtMode spec = ≤ᵐ-spec
+
+rwtMode-mono : ∀ {m m′} → m ≤ᵐ m′ → rwtMode m ≤ᵐ rwtMode m′
+rwtMode-mono {m′ = run}  ≤ᵐ-run = ≤ᵐ-evid
+rwtMode-mono {m′ = evid} ≤ᵐ-run = ≤ᵐ-evid
+rwtMode-mono {m′ = spec} ≤ᵐ-run = ≤ᵐ-evsp
+rwtMode-mono ≤ᵐ-evid = ≤ᵐ-evid
+rwtMode-mono ≤ᵐ-evsp = ≤ᵐ-evsp
+rwtMode-mono ≤ᵐ-spec = ≤ᵐ-spec
+
 allowedDef-mono : ∀ d {m m′} → m ≤ᵐ m′
   → allowedDef d m ≡ true → allowedDef d m′ ≡ true
 allowedDef-mono run  _       _ = refl

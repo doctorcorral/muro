@@ -971,9 +971,10 @@ defmodule Muro.Check do
       {_, :rfl} ->
         {:error, "refl requires an expected identity type"}
 
-      # ⇒-rwt
+      # ⇒-rwt. The equation is evidence, or spec inside a spec term
+      # (Agda: rwtMode); its uses are discarded.
       {m, {:rwt, eq, p, t1}} ->
-        with {:ok, {et, _}} <- infer(k, book, rs, gamma, :evidence, eq),
+        with {:ok, {et, _}} <- infer(k, book, rs, gamma, rwt_mode(m), eq),
              {:ok, {a, lft, r}} <- view_id(k, book, et),
              :ok <- check_ty(k, book, ext_rec(rs, false, false), ext(gamma, :affine, a), p),
              {:ok, tu} <- check(k, book, rs, gamma, m, t1, Subst.inst(p, r)) do
@@ -1445,6 +1446,9 @@ defmodule Muro.Check do
       end)
     end
   end
+
+  defp rwt_mode(:spec), do: :spec
+  defp rwt_mode(_), do: :evidence
 
   defp match_arity(bs, ctors) do
     if length(bs) == length(ctors) do

@@ -170,10 +170,11 @@ data _,_⊢[_]_⇒_⊣_ σ Γ where
     → σ , Γ ⊢[ spec ] b ⇐ A ⊣ ub
     → σ , Γ ⊢[ spec ] idt A a b ⇒ typ ⊣ u0s
 
-  -- Equality is evidence (as in infer′ of Check), uses discarded.
-  -- The equation type is read through ≈ (Check: viewId).
+  -- The equation is evidence, or spec inside a spec term (rwtMode);
+  -- its uses are discarded. The equation type is read through ≈
+  -- (Check: viewId).
   ⇒-rwt : ∀ {m E A l r eq P t eu tu}
-    → σ , Γ ⊢[ evid ] eq ⇒ E ⊣ eu
+    → σ , Γ ⊢[ rwtMode m ] eq ⇒ E ⊣ eu
     → σ ⊢[ spec ] E ≈ idt A l r
     → σ , ext Γ affine A ⊢ P wf
     → σ , Γ ⊢[ m ] t ⇐ inst P r ⊣ tu

@@ -54,6 +54,8 @@ rewrite eq motive (λ z → P) in t
 
 You write the motive. There is no tactic that finds it.
 
+`eq` is checked in evidence, and its uses are discarded: in a run function the equation costs nothing at runtime and is not emitted. Inside a spec term (a type, an erased argument) `eq` is checked in spec, so a type may rewrite along an erased variable: `Π (-e : {n ≡ m : Nat}) → Vec A (rewrite e motive (λ _ → Nat) in m)` is well-formed. What is evidence may be used in spec, never the other way round.
+
 From `plus_suc` in `examples/half_ok.muro`:
 
 ```

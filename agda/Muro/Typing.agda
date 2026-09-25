@@ -29,16 +29,14 @@
 --   ⊨-ren                 renaming (contexts related pointwise by Ren)
 --   ⊨-sub / ⊨-inst        substitution
 --   pres / pres*          preservation: a ⟶ step, taken in any mode,
---                         keeps the type of a run- or evid-mode
---                         derivation, given a signature whose bodies
---                         have their declared types (WfSig)
+--                         keeps the type of a derivation in any mode,
+--                         given a signature whose bodies have their
+--                         declared types (WfSig)
 --
--- Why not spec mode: rwt reads its equation in evid whatever the
--- surrounding mode is. A spec-mode λ may therefore bind a variable that
--- is used as evidence, and the spec-typed argument that β substitutes
--- for it would have to be evidence. Every other premise is in a mode
--- ≥ the mode of its conclusion. This is a design point, not a proof
--- gap; see the manual.
+-- Every premise of every rule is in a mode ≥ the mode of its
+-- conclusion (the equation of a rewrite is read in rwtMode m: evidence,
+-- or spec inside a spec term), so substitution and preservation hold
+-- in every mode.
 --
 -- Why not ⊢ itself: ann e A ⟶ e removes the annotation a bidirectional
 -- derivation needs (rwt rfl P t has no ⇒ derivation since rfl only
@@ -175,7 +173,7 @@ data _,_⊨⁰[_]_∶_ σ Γ where
     → σ , Γ ⊨⁰[ m ] rfl ∶ idt A a b
 
   t-rwt : ∀ {m eq A l r P t}
-    → σ , Γ ⊨[ evid ] eq ∶ idt A l r
+    → σ , Γ ⊨[ rwtMode m ] eq ∶ idt A l r
     → σ , ext Γ affine A ⊨ P wf
     → σ , Γ ⊨[ m ] t ∶ inst P r
     → σ , Γ ⊨⁰[ m ] rwt eq P t ∶ inst P l
@@ -447,7 +445,7 @@ fieldMode-mono reuse  h = h
 ⊨⁰-mode h (t-app-reuse Df isd Da) = t-app-reuse (⊨-mode h Df) isd (⊨-mode h Da)
 ⊨⁰-mode ≤ᵐ-spec (t-idt W Da Db) = t-idt W Da Db
 ⊨⁰-mode h (t-rfl c) = t-rfl c
-⊨⁰-mode h (t-rwt Deq W Dt) = t-rwt Deq W (⊨-mode h Dt)
+⊨⁰-mode h (t-rwt Deq W Dt) = t-rwt (⊨-mode (rwtMode-mono h) Deq) W (⊨-mode h Dt)
 ⊨⁰-mode h (t-mNat De W Dz Ds) = t-mNat (⊨-mode h De) W (⊨-mode h Dz) (⊨-mode h Ds)
 ⊨⁰-mode h (t-mEmp De W) = t-mEmp (⊨-mode h De) W
 ⊨⁰-mode h (t-mUnit De W Du) = t-mUnit (⊨-mode h De) W (⊨-mode h Du)
@@ -634,7 +632,8 @@ closed-⊨ {Γ = Γ} D = ⊨-ren (Ren-closed Γ) D
 ------------------------------------------------------------------------
 -- Substitution. τ maps Γ into Δ when each τ x has the (substituted)
 -- type of x, in mode m₀ if x is usable computationally and in spec if
--- x is erased. m₀ must be run or evid: see the header.
+-- x is erased. m₀ ≤ m: the substituted terms are in a mode below the
+-- derivation's, and every premise is in a mode ≥ its conclusion's.
 ------------------------------------------------------------------------
 
 modeFor : Qty → Mode → Mode
@@ -652,14 +651,14 @@ varOk-modeFor reuse  evid = v-evid (λ ())
 varOk-modeFor reuse  spec = v-spec
 
 -- A variable usable in mode m, substituted by a term in mode m₀ ≤ m.
-modeFor-≤ : ∀ {m m₀ q} → VarOk m q → m₀ ≤ᵐ evid → m₀ ≤ᵐ m → modeFor q m₀ ≤ᵐ m
-modeFor-≤ v-spec _ _ = ≤ᵐ-spec-top
-modeFor-≤ {q = erased} (v-run h) _ _ = ⊥-elim (h refl)
-modeFor-≤ {q = affine} (v-run h) _ lm = lm
-modeFor-≤ {q = reuse}  (v-run h) _ lm = lm
-modeFor-≤ {q = erased} (v-evid h) _ _ = ⊥-elim (h refl)
-modeFor-≤ {q = affine} (v-evid h) le _ = le
-modeFor-≤ {q = reuse}  (v-evid h) le _ = le
+modeFor-≤ : ∀ {m m₀ q} → VarOk m q → m₀ ≤ᵐ m → modeFor q m₀ ≤ᵐ m
+modeFor-≤ v-spec _ = ≤ᵐ-spec-top
+modeFor-≤ {q = erased} (v-run h) _ = ⊥-elim (h refl)
+modeFor-≤ {q = affine} (v-run h) lm = lm
+modeFor-≤ {q = reuse}  (v-run h) lm = lm
+modeFor-≤ {q = erased} (v-evid h) _ = ⊥-elim (h refl)
+modeFor-≤ {q = affine} (v-evid h) lm = lm
+modeFor-≤ {q = reuse}  (v-evid h) lm = lm
 
 Subst : ∀ {n k} → Sig → Mode → (Fin n → Tm k) → Ctx n → Ctx k → Set
 Subst σ m₀ τ Γ Δ = ∀ x → σ , Δ ⊨[ modeFor (qtyOf Γ x) m₀ ] τ x ∶ sub τ (typOf Γ x)
@@ -673,26 +672,26 @@ Subst-lifts {τ = τ} {Γ} {Δ} s q A (suc x)
   ⊨-ren (Ren-wk Δ q (sub τ A)) (s x)
 
 ⊨-sub : ∀ {σ n k m₀ m} {τ : Fin n → Tm k} {Γ Δ e A}
-  → m₀ ≤ᵐ evid → m₀ ≤ᵐ m → Subst σ m₀ τ Γ Δ
+  → m₀ ≤ᵐ m → Subst σ m₀ τ Γ Δ
   → σ , Γ ⊨[ m ] e ∶ A → σ , Δ ⊨[ m ] sub τ e ∶ sub τ A
 ⊨⁰-sub : ∀ {σ n k m₀ m} {τ : Fin n → Tm k} {Γ Δ e A}
-  → m₀ ≤ᵐ evid → m₀ ≤ᵐ m → Subst σ m₀ τ Γ Δ
+  → m₀ ≤ᵐ m → Subst σ m₀ τ Γ Δ
   → σ , Γ ⊨⁰[ m ] e ∶ A → σ , Δ ⊨[ m ] sub τ e ∶ sub τ A
 wf-sub : ∀ {σ n k m₀} {τ : Fin n → Tm k} {Γ Δ A}
-  → m₀ ≤ᵐ evid → Subst σ m₀ τ Γ Δ
+  → Subst σ m₀ τ Γ Δ
   → σ , Γ ⊨ A wf → σ , Δ ⊨ sub τ A wf
 ▹-sub : ∀ {σ n k m₀ m} {τ : Fin n → Tm k} {Γ Δ T as R}
-  → m₀ ≤ᵐ evid → m₀ ≤ᵐ m → Subst σ m₀ τ Γ Δ
+  → m₀ ≤ᵐ m → Subst σ m₀ τ Γ Δ
   → σ , Γ ⊨[ m ] T ▹ as ⇝ R → σ , Δ ⊨[ m ] sub τ T ▹ subList τ as ⇝ sub τ R
 ca-sub : ∀ {σ n k m₀ m} {τ : Fin n → Tm k} {Γ Δ i j as A}
-  → m₀ ≤ᵐ evid → m₀ ≤ᵐ m → Subst σ m₀ τ Γ Δ
+  → m₀ ≤ᵐ m → Subst σ m₀ τ Γ Δ
   → CtorApp σ Γ m i j as A → CtorApp σ Δ m i j (subList τ as) (sub τ A)
 brs-sub : ∀ {σ n k m₀ m} {τ : Fin n → Tm k} {Γ Δ bs di ps is P ci cs}
-  → m₀ ≤ᵐ evid → m₀ ≤ᵐ m → Subst σ m₀ τ Γ Δ
+  → m₀ ≤ᵐ m → Subst σ m₀ τ Γ Δ
   → σ , Γ ⊨[ m ] bs brs⟨ di , ps , is , P , ci ⟩ cs
   → σ , Δ ⊨[ m ] subList τ bs brs⟨ di , subList τ ps , subList τ is , sub (lifts τ) P , ci ⟩ cs
 mot-sub : ∀ {σ n k m₀} {τ : Fin n → Tm k} {Γ Δ di ps ixs P}
-  → m₀ ≤ᵐ evid → Subst σ m₀ τ Γ Δ
+  → Subst σ m₀ τ Γ Δ
   → Mot⊨ σ Γ di ps ixs P → Mot⊨ σ Δ di (subList τ ps) ixs (sub (lifts τ) P)
 
 ≤-fieldMode : ∀ {m₀ m} → m₀ ≤ᵐ m → ∀ q → m₀ ≤ᵐ fieldMode q m
@@ -700,104 +699,104 @@ mot-sub : ∀ {σ n k m₀} {τ : Fin n → Tm k} {Γ Δ di ps ixs P}
 ≤-fieldMode lm affine = lm
 ≤-fieldMode lm reuse  = lm
 
-⊨-sub {τ = τ} le lm s (conv D c) = conv-≈ (⊨⁰-sub le lm s D) (≈-sub τ c)
+⊨-sub {τ = τ} lm s (conv D c) = conv-≈ (⊨⁰-sub lm s D) (≈-sub τ c)
 
-⊨⁰-sub le lm s (t-var {x = x} v) = ⊨-mode (modeFor-≤ v le lm) (s x)
-⊨⁰-sub le lm s t-ze = conv t-ze ≈-refl
-⊨⁰-sub le lm s (t-su D) = conv (t-su (⊨-sub le lm s D)) ≈-refl
-⊨⁰-sub le lm s t-one = conv t-one ≈-refl
-⊨⁰-sub le lm s t-nat = conv t-nat ≈-refl
-⊨⁰-sub le lm s t-unit = conv t-unit ≈-refl
-⊨⁰-sub le lm s t-empty = conv t-empty ≈-refl
-⊨⁰-sub le lm s (t-pi W D) =
-  conv (t-pi (wf-sub le s W) (⊨-sub le ≤ᵐ-spec-top (Subst-lifts s _ _) D)) ≈-refl
-⊨⁰-sub {τ = τ} le lm s (t-lam {q = q} W c rok D) =
-  conv (t-lam (wf-sub le s W) (≈-sub τ c) (ReuseOk-sub τ q rok)
-          (⊨-sub le lm (Subst-lifts s _ _) D)) ≈-refl
-⊨⁰-sub {τ = τ} le lm s (t-app-aff {a = a} {B = B} Df Da) =
-  conv (t-app-aff (⊨-sub le lm s Df) (⊨-sub le lm s Da)) (≈-≡ (sym (sub-inst τ B a)))
-⊨⁰-sub {τ = τ} le lm s (t-app-era {a = a} {B = B} Df Da) =
-  conv (t-app-era (⊨-sub le lm s Df) (⊨-sub le ≤ᵐ-spec-top s Da))
+⊨⁰-sub lm s (t-var {x = x} v) = ⊨-mode (modeFor-≤ v lm) (s x)
+⊨⁰-sub lm s t-ze = conv t-ze ≈-refl
+⊨⁰-sub lm s (t-su D) = conv (t-su (⊨-sub lm s D)) ≈-refl
+⊨⁰-sub lm s t-one = conv t-one ≈-refl
+⊨⁰-sub lm s t-nat = conv t-nat ≈-refl
+⊨⁰-sub lm s t-unit = conv t-unit ≈-refl
+⊨⁰-sub lm s t-empty = conv t-empty ≈-refl
+⊨⁰-sub lm s (t-pi W D) =
+  conv (t-pi (wf-sub s W) (⊨-sub ≤ᵐ-spec-top (Subst-lifts s _ _) D)) ≈-refl
+⊨⁰-sub {τ = τ} lm s (t-lam {q = q} W c rok D) =
+  conv (t-lam (wf-sub s W) (≈-sub τ c) (ReuseOk-sub τ q rok)
+          (⊨-sub lm (Subst-lifts s _ _) D)) ≈-refl
+⊨⁰-sub {τ = τ} lm s (t-app-aff {a = a} {B = B} Df Da) =
+  conv (t-app-aff (⊨-sub lm s Df) (⊨-sub lm s Da)) (≈-≡ (sym (sub-inst τ B a)))
+⊨⁰-sub {τ = τ} lm s (t-app-era {a = a} {B = B} Df Da) =
+  conv (t-app-era (⊨-sub lm s Df) (⊨-sub ≤ᵐ-spec-top s Da))
     (≈-≡ (sym (sub-inst τ B a)))
-⊨⁰-sub {τ = τ} le lm s (t-app-reuse {a = a} {B = B} Df isd Da) =
-  conv (t-app-reuse (⊨-sub le lm s Df) (IsData-sub τ isd) (⊨-sub le lm s Da))
+⊨⁰-sub {τ = τ} lm s (t-app-reuse {a = a} {B = B} Df isd Da) =
+  conv (t-app-reuse (⊨-sub lm s Df) (IsData-sub τ isd) (⊨-sub lm s Da))
     (≈-≡ (sym (sub-inst τ B a)))
-⊨⁰-sub le lm s (t-idt W Da Db) =
-  conv (t-idt (wf-sub le s W) (⊨-sub le ≤ᵐ-spec-top s Da) (⊨-sub le ≤ᵐ-spec-top s Db))
+⊨⁰-sub lm s (t-idt W Da Db) =
+  conv (t-idt (wf-sub s W) (⊨-sub ≤ᵐ-spec-top s Da) (⊨-sub ≤ᵐ-spec-top s Db))
     ≈-refl
-⊨⁰-sub {τ = τ} le lm s (t-rfl c) = conv (t-rfl (≈-sub τ c)) ≈-refl
-⊨⁰-sub {τ = τ} le lm s (t-rwt {l = l} {r = r} {P = P} Deq W Dt) =
-  conv (t-rwt (⊨-sub le le s Deq) (wf-sub le (Subst-lifts s _ _) W)
-          (⊨-≡ (sub-inst τ P r) (⊨-sub le lm s Dt)))
+⊨⁰-sub {τ = τ} lm s (t-rfl c) = conv (t-rfl (≈-sub τ c)) ≈-refl
+⊨⁰-sub {τ = τ} lm s (t-rwt {l = l} {r = r} {P = P} Deq W Dt) =
+  conv (t-rwt (⊨-sub (≤ᵐ-trans lm (≤ᵐ-rwtMode _)) s Deq) (wf-sub (Subst-lifts s _ _) W)
+          (⊨-≡ (sub-inst τ P r) (⊨-sub lm s Dt)))
     (≈-≡ (sym (sub-inst τ P l)))
-⊨⁰-sub {τ = τ} le lm s (t-mNat {e = e} {P = P} De W Dz Ds) =
-  conv (t-mNat (⊨-sub le lm s De) (wf-sub le (Subst-lifts s _ _) W)
-          (⊨-≡ (sub-inst τ P ze) (⊨-sub le lm s Dz))
-          (⊨-≡ (sub-motSuc τ P) (⊨-sub le lm (Subst-lifts s _ _) Ds)))
+⊨⁰-sub {τ = τ} lm s (t-mNat {e = e} {P = P} De W Dz Ds) =
+  conv (t-mNat (⊨-sub lm s De) (wf-sub (Subst-lifts s _ _) W)
+          (⊨-≡ (sub-inst τ P ze) (⊨-sub lm s Dz))
+          (⊨-≡ (sub-motSuc τ P) (⊨-sub lm (Subst-lifts s _ _) Ds)))
     (≈-≡ (sym (sub-inst τ P e)))
-⊨⁰-sub {τ = τ} le lm s (t-mEmp {e = e} {P = P} De W) =
-  conv (t-mEmp (⊨-sub le lm s De) (wf-sub le (Subst-lifts s _ _) W))
+⊨⁰-sub {τ = τ} lm s (t-mEmp {e = e} {P = P} De W) =
+  conv (t-mEmp (⊨-sub lm s De) (wf-sub (Subst-lifts s _ _) W))
     (≈-≡ (sym (sub-inst τ P e)))
-⊨⁰-sub {τ = τ} le lm s (t-mUnit {e = e} {P = P} De W Du) =
-  conv (t-mUnit (⊨-sub le lm s De) (wf-sub le (Subst-lifts s _ _) W)
-          (⊨-≡ (sub-inst τ P one) (⊨-sub le lm s Du)))
+⊨⁰-sub {τ = τ} lm s (t-mUnit {e = e} {P = P} De W Du) =
+  conv (t-mUnit (⊨-sub lm s De) (wf-sub (Subst-lifts s _ _) W)
+          (⊨-≡ (sub-inst τ P one) (⊨-sub lm s Du)))
     (≈-≡ (sym (sub-inst τ P e)))
-⊨⁰-sub {τ = τ} le lm s (t-dty {d = d} lk) =
+⊨⁰-sub {τ = τ} lm s (t-dty {d = d} lk) =
   conv (t-dty lk) (≈-≡ (sym (dtyType-sub τ (DataDecl.pqtys d) (DataDecl.idxs d))))
-⊨⁰-sub {τ = τ} le lm s (t-ctor sp c) = conv (t-ctor (Spine-sub τ sp) (ca-sub le lm s c)) ≈-refl
-⊨⁰-sub {τ = τ} le lm s (t-mData {e = e} {di} {ps} {is} {P = P} De lk lps lis M Bs) =
+⊨⁰-sub {τ = τ} lm s (t-ctor sp c) = conv (t-ctor (Spine-sub τ sp) (ca-sub lm s c)) ≈-refl
+⊨⁰-sub {τ = τ} lm s (t-mData {e = e} {di} {ps} {is} {P = P} De lk lps lis M Bs) =
   conv (t-mData (⊨-≡ (trans (sub-appsFrom τ (dty di) (ps ++ is)) (cong (appsFrom (dty di)) (subList-++ τ ps is)))
-                   (⊨-sub le lm s De))
+                   (⊨-sub lm s De))
           lk (trans (subList-length τ ps) lps) (trans (subList-length τ is) lis)
-          (mot-sub le s M) (brs-sub le lm s Bs))
+          (mot-sub s M) (brs-sub lm s Bs))
     (≈-≡ (sym (sub-motApp τ P is e)))
-⊨⁰-sub {τ = τ} le lm s (t-def {d = d} lk al) =
+⊨⁰-sub {τ = τ} lm s (t-def {d = d} lk al) =
   conv (t-def lk al) (≈-≡ (sym (closed-sub τ (Def.dtype d))))
-⊨⁰-sub le lm s (t-ann W D) = conv (t-ann (wf-sub le s W) (⊨-sub le lm s D)) ≈-refl
-⊨⁰-sub le lm s (t-prod DA DB) =
-  conv (t-prod (⊨-sub le ≤ᵐ-spec-top s DA) (⊨-sub le ≤ᵐ-spec-top s DB)) ≈-refl
-⊨⁰-sub le lm s (t-pair Da Db) = conv (t-pair (⊨-sub le lm s Da) (⊨-sub le lm s Db)) ≈-refl
-⊨⁰-sub {τ = τ} le lm s (t-letp {A = A} {B} {C} De Dt) =
-  conv (t-letp (⊨-sub le lm s De)
+⊨⁰-sub lm s (t-ann W D) = conv (t-ann (wf-sub s W) (⊨-sub lm s D)) ≈-refl
+⊨⁰-sub lm s (t-prod DA DB) =
+  conv (t-prod (⊨-sub ≤ᵐ-spec-top s DA) (⊨-sub ≤ᵐ-spec-top s DB)) ≈-refl
+⊨⁰-sub lm s (t-pair Da Db) = conv (t-pair (⊨-sub lm s Da) (⊨-sub lm s Db)) ≈-refl
+⊨⁰-sub {τ = τ} lm s (t-letp {A = A} {B} {C} De Dt) =
+  conv (t-letp (⊨-sub lm s De)
           (⊨-≡ (trans (sub-wk (lifts τ) (wk C)) (cong wk (sub-wk τ C)))
             (⊨-ctx (cong (ext _ affine) (sub-wk τ B))
-              (⊨-sub le lm (Subst-lifts (Subst-lifts s affine A) affine (wk B)) Dt))))
+              (⊨-sub lm (Subst-lifts (Subst-lifts s affine A) affine (wk B)) Dt))))
     ≈-refl
 
-▹-sub {τ = τ} le lm s (a-[] c) = a-[] (≈-sub τ c)
-▹-sub {τ = τ} le lm s (a-∷ {q = q} {B = B} {a = a} c Da ar) =
-  a-∷ (≈-sub τ c) (⊨-sub le (≤-fieldMode lm q) s Da)
-    (subst (λ T → _ , _ ⊨[ _ ] T ▹ _ ⇝ _) (sub-inst τ B a) (▹-sub le lm s ar))
+▹-sub {τ = τ} lm s (a-[] c) = a-[] (≈-sub τ c)
+▹-sub {τ = τ} lm s (a-∷ {q = q} {B = B} {a = a} c Da ar) =
+  a-∷ (≈-sub τ c) (⊨-sub (≤-fieldMode lm q) s Da)
+    (subst (λ T → _ , _ ⊨[ _ ] T ▹ _ ⇝ _) (sub-inst τ B a) (▹-sub lm s ar))
 
-ca-sub {τ = τ} le lm s (ca {i = i} {ps = ps} {idxs} {c = c} lk lkc lps lidx ip ar)
+ca-sub {τ = τ} lm s (ca {i = i} {ps = ps} {idxs} {c = c} lk lkc lps lidx ip ar)
   rewrite sub-appsFrom τ (dty i) (ps ++ idxs) | subList-++ τ ps idxs =
   ca lk lkc (trans (subList-length τ ps) lps) (trans (subList-length τ idxs) lidx)
     (subst (λ T → InstParams _ T _ _) (closed-sub τ (Ctor.ctype c)) (InstParams-sub τ ip))
     (subst (λ R → _ , _ ⊨[ _ ] _ ▹ _ ⇝ R)
       (trans (sub-appsFrom τ (dty i) (ps ++ idxs))
         (cong (appsFrom (dty i)) (subList-++ τ ps idxs)))
-      (▹-sub le lm s ar))
+      (▹-sub lm s ar))
 
-brs-sub le lm s b-[] = b-[]
-brs-sub {τ = τ} le lm s (b-∷ {ps = ps} {c = c} ip bt Db Bs) =
+brs-sub lm s b-[] = b-[]
+brs-sub {τ = τ} lm s (b-∷ {ps = ps} {c = c} ip bt Db Bs) =
   b-∷ (subst (λ T → InstParams _ T _ _) (closed-sub τ (Ctor.ctype c)) (InstParams-sub τ ip))
     (subst (λ k → BrTy _ _ _ k _ _ _ _) (sym (subList-length τ ps)) (BrTy-sub τ bt))
-    (⊨-sub le lm s Db) (brs-sub le lm s Bs)
-brs-sub {τ = τ} le lm s (b-skip {ps = ps} {c = c} ip cl Bs) =
+    (⊨-sub lm s Db) (brs-sub lm s Bs)
+brs-sub {τ = τ} lm s (b-skip {ps = ps} {c = c} ip cl Bs) =
   b-skip (subst (λ T → InstParams _ T _ _) (closed-sub τ (Ctor.ctype c)) (InstParams-sub τ ip))
     (subst (λ k → Clash _ k _ _) (sym (subList-length τ ps)) (Clash-sub τ cl))
-    (brs-sub le lm s Bs)
+    (brs-sub lm s Bs)
 
-mot-sub {τ = τ} {di = di} {ps = ps} {ixs = []} le s W =
+mot-sub {τ = τ} {di = di} {ps = ps} {ixs = []} s W =
   subst (λ A → _ , ext _ affine A ⊨ _ wf) (sub-appsFrom τ (dty di) ps)
-    (wf-sub le (Subst-lifts s _ _) W)
-mot-sub {τ = τ} {di = di} {ps = ps} {ixs = (q , T) ∷ ixs} le s D =
+    (wf-sub (Subst-lifts s _ _) W)
+mot-sub {τ = τ} {di = di} {ps = ps} {ixs = (q , T) ∷ ixs} s D =
   ⊨-≡ (trans (sub-motiveTail (lifts τ) di _ ixs) (cong (λ xs → motiveTail di xs ixs) (subList-acc τ ps)))
-    (⊨-ctx (cong (ext _ q) (closed-sub τ T)) (⊨-sub le ≤ᵐ-spec-top (Subst-lifts s q (closed T)) D))
+    (⊨-ctx (cong (ext _ q) (closed-sub τ T)) (⊨-sub ≤ᵐ-spec-top (Subst-lifts s q (closed T)) D))
 
-wf-sub le s wf-typ = wf-typ
-wf-sub le s (wf-pi WA WB) = wf-pi (wf-sub le s WA) (wf-sub le (Subst-lifts s _ _) WB)
-wf-sub le s (wf-el D) = wf-el (⊨-sub le ≤ᵐ-spec-top s D)
+wf-sub s wf-typ = wf-typ
+wf-sub s (wf-pi WA WB) = wf-pi (wf-sub s WA) (wf-sub (Subst-lifts s _ _) WB)
+wf-sub s (wf-el D) = wf-el (⊨-sub ≤ᵐ-spec-top s D)
 
 -- Instantiating the last binder.
 Subst-inst : ∀ {σ n m₀} {Γ : Ctx n} q A {a}
@@ -809,11 +808,11 @@ Subst-inst {m₀ = m₀} {Γ} q A {a} Da (suc x)
   conv (t-var (varOk-modeFor (qtyOf Γ x) m₀)) ≈-refl
 
 ⊨-inst : ∀ {σ n m₀ m} {Γ : Ctx n} {q A t B a}
-  → m₀ ≤ᵐ evid → m₀ ≤ᵐ m
+  → m₀ ≤ᵐ m
   → σ , ext Γ q A ⊨[ m ] t ∶ B
   → σ , Γ ⊨[ modeFor q m₀ ] a ∶ A
   → σ , Γ ⊨[ m ] inst t a ∶ inst B a
-⊨-inst {q = q} {A} le lm D Da = ⊨-sub le lm (Subst-inst q A Da) D
+⊨-inst {q = q} {A} lm D Da = ⊨-sub lm (Subst-inst q A Da) D
 
 ------------------------------------------------------------------------
 -- Preservation.
@@ -992,88 +991,88 @@ pres-ιdata {σ = σ} {Γ = Γ} {m} {as = as} {di = di} {ps₀} {is₀} {P = P} 
 -- The step may be taken in any mode m′: δ is justified by the typing's
 -- allowedDef, not the step's.
 pres : ∀ {σ n} {Γ : Ctx n} {m m′ e e′ A}
-  → WfSig σ → m ≤ᵐ evid
+  → WfSig σ
   → σ , Γ ⊨[ m ] e ∶ A → σ ⊢[ m′ ] e ⟶ e′ → σ , Γ ⊨[ m ] e′ ∶ A
 pres⁰ : ∀ {σ n} {Γ : Ctx n} {m m′ e e′ A}
-  → WfSig σ → m ≤ᵐ evid
+  → WfSig σ
   → σ , Γ ⊨⁰[ m ] e ∶ A → σ ⊢[ m′ ] e ⟶ e′ → σ , Γ ⊨[ m ] e′ ∶ A
 
-pres wf le (conv D c) s = conv-≈ (pres⁰ wf le D s) c
+pres wf (conv D c) s = conv-≈ (pres⁰ wf D s) c
 
 -- A step is a conversion (in spec mode, where every def unfolds).
 step-≈ : ∀ {σ m n} {e e′ : Tm n} → σ ⊢[ m ] e ⟶ e′ → σ ⊢[ spec ] e′ ≈ e
 step-≈ s = ≈-sym (≈-mode ≤ᵐ-spec-top (⟶→≈ s))
 
 -- δ
-pres⁰ wf le (t-def {d = d} lk al) (δ lk′ _) with ok-inj (trans (sym lk) lk′)
+pres⁰ wf (t-def {d = d} lk al) (δ lk′ _) with ok-inj (trans (sym lk) lk′)
 ... | refl = ⊨-mode (allowedDef→≤ᵐ (Def.dmode d) _ al) (closed-⊨ (wf _ _ lk))
 -- β
-pres⁰ wf le (t-app-aff (conv (t-lam W c rok Dt) cpi) Da) β with ≈-pi-inj cpi
+pres⁰ wf (t-app-aff (conv (t-lam W c rok Dt) cpi) Da) β with ≈-pi-inj cpi
 ... | refl , cA , cB =
-  conv-≈ (⊨-inst le ≤ᵐ-refl Dt (conv-≈ Da (≈-sym cA))) (≈-sub _ cB)
-pres⁰ wf le (t-app-era (conv (t-lam W c rok Dt) cpi) Da) β with ≈-pi-inj cpi
+  conv-≈ (⊨-inst ≤ᵐ-refl Dt (conv-≈ Da (≈-sym cA))) (≈-sub _ cB)
+pres⁰ wf (t-app-era (conv (t-lam W c rok Dt) cpi) Da) β with ≈-pi-inj cpi
 ... | refl , cA , cB =
-  conv-≈ (⊨-inst le ≤ᵐ-refl Dt (conv-≈ Da (≈-sym cA))) (≈-sub _ cB)
-pres⁰ wf le (t-app-reuse (conv (t-lam W c rok Dt) cpi) isd Da) β with ≈-pi-inj cpi
+  conv-≈ (⊨-inst ≤ᵐ-refl Dt (conv-≈ Da (≈-sym cA))) (≈-sub _ cB)
+pres⁰ wf (t-app-reuse (conv (t-lam W c rok Dt) cpi) isd Da) β with ≈-pi-inj cpi
 ... | refl , cA , cB =
-  conv-≈ (⊨-inst le ≤ᵐ-refl Dt (conv-≈ Da (≈-sym cA))) (≈-sub _ cB)
+  conv-≈ (⊨-inst ≤ᵐ-refl Dt (conv-≈ Da (≈-sym cA))) (≈-sub _ cB)
 -- congruence in the function
-pres⁰ wf le (t-app-aff Df Da) (app-f s) = conv (t-app-aff (pres wf le Df s) Da) ≈-refl
-pres⁰ wf le (t-app-era Df Da) (app-f s) = conv (t-app-era (pres wf le Df s) Da) ≈-refl
-pres⁰ wf le (t-app-reuse Df isd Da) (app-f s) =
-  conv (t-app-reuse (pres wf le Df s) isd Da) ≈-refl
+pres⁰ wf (t-app-aff Df Da) (app-f s) = conv (t-app-aff (pres wf Df s) Da) ≈-refl
+pres⁰ wf (t-app-era Df Da) (app-f s) = conv (t-app-era (pres wf Df s) Da) ≈-refl
+pres⁰ wf (t-app-reuse Df isd Da) (app-f s) =
+  conv (t-app-reuse (pres wf Df s) isd Da) ≈-refl
 -- ι
-pres⁰ wf le (t-mNat De W Dz Ds) ιz = Dz
-pres⁰ wf le (t-mNat {P = P} (conv (t-su Du) _) W Dz Ds) (ιs {u = u}) =
-  conv-≈ (⊨-inst le ≤ᵐ-refl Ds Du) (≈-≡ (inst-motSuc P u))
-pres⁰ wf le (t-mNat {P = P} De W Dz Ds) (mNat-e s) =
-  conv (t-mNat (pres wf le De s) W Dz Ds) (≈-inst P (step-≈ s))
-pres⁰ wf le (t-mUnit De W Du) ιtt = Du
-pres⁰ wf le (t-mUnit {P = P} De W Du) (mUnit-e s) =
-  conv (t-mUnit (pres wf le De s) W Du) (≈-inst P (step-≈ s))
-pres⁰ wf le (t-mEmp {P = P} De W) (mEmp-e s) =
-  conv (t-mEmp (pres wf le De s) W) (≈-inst P (step-≈ s))
-pres⁰ wf le (t-rwt {P = P} (conv (t-rfl cab) cid) W Dt) ιrfl with ≈-idt-inj cid
+pres⁰ wf (t-mNat De W Dz Ds) ιz = Dz
+pres⁰ wf (t-mNat {P = P} (conv (t-su Du) _) W Dz Ds) (ιs {u = u}) =
+  conv-≈ (⊨-inst ≤ᵐ-refl Ds Du) (≈-≡ (inst-motSuc P u))
+pres⁰ wf (t-mNat {P = P} De W Dz Ds) (mNat-e s) =
+  conv (t-mNat (pres wf De s) W Dz Ds) (≈-inst P (step-≈ s))
+pres⁰ wf (t-mUnit De W Du) ιtt = Du
+pres⁰ wf (t-mUnit {P = P} De W Du) (mUnit-e s) =
+  conv (t-mUnit (pres wf De s) W Du) (≈-inst P (step-≈ s))
+pres⁰ wf (t-mEmp {P = P} De W) (mEmp-e s) =
+  conv (t-mEmp (pres wf De s) W) (≈-inst P (step-≈ s))
+pres⁰ wf (t-rwt {P = P} (conv (t-rfl cab) cid) W Dt) ιrfl with ≈-idt-inj cid
 ... | _ , cal , cbr =
   conv-≈ Dt (≈-inst P (≈-trans (≈-sym cbr) (≈-trans (≈-sym cab) cal)))
-pres⁰ wf le (t-rwt Deq W Dt) (rwt-e s) =
-  conv (t-rwt (pres wf ≤ᵐ-evid Deq s) W Dt) ≈-refl
+pres⁰ wf (t-rwt Deq W Dt) (rwt-e s) =
+  conv (t-rwt (pres wf Deq s) W Dt) ≈-refl
 -- data
-pres⁰ wf le (t-ctor sp _) s = ⊥-elim (Spine-no-step dh-ctor sp s)
-pres⁰ wf le (t-mData De lk lps lis M Bs) (ι-data sp lkb) = pres-ιdata sp lkb De lk lps Bs
-pres⁰ wf le (t-mData {is = is} {P = P} De lk lps lis M Bs) (mData-e s) =
-  conv (t-mData (pres wf le De s) lk lps lis M Bs) (≈-motApp P (≈L-refl is) (step-≈ s))
+pres⁰ wf (t-ctor sp _) s = ⊥-elim (Spine-no-step dh-ctor sp s)
+pres⁰ wf (t-mData De lk lps lis M Bs) (ι-data sp lkb) = pres-ιdata sp lkb De lk lps Bs
+pres⁰ wf (t-mData {is = is} {P = P} De lk lps lis M Bs) (mData-e s) =
+  conv (t-mData (pres wf De s) lk lps lis M Bs) (≈-motApp P (≈L-refl is) (step-≈ s))
 -- ann
-pres⁰ wf le (t-ann W D) ann-e = D
+pres⁰ wf (t-ann W D) ann-e = D
 -- let (a, b) = (a₀, b₀) in t
-pres⁰ {Γ = Γ} wf le (t-letp {t = t} {A = A} {C = C} (conv (t-pair {a = a} {b} Da Db) cp) Dt) ι-letp
+pres⁰ {Γ = Γ} wf (t-letp {t = t} {A = A} {C = C} (conv (t-pair {a = a} {b} Da Db) cp) Dt) ι-letp
   with ≈-prod-inj cp
 ... | cA , cB =
   ⊨-≡ (inst-wk C a)
-    (⊨-inst le ≤ᵐ-refl
+    (⊨-inst ≤ᵐ-refl
       (⊨-≡ (inst-wk (wk C) (wk b))
-        (⊨-inst le ≤ᵐ-refl Dt
+        (⊨-inst ≤ᵐ-refl Dt
           (⊨-ren (Ren-wk Γ affine A) (conv-≈ Db cB))))
       (conv-≈ Da cA))
-pres⁰ wf le (t-letp De Dt) (letp-e s) = conv (t-letp (pres wf le De s) Dt) ≈-refl
+pres⁰ wf (t-letp De Dt) (letp-e s) = conv (t-letp (pres wf De s) Dt) ≈-refl
 -- rigid forms do not step
-pres⁰ wf le (t-var _) ()
-pres⁰ wf le t-ze ()
-pres⁰ wf le (t-su _) ()
-pres⁰ wf le t-one ()
-pres⁰ wf le t-nat ()
-pres⁰ wf le t-unit ()
-pres⁰ wf le t-empty ()
-pres⁰ wf le (t-pi _ _) ()
-pres⁰ wf le (t-lam _ _ _ _) ()
-pres⁰ wf le (t-idt _ _ _) ()
-pres⁰ wf le (t-rfl _) ()
-pres⁰ wf le (t-dty _) ()
-pres⁰ wf le (t-prod _ _) ()
-pres⁰ wf le (t-pair _ _) ()
+pres⁰ wf (t-var _) ()
+pres⁰ wf t-ze ()
+pres⁰ wf (t-su _) ()
+pres⁰ wf t-one ()
+pres⁰ wf t-nat ()
+pres⁰ wf t-unit ()
+pres⁰ wf t-empty ()
+pres⁰ wf (t-pi _ _) ()
+pres⁰ wf (t-lam _ _ _ _) ()
+pres⁰ wf (t-idt _ _ _) ()
+pres⁰ wf (t-rfl _) ()
+pres⁰ wf (t-dty _) ()
+pres⁰ wf (t-prod _ _) ()
+pres⁰ wf (t-pair _ _) ()
 
 pres* : ∀ {σ n} {Γ : Ctx n} {m m′ e e′ A}
-  → WfSig σ → m ≤ᵐ evid
+  → WfSig σ
   → σ , Γ ⊨[ m ] e ∶ A → σ ⊢[ m′ ] e ⟶* e′ → σ , Γ ⊨[ m ] e′ ∶ A
-pres* wf le D ⟶*-refl = D
-pres* wf le D (⟶*-step s r) = pres* wf le (pres wf le D s) r
+pres* wf D ⟶*-refl = D
+pres* wf D (⟶*-step s r) = pres* wf (pres wf D s) r
