@@ -70,7 +70,9 @@ defmodule Muro.Check do
   # check_def tries each non-erased position (Agda: RecSt, checkBody).
 
   defp empty_rec, do: %{self: nil, pos: 0, next_arg: nil, smaller: [], rec_ok: [], names: []}
-  defp def_rec(name, pos), do: %{self: name, pos: pos, next_arg: pos, smaller: [], rec_ok: [], names: []}
+
+  defp def_rec(name, pos),
+    do: %{self: name, pos: pos, next_arg: pos, smaller: [], rec_ok: [], names: []}
 
   defp push_name(rs, x), do: %{rs | names: [x | Map.get(rs, :names, [])]}
 
@@ -643,7 +645,7 @@ defmodule Muro.Check do
 
   defp expand_bisim(k, book, rs, gamma, s, t) do
     with {:ok, {ts, _}} <- infer(k, book, rs, gamma, :spec, s),
-             {:ok, f} <- view_nu(k, book, ts, names_of(rs, gamma)),
+         {:ok, f} <- view_nu(k, book, ts, names_of(rs, gamma)),
          {:ok, a} <- payload_ty(k, book, f),
          {:ok, {tt, _}} <- infer(k, book, rs, gamma, :spec, t),
          :ok <- conv(k, book, names_of(rs, gamma), ts, tt) do
@@ -947,7 +949,15 @@ defmodule Muro.Check do
       {:spec, {:pi, q, a, x, b}} ->
         with :ok <- check_ty(k, book, rs, gamma, a),
              {:ok, _} <-
-               check(k, book, push_name(ext_rec(rs, false, false), x), ext(gamma, q, a), :spec, b, :typ),
+               check(
+                 k,
+                 book,
+                 push_name(ext_rec(rs, false, false), x),
+                 ext(gamma, q, a),
+                 :spec,
+                 b,
+                 :typ
+               ),
              do: {:ok, {:typ, u0s(n)}}
 
       # ⇒-lam
@@ -993,7 +1003,14 @@ defmodule Muro.Check do
       {m, {:rwt, eq, p, t1}} ->
         with {:ok, {et, _}} <- infer(k, book, rs, gamma, rwt_mode(m), eq),
              {:ok, {a, lft, r}} <- view_id(k, book, et, names_of(rs, gamma)),
-             :ok <- check_ty(k, book, push_name(ext_rec(rs, false, false), "z"), ext(gamma, :affine, a), p),
+             :ok <-
+               check_ty(
+                 k,
+                 book,
+                 push_name(ext_rec(rs, false, false), "z"),
+                 ext(gamma, :affine, a),
+                 p
+               ),
              {:ok, tu} <- check(k, book, rs, gamma, m, t1, Subst.inst(p, r)) do
           {:ok, {Subst.inst(p, lft), tu}}
         end
@@ -1001,7 +1018,14 @@ defmodule Muro.Check do
       # ⇒-mNat
       {m, {:mnat, e, p, z, s}} ->
         with {:ok, eu} <- check(k, book, rs, gamma, m, e, :nat),
-             :ok <- check_ty(k, book, push_name(ext_rec(rs, false, false), "n"), ext(gamma, :affine, :nat), p),
+             :ok <-
+               check_ty(
+                 k,
+                 book,
+                 push_name(ext_rec(rs, false, false), "n"),
+                 ext(gamma, :affine, :nat),
+                 p
+               ),
              {:ok, zu} <- check(k, book, rs, gamma, m, z, Subst.inst(p, :ze)),
              ok? = scrut_ok(rs, e),
              {:ok, [u0 | sus]} <-
@@ -1022,7 +1046,14 @@ defmodule Muro.Check do
       # ⇒-mEmp
       {m, {:memp, e, p}} ->
         with {:ok, eu} <- check(k, book, rs, gamma, m, e, :empty),
-             :ok <- check_ty(k, book, push_name(ext_rec(rs, false, false), "e"), ext(gamma, :affine, :empty), p) do
+             :ok <-
+               check_ty(
+                 k,
+                 book,
+                 push_name(ext_rec(rs, false, false), "e"),
+                 ext(gamma, :affine, :empty),
+                 p
+               ) do
           {:ok, {Subst.inst(p, e), eu}}
         end
 
@@ -1104,7 +1135,7 @@ defmodule Muro.Check do
       # ⇒-letp: as ⇐-letp, but the body is inferred and its type must not
       # mention the two components (Subst.strengthen2).
       {m, {:letp, e, t}} ->
-        with              {:ok, {e_ty, eu}} <- infer(k, book, rs, gamma, m, e),
+        with {:ok, {e_ty, eu}} <- infer(k, book, rs, gamma, m, e),
              {:ok, {a1, b1}} <- view_prod(k, book, e_ty, names_of(rs, gamma)),
              {:ok, {t_ty, [ub, ua | tus]}} <-
                infer(
@@ -1710,7 +1741,8 @@ defmodule Muro.Check do
         args = Enum.map(params, &Subst.wk/1) ++ [{:var, 0}]
         tail = motive_tail(dname, args, rest)
 
-        with {:ok, _} <- check(k, book, push_name(ext_rec(rs, false, false), x), gamma1, :spec, p, tail),
+        with {:ok, _} <-
+               check(k, book, push_name(ext_rec(rs, false, false), x), gamma1, :spec, p, tail),
              do: :ok
     end
   end

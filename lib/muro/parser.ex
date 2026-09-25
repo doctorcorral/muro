@@ -101,7 +101,8 @@ defmodule Muro.Parser do
          {:ok, indices} <- peel_indices(sort),
          {:ok, rest} <- kw(skip(rest), "where"),
          {:ok, ctors, rest} <- parse_ctors(skip(rest), []) do
-      {:ok, %{kind: :data, name: name, params: params, indices: indices, ctors: ctors, loc: loc}, rest}
+      {:ok, %{kind: :data, name: name, params: params, indices: indices, ctors: ctors, loc: loc},
+       rest}
     end
   end
 

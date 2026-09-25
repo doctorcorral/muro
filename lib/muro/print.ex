@@ -77,7 +77,11 @@ defmodule Muro.Print do
   end
 
   defp fmt({:pi, q, a, x, b}, names, prec) do
-    wrap(prec, :arrow, "Π (#{qty_mark(q)}#{x} : #{fmt(a, names, :none)}) → #{fmt(b, [x | names], :arrow)}")
+    wrap(
+      prec,
+      :arrow,
+      "Π (#{qty_mark(q)}#{x} : #{fmt(a, names, :none)}) → #{fmt(b, [x | names], :arrow)}"
+    )
   end
 
   defp fmt({:lam, q, a, x, t}, names, prec) do
