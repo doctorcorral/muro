@@ -6,7 +6,8 @@
 module Muro.Subst where
 
 open import Data.Fin.Base using (Fin; zero; suc)
-open import Data.List.Base using (List; []; _∷_)
+open import Data.List.Base using (List; []; _∷_; _++_)
+open import Data.Product.Base using (_×_; _,_)
 open import Data.Nat.Base using (ℕ; zero; suc)
 
 open import Muro.Base
@@ -224,6 +225,22 @@ motSuc P = sub motSucσ P
 appsFrom : ∀ {n} → Tm n → List (Tm n) → Tm n
 appsFrom f []       = f
 appsFrom f (a ∷ as) = appsFrom (app f a) as
+
+-- The motive of a match at the indices is and the scrutinee e. P is the
+-- motive under its first binder: the scrutinee when the data type has
+-- no indices, the first index otherwise (Check writes the motive as a
+-- λ; appsFrom (lam _ _ P) (is ++ [e]) β-reduces to this).
+motApp : ∀ {n} → Tm (suc n) → List (Tm n) → Tm n → Tm n
+motApp P []       e = inst P e
+motApp P (i ∷ is) e = appsFrom (inst P i) (is ++ (e ∷ []))
+
+-- The kind of a motive after its first index binder: one Π per further
+-- index (index types are closed), then Π over the data type at the
+-- parameters and indices so far, then Type.
+motiveTail : ∀ {n} → ℕ → List (Tm n) → List (Qty × Tm 0) → Tm n
+motiveTail di args []             = pi affine (appsFrom (dty di) args) typ
+motiveTail di args ((q , T) ∷ is) =
+  pi q (closed T) (motiveTail di (renList suc args ++ (var zero ∷ [])) is)
 
 ------------------------------------------------------------------------
 -- toPHOAS : de Bruijn → PHOAS

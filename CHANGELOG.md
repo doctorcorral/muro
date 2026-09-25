@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.7.0
+
+`match` on an indexed data type is in ⊢, with preservation and checker soundness. A branch is typed at its constructor's own indices: the checker no longer substitutes a scrutinee index for a constructor argument in the branch (no forcing). A constructor whose numeral index clashes with the scrutinee's (`0` against `suc(…)`, under any number of matching `suc`) is skipped, as before. What a branch needs to know about the scrutinee's indices it states in the motive as an equation and uses with `rewrite`; `examples/vec.muro` does this for `lookup`, with `inj-suc` as the evidence that `suc` is injective.
+
+### Language
+
+- `match e motive P | c₁ … | cₙ …` on `D params indices` has type `P indices e`. The branch for `c` binds every argument of `c` and is checked against `P` at `c`'s target indices and `c` applied to its arguments. Before, a constructor-argument variable that appeared as a target index was replaced in the branch by the scrutinee's index; a program that relied on that now carries the equation in the motive (see `manual/indexed.md`). The `vnil` branch of `lookup` is still skipped as a clash.
+- `examples/vec.muro`: `pred`, `inj-suc : Π (-m : Nat) → Π (-p : Nat) → {suc(m) ≡ suc(p) : Nat} → {m ≡ p : Nat}`, and `lookup` with the index equation in the inner motives.
+
+### Kernel (Agda)
+
+- `Muro.Subst`: `motApp P is e` (the motive at the indices and the scrutinee), `motiveTail` (the motive's kind after its first index).
+- `Muro.Data`: `BrTy σ i j np T P acc X` ends at `motApp P (drop np qs) (ctor i j acc)` for a constructor telescope ending in `dty i qs`; `Clash σ np is T` (a target index is a numeral that differs from the scrutinee's); renaming, substitution, and `≈` lemmas for both; `≈L-++-split`, `drop-++`.
+- `Muro.Convert`: `≈-su-inj`, `≈-su-ze`.
+- `Muro.Judgement`: `⇒-mData` takes the scrutinee's type as `dty di (ps ++ is)` with `length is ≡ nidxs d`, `MotiveOk` (the motive is well-formed over the scrutinee when there are no indices, and checks against `motiveTail` otherwise), branches `brs⟨ di , ps , is , P , ci ⟩` with `brs-∷` and `brs-skip` (a `Clash`); the type is `motApp P is e`.
+- `Muro.Typing`: `t-mData`, `Mot⊨`, `b-skip`; renaming and substitution of motives and branches; preservation for ι on an indexed `match` (`brApp`, `Clash-▹`: a skipped constructor cannot be the scrutinee's head). `Muro.Wall`, `Muro.Consistency` follow.
+- `Muro.Check`: `forceBr`, `analyzeForces`, `forcePairs`, `matchIdx` removed. `clashes` / `clashIdx` (the clash test, `NatView`), `checkBr` / `checkBrPi` bind one λ per Π, `checkMotive` and `firstMotLam` take the data type's index telescope. Fuel is spent only in `whnf`, `conv`, `isData`, `clashIdx`.
+- `Muro.Soundness.Views`: `GoodSig` covers indexed data types (`tel` at `nparams d + nidxs d`); `clashIdx-sound`, `clashIdxs-sound`, `clashes-sound`, `motApp-β`, `Frag-motiveTail`, `firstMotLam-form`. `Muro.Soundness`: `checkMotive-sound`; `checkBr-sound`, `checkBrPi-sound`, `checkBranches-sound` over indexed data, with the skipped branch as `brs-skip`. Statements otherwise unchanged; `--safe`, no postulates.
+- `Muro.ExampleVec`: `pred`, `suc-inj`, `lookup` with the index equation in the inner motives; `lookup-ok` still checks.
+
+### Elixir mirror
+
+- `Muro.Check`: `force_br`, `analyze_forces`, `walk_forces`, `match_idx`, `forces_for` removed; `clashes` / `clash_idxs` / `clash_idx` mirror `Check.clashes`; `check_br` / `check_br_n` without a force list.
+
+### Manual
+
+- `indexed.md` rewritten around the motive equation and `rewrite`; `limits.md`, `extending.md`, `examples.md`, `for-agents.md`, README.
+
+### Package
+
+- Version 0.7.0.
+
 ## 0.6.0
 
 The kernel has one pair eliminator. `fst` and `snd` are no longer constructors of the term language: `fst t` parses to `let (a, b) = t in a` and `snd t` to `let (a, b) = t in b`, so `head` and `tail` are a `let` on `uncons` too. To keep them usable wherever they were, `let` is now also inferred: `⇒-letp` infers the body under the two binders and requires its type not to mention the components. Every use of pairs is now inside the proved fragment.

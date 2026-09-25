@@ -16,9 +16,12 @@
 -- the type, the arguments are checked along the instantiated
 -- constructor telescope (▹), and the residual must be the data type.
 -- There is no rule for a bare constructor, so a constructor-headed
--- term has exactly one derivation shape (ctor-inv). match on a
--- non-indexed type (t-mData) types each branch by BrTy; preservation
--- for ι-data is brApp: a branch applied to the constructor arguments.
+-- term has exactly one derivation shape (ctor-inv). match (t-mData)
+-- types each branch by BrTy at the constructor's own indices, or skips
+-- it when those clash with the scrutinee's (Clash); preservation for
+-- ι-data is brApp, a branch applied to the constructor arguments, whose
+-- indices are then convertible to the scrutinee's (≈-dty-inj), and
+-- Clash-▹: a skipped branch has no constructor application to fire on.
 --
 -- Proved here:
 --   forget-⇒ / forget-⇐   ⊢ is sound for ⊨
@@ -48,7 +51,7 @@ module Muro.Typing where
 open import Data.Bool.Base using (Bool; true; false)
 open import Data.Empty using (⊥; ⊥-elim)
 open import Data.Fin.Base using (Fin; zero; suc)
-open import Data.List.Base using (List; []; _∷_; _++_; length)
+open import Data.List.Base using (List; []; _∷_; _++_; length; drop)
 open import Data.Nat.Base using (ℕ; zero; suc; _+_)
 open import Data.Nat.Properties using (+-identityʳ; +-suc)
 open import Data.Product.Base using (_×_; _,_; ∃; proj₁; proj₂)
@@ -89,7 +92,7 @@ VarOk-mono ≤ᵐ-spec v = v
 -- The judgment.
 ------------------------------------------------------------------------
 
-infix 3 _,_⊨[_]_∶_ _,_⊨⁰[_]_∶_ _,_⊨_wf _,_⊨[_]_▹_⇝_ _,_⊨[_]_brs⟨_,_,_,_⟩_
+infix 3 _,_⊨[_]_∶_ _,_⊨⁰[_]_∶_ _,_⊨_wf _,_⊨[_]_▹_⇝_ _,_⊨[_]_brs⟨_,_,_,_,_⟩_
 
 data _,_⊨⁰[_]_∶_ (σ : Sig) {n} (Γ : Ctx n) : Mode → Tm n → Tm n → Set
 data _,_⊨[_]_∶_ (σ : Sig) {n} (Γ : Ctx n) : Mode → Tm n → Tm n → Set
@@ -102,8 +105,10 @@ data _,_⊨[_]_▹_⇝_ (σ : Sig) {n} (Γ : Ctx n)
 -- as, at the data type applied to the parameters and indices.
 data CtorApp (σ : Sig) {n} (Γ : Ctx n) : Mode → ℕ → ℕ → List (Tm n) → Tm n → Set
 -- Branches of a match, one per constructor from index ci on.
-data _,_⊨[_]_brs⟨_,_,_,_⟩_ (σ : Sig) {n} (Γ : Ctx n)
-    : Mode → List (Tm n) → ℕ → List (Tm n) → Tm (suc n) → ℕ → List Ctor → Set
+data _,_⊨[_]_brs⟨_,_,_,_,_⟩_ (σ : Sig) {n} (Γ : Ctx n)
+    : Mode → List (Tm n) → ℕ → List (Tm n) → List (Tm n) → Tm (suc n) → ℕ → List Ctor → Set
+-- The motive of a match (Judgement.MotiveOk without uses).
+Mot⊨ : ∀ (σ : Sig) {n} (Γ : Ctx n) → ℕ → List (Tm n) → List (Qty × Tm 0) → Tm (suc n) → Set
 
 data _,_⊨[_]_∶_ σ Γ where
   conv : ∀ {m e A B}
@@ -202,14 +207,14 @@ data _,_⊨⁰[_]_∶_ σ Γ where
     → CtorApp σ Γ m i j as A
     → σ , Γ ⊨⁰[ m ] e ∶ A
 
-  t-mData : ∀ {m e di ps d P bs}
-    → σ , Γ ⊨[ m ] e ∶ appsFrom (dty di) ps
+  t-mData : ∀ {m e di ps is d P bs}
+    → σ , Γ ⊨[ m ] e ∶ appsFrom (dty di) (ps ++ is)
     → lookupData σ di ≡ ok d
-    → DataDecl.idxs d ≡ []
     → length ps ≡ nparams d
-    → σ , ext Γ affine (appsFrom (dty di) ps) ⊨ P wf
-    → σ , Γ ⊨[ m ] bs brs⟨ di , ps , P , 0 ⟩ DataDecl.ctors d
-    → σ , Γ ⊨⁰[ m ] mData e P bs ∶ inst P e
+    → length is ≡ nidxs d
+    → Mot⊨ σ Γ di ps (DataDecl.idxs d) P
+    → σ , Γ ⊨[ m ] bs brs⟨ di , ps , is , P , 0 ⟩ DataDecl.ctors d
+    → σ , Γ ⊨⁰[ m ] mData e P bs ∶ motApp P is e
 
   t-def : ∀ {m i d}
     → lookupDef σ i ≡ ok d
@@ -258,15 +263,24 @@ data CtorApp σ Γ where
     → σ , Γ ⊨[ m ] T ▹ as ⇝ appsFrom (dty i) (ps ++ idxs)
     → CtorApp σ Γ m i j as (appsFrom (dty i) (ps ++ idxs))
 
-data _,_⊨[_]_brs⟨_,_,_,_⟩_ σ Γ where
-  b-[] : ∀ {m di ps P ci}
-    → σ , Γ ⊨[ m ] [] brs⟨ di , ps , P , ci ⟩ []
-  b-∷  : ∀ {m di ps P ci c cs b bs T X}
+data _,_⊨[_]_brs⟨_,_,_,_,_⟩_ σ Γ where
+  b-[] : ∀ {m di ps is P ci}
+    → σ , Γ ⊨[ m ] [] brs⟨ di , ps , is , P , ci ⟩ []
+  b-∷  : ∀ {m di ps is P ci c cs b bs T X}
     → InstParams σ (closed (Ctor.ctype c)) ps T
-    → BrTy σ di ci T P [] X
+    → BrTy σ di ci (length ps) T P [] X
     → σ , Γ ⊨[ m ] b ∶ X
-    → σ , Γ ⊨[ m ] bs brs⟨ di , ps , P , suc ci ⟩ cs
-    → σ , Γ ⊨[ m ] (b ∷ bs) brs⟨ di , ps , P , ci ⟩ (c ∷ cs)
+    → σ , Γ ⊨[ m ] bs brs⟨ di , ps , is , P , suc ci ⟩ cs
+    → σ , Γ ⊨[ m ] (b ∷ bs) brs⟨ di , ps , is , P , ci ⟩ (c ∷ cs)
+  b-skip : ∀ {m di ps is P ci c cs b bs T}
+    → InstParams σ (closed (Ctor.ctype c)) ps T
+    → Clash σ (length ps) is T
+    → σ , Γ ⊨[ m ] bs brs⟨ di , ps , is , P , suc ci ⟩ cs
+    → σ , Γ ⊨[ m ] (b ∷ bs) brs⟨ di , ps , is , P , ci ⟩ (c ∷ cs)
+
+Mot⊨ σ Γ di ps [] P = σ , ext Γ affine (appsFrom (dty di) ps) ⊨ P wf
+Mot⊨ σ Γ di ps ((q , T) ∷ ixs) P =
+  σ , ext Γ q (closed T) ⊨[ spec ] P ∶ motiveTail di (renList suc ps ++ (var zero ∷ [])) ixs
 
 -- Conversion composes.
 conv-≈ : ∀ {σ n} {Γ : Ctx n} {m e A B}
@@ -329,9 +343,11 @@ forget-wf : ∀ {σ n} {Γ : Ctx n} {A}
   → σ , Γ ⊢ A wf → σ , Γ ⊨ A wf
 forget-args : ∀ {σ n} {Γ : Ctx n} {m T as R u}
   → σ , Γ ⊢[ m ] T ▹ as ⇝ R ⊣ u → σ , Γ ⊨[ m ] T ▹ as ⇝ R
-forget-brs : ∀ {σ n} {Γ : Ctx n} {m bs di ps P ci cs u}
-  → σ , Γ ⊢[ m ] bs brs⟨ di , ps , P , ci ⟩ cs ⊣ u
-  → σ , Γ ⊨[ m ] bs brs⟨ di , ps , P , ci ⟩ cs
+forget-brs : ∀ {σ n} {Γ : Ctx n} {m bs di ps is P ci cs u}
+  → σ , Γ ⊢[ m ] bs brs⟨ di , ps , is , P , ci ⟩ cs ⊣ u
+  → σ , Γ ⊨[ m ] bs brs⟨ di , ps , is , P , ci ⟩ cs
+forget-mot : ∀ {σ n} {Γ : Ctx n} {di ps ixs P}
+  → MotiveOk σ Γ di ps ixs P → Mot⊨ σ Γ di ps ixs P
 
 forget-⇒ (⇒-var-run h) = conv (t-var (v-run h)) ≈-refl
 forget-⇒ (⇒-var-evid h) = conv (t-var (v-evid h)) ≈-refl
@@ -361,8 +377,8 @@ forget-⇒ (⇒-mEmp De W) = conv (t-mEmp (forget-⇐ De) (forget-wf W)) ≈-ref
 forget-⇒ (⇒-mUnit De W Du _) =
   conv (t-mUnit (forget-⇐ De) (forget-wf W) (forget-⇐ Du)) ≈-refl
 forget-⇒ (⇒-dty lk) = conv (t-dty lk) ≈-refl
-forget-⇒ (⇒-mData De c lk ix lps W Bs _) =
-  conv (t-mData (conv-≈ (forget-⇒ De) c) lk ix lps (forget-wf W) (forget-brs Bs)) ≈-refl
+forget-⇒ (⇒-mData De c lk lps lis M Bs _) =
+  conv (t-mData (conv-≈ (forget-⇒ De) c) lk lps lis (forget-mot M) (forget-brs Bs)) ≈-refl
 forget-⇒ (⇒-def lk al) = conv (t-def lk al) ≈-refl
 forget-⇒ (⇒-ann W D) = conv (t-ann (forget-wf W) (forget-⇐ D)) ≈-refl
 forget-⇒ (⇒-prod DA DB) = conv (t-prod (forget-⇐ DA) (forget-⇐ DB)) ≈-refl
@@ -385,6 +401,10 @@ forget-args (args-snoc Ar c Da _) = ▹-snoc (forget-args Ar) c (forget-⇐ Da)
 
 forget-brs brs-[] = b-[]
 forget-brs (brs-∷ ip bt Db Bs) = b-∷ ip bt (forget-⇐ Db) (forget-brs Bs)
+forget-brs (brs-skip ip cl Bs) = b-skip ip cl (forget-brs Bs)
+
+forget-mot {ixs = []} W = forget-wf W
+forget-mot {ixs = (q , T) ∷ ixs} (_ , D) = forget-⇐ D
 
 forget-wf type-Type = wf-typ
 forget-wf (type-pi WA WB) = wf-pi (forget-wf WA) (forget-wf WB)
@@ -402,9 +422,9 @@ forget-wf (type-el D c) = wf-el (conv-≈ (forget-⇒ D) c)
   → m ≤ᵐ m′ → σ , Γ ⊨[ m ] T ▹ as ⇝ R → σ , Γ ⊨[ m′ ] T ▹ as ⇝ R
 ca-mode : ∀ {σ n} {Γ : Ctx n} {m m′ i j as A}
   → m ≤ᵐ m′ → CtorApp σ Γ m i j as A → CtorApp σ Γ m′ i j as A
-brs-mode : ∀ {σ n} {Γ : Ctx n} {m m′ bs di ps P ci cs}
-  → m ≤ᵐ m′ → σ , Γ ⊨[ m ] bs brs⟨ di , ps , P , ci ⟩ cs
-  → σ , Γ ⊨[ m′ ] bs brs⟨ di , ps , P , ci ⟩ cs
+brs-mode : ∀ {σ n} {Γ : Ctx n} {m m′ bs di ps is P ci cs}
+  → m ≤ᵐ m′ → σ , Γ ⊨[ m ] bs brs⟨ di , ps , is , P , ci ⟩ cs
+  → σ , Γ ⊨[ m′ ] bs brs⟨ di , ps , is , P , ci ⟩ cs
 
 fieldMode-mono : ∀ q {m m′} → m ≤ᵐ m′ → fieldMode q m ≤ᵐ fieldMode q m′
 fieldMode-mono erased _ = ≤ᵐ-spec
@@ -433,8 +453,8 @@ fieldMode-mono reuse  h = h
 ⊨⁰-mode h (t-mUnit De W Du) = t-mUnit (⊨-mode h De) W (⊨-mode h Du)
 ⊨⁰-mode ≤ᵐ-spec (t-dty lk) = t-dty lk
 ⊨⁰-mode h (t-ctor sp c) = t-ctor sp (ca-mode h c)
-⊨⁰-mode h (t-mData De lk ix lps W Bs) =
-  t-mData (⊨-mode h De) lk ix lps W (brs-mode h Bs)
+⊨⁰-mode h (t-mData De lk lps lis M Bs) =
+  t-mData (⊨-mode h De) lk lps lis M (brs-mode h Bs)
 ⊨⁰-mode h (t-def {d = d} lk al) = t-def lk (allowedDef-mono (Def.dmode d) h al)
 ⊨⁰-mode h (t-ann W D) = t-ann W (⊨-mode h D)
 ⊨⁰-mode ≤ᵐ-spec (t-prod DA DB) = t-prod DA DB
@@ -448,6 +468,7 @@ ca-mode h (ca lk lkc lps lidx ip ar) = ca lk lkc lps lidx ip (▹-mode h ar)
 
 brs-mode h b-[] = b-[]
 brs-mode h (b-∷ ip bt Db Bs) = b-∷ ip bt (⊨-mode h Db) (brs-mode h Bs)
+brs-mode h (b-skip ip cl Bs) = b-skip ip cl (brs-mode h Bs)
 
 ------------------------------------------------------------------------
 -- Contexts: lookup under ext.
@@ -510,9 +531,11 @@ wf-ren : ∀ {σ n k} {ρ : Fin n → Fin k} {Γ Δ A}
   → σ , Δ ⊨[ m ] ren ρ T ▹ renList ρ as ⇝ ren ρ R
 ca-ren : ∀ {σ n k} {ρ : Fin n → Fin k} {Γ Δ m i j as A}
   → Ren ρ Γ Δ → CtorApp σ Γ m i j as A → CtorApp σ Δ m i j (renList ρ as) (ren ρ A)
-brs-ren : ∀ {σ n k} {ρ : Fin n → Fin k} {Γ Δ m bs di ps P ci cs}
-  → Ren ρ Γ Δ → σ , Γ ⊨[ m ] bs brs⟨ di , ps , P , ci ⟩ cs
-  → σ , Δ ⊨[ m ] renList ρ bs brs⟨ di , renList ρ ps , ren (lift ρ) P , ci ⟩ cs
+brs-ren : ∀ {σ n k} {ρ : Fin n → Fin k} {Γ Δ m bs di ps is P ci cs}
+  → Ren ρ Γ Δ → σ , Γ ⊨[ m ] bs brs⟨ di , ps , is , P , ci ⟩ cs
+  → σ , Δ ⊨[ m ] renList ρ bs brs⟨ di , renList ρ ps , renList ρ is , ren (lift ρ) P , ci ⟩ cs
+mot-ren : ∀ {σ n k} {ρ : Fin n → Fin k} {Γ Δ di ps ixs P}
+  → Ren ρ Γ Δ → Mot⊨ σ Γ di ps ixs P → Mot⊨ σ Δ di (renList ρ ps) ixs (ren (lift ρ) P)
 
 ⊨-ren {ρ = ρ} r (conv D c) = conv (⊨⁰-ren r D) (≈-ren ρ c)
 
@@ -552,12 +575,12 @@ brs-ren : ∀ {σ n k} {ρ : Fin n → Fin k} {Γ Δ m bs di ps P ci cs}
 ⊨⁰-ren {ρ = ρ} r (t-dty {d = d} lk) rewrite dtyType-ren ρ (DataDecl.pqtys d) (DataDecl.idxs d) =
   t-dty lk
 ⊨⁰-ren {ρ = ρ} r (t-ctor sp c) = t-ctor (Spine-ren ρ sp) (ca-ren r c)
-⊨⁰-ren {ρ = ρ} r (t-mData {e = e} {di} {ps} {P = P} De lk ix lps W Bs) rewrite ren-inst ρ P e =
-  t-mData (⊨-≡ (ren-appsFrom ρ (dty di) ps) (⊨-ren r De)) lk ix
-    (trans (renList-length ρ ps) lps)
-    (subst (λ A → _ , ext _ affine A ⊨ _ wf) (ren-appsFrom ρ (dty di) ps)
-      (wf-ren (Ren-lift r _ _) W))
-    (brs-ren r Bs)
+⊨⁰-ren {ρ = ρ} r (t-mData {e = e} {di} {ps} {is} {P = P} De lk lps lis M Bs)
+  rewrite ren-motApp ρ P is e =
+  t-mData (⊨-≡ (trans (ren-appsFrom ρ (dty di) (ps ++ is)) (cong (appsFrom (dty di)) (renList-++ ρ ps is)))
+             (⊨-ren r De))
+    lk (trans (renList-length ρ ps) lps) (trans (renList-length ρ is) lis)
+    (mot-ren r M) (brs-ren r Bs)
 ⊨⁰-ren {ρ = ρ} r (t-def {d = d} lk al) rewrite closed-ren ρ (Def.dtype d) = t-def lk al
 ⊨⁰-ren r (t-ann W D) = t-ann (wf-ren r W) (⊨-ren r D)
 ⊨⁰-ren r (t-prod DA DB) = t-prod (⊨-ren r DA) (⊨-ren r DB)
@@ -583,9 +606,21 @@ ca-ren {ρ = ρ} r (ca {i = i} {ps = ps} {idxs} {c = c} lk lkc lps lidx ip ar)
       (▹-ren r ar))
 
 brs-ren r b-[] = b-[]
-brs-ren {ρ = ρ} r (b-∷ {c = c} ip bt Db Bs) =
+brs-ren {ρ = ρ} r (b-∷ {ps = ps} {c = c} ip bt Db Bs) =
   b-∷ (subst (λ T → InstParams _ T _ _) (closed-ren ρ (Ctor.ctype c)) (InstParams-ren ρ ip))
-    (BrTy-ren ρ bt) (⊨-ren r Db) (brs-ren r Bs)
+    (subst (λ k → BrTy _ _ _ k _ _ _ _) (sym (renList-length ρ ps)) (BrTy-ren ρ bt))
+    (⊨-ren r Db) (brs-ren r Bs)
+brs-ren {ρ = ρ} r (b-skip {ps = ps} {c = c} ip cl Bs) =
+  b-skip (subst (λ T → InstParams _ T _ _) (closed-ren ρ (Ctor.ctype c)) (InstParams-ren ρ ip))
+    (subst (λ k → Clash _ k _ _) (sym (renList-length ρ ps)) (Clash-ren ρ cl))
+    (brs-ren r Bs)
+
+mot-ren {ρ = ρ} {di = di} {ps = ps} {ixs = []} r W =
+  subst (λ A → _ , ext _ affine A ⊨ _ wf) (ren-appsFrom ρ (dty di) ps)
+    (wf-ren (Ren-lift r _ _) W)
+mot-ren {ρ = ρ} {di = di} {ps = ps} {ixs = (q , T) ∷ ixs} r D =
+  ⊨-≡ (trans (ren-motiveTail (lift ρ) di _ ixs) (cong (λ xs → motiveTail di xs ixs) (renList-acc ρ ps)))
+    (⊨-ctx (cong (ext _ q) (closed-ren ρ T)) (⊨-ren (Ren-lift r q (closed T)) D))
 
 wf-ren r wf-typ = wf-typ
 wf-ren r (wf-pi WA WB) = wf-pi (wf-ren r WA) (wf-ren (Ren-lift r _ _) WB)
@@ -652,10 +687,13 @@ wf-sub : ∀ {σ n k m₀} {τ : Fin n → Tm k} {Γ Δ A}
 ca-sub : ∀ {σ n k m₀ m} {τ : Fin n → Tm k} {Γ Δ i j as A}
   → m₀ ≤ᵐ evid → m₀ ≤ᵐ m → Subst σ m₀ τ Γ Δ
   → CtorApp σ Γ m i j as A → CtorApp σ Δ m i j (subList τ as) (sub τ A)
-brs-sub : ∀ {σ n k m₀ m} {τ : Fin n → Tm k} {Γ Δ bs di ps P ci cs}
+brs-sub : ∀ {σ n k m₀ m} {τ : Fin n → Tm k} {Γ Δ bs di ps is P ci cs}
   → m₀ ≤ᵐ evid → m₀ ≤ᵐ m → Subst σ m₀ τ Γ Δ
-  → σ , Γ ⊨[ m ] bs brs⟨ di , ps , P , ci ⟩ cs
-  → σ , Δ ⊨[ m ] subList τ bs brs⟨ di , subList τ ps , sub (lifts τ) P , ci ⟩ cs
+  → σ , Γ ⊨[ m ] bs brs⟨ di , ps , is , P , ci ⟩ cs
+  → σ , Δ ⊨[ m ] subList τ bs brs⟨ di , subList τ ps , subList τ is , sub (lifts τ) P , ci ⟩ cs
+mot-sub : ∀ {σ n k m₀} {τ : Fin n → Tm k} {Γ Δ di ps ixs P}
+  → m₀ ≤ᵐ evid → Subst σ m₀ τ Γ Δ
+  → Mot⊨ σ Γ di ps ixs P → Mot⊨ σ Δ di (subList τ ps) ixs (sub (lifts τ) P)
 
 ≤-fieldMode : ∀ {m₀ m} → m₀ ≤ᵐ m → ∀ q → m₀ ≤ᵐ fieldMode q m
 ≤-fieldMode _  erased = ≤ᵐ-spec-top
@@ -707,13 +745,12 @@ brs-sub : ∀ {σ n k m₀ m} {τ : Fin n → Tm k} {Γ Δ bs di ps P ci cs}
 ⊨⁰-sub {τ = τ} le lm s (t-dty {d = d} lk) =
   conv (t-dty lk) (≈-≡ (sym (dtyType-sub τ (DataDecl.pqtys d) (DataDecl.idxs d))))
 ⊨⁰-sub {τ = τ} le lm s (t-ctor sp c) = conv (t-ctor (Spine-sub τ sp) (ca-sub le lm s c)) ≈-refl
-⊨⁰-sub {τ = τ} le lm s (t-mData {e = e} {di} {ps} {P = P} De lk ix lps W Bs) =
-  conv (t-mData (⊨-≡ (sub-appsFrom τ (dty di) ps) (⊨-sub le lm s De)) lk ix
-          (trans (subList-length τ ps) lps)
-          (subst (λ A → _ , ext _ affine A ⊨ _ wf) (sub-appsFrom τ (dty di) ps)
-            (wf-sub le (Subst-lifts s _ _) W))
-          (brs-sub le lm s Bs))
-    (≈-≡ (sym (sub-inst τ P e)))
+⊨⁰-sub {τ = τ} le lm s (t-mData {e = e} {di} {ps} {is} {P = P} De lk lps lis M Bs) =
+  conv (t-mData (⊨-≡ (trans (sub-appsFrom τ (dty di) (ps ++ is)) (cong (appsFrom (dty di)) (subList-++ τ ps is)))
+                   (⊨-sub le lm s De))
+          lk (trans (subList-length τ ps) lps) (trans (subList-length τ is) lis)
+          (mot-sub le s M) (brs-sub le lm s Bs))
+    (≈-≡ (sym (sub-motApp τ P is e)))
 ⊨⁰-sub {τ = τ} le lm s (t-def {d = d} lk al) =
   conv (t-def lk al) (≈-≡ (sym (closed-sub τ (Def.dtype d))))
 ⊨⁰-sub le lm s (t-ann W D) = conv (t-ann (wf-sub le s W) (⊨-sub le lm s D)) ≈-refl
@@ -742,9 +779,21 @@ ca-sub {τ = τ} le lm s (ca {i = i} {ps = ps} {idxs} {c = c} lk lkc lps lidx ip
       (▹-sub le lm s ar))
 
 brs-sub le lm s b-[] = b-[]
-brs-sub {τ = τ} le lm s (b-∷ {c = c} ip bt Db Bs) =
+brs-sub {τ = τ} le lm s (b-∷ {ps = ps} {c = c} ip bt Db Bs) =
   b-∷ (subst (λ T → InstParams _ T _ _) (closed-sub τ (Ctor.ctype c)) (InstParams-sub τ ip))
-    (BrTy-sub τ bt) (⊨-sub le lm s Db) (brs-sub le lm s Bs)
+    (subst (λ k → BrTy _ _ _ k _ _ _ _) (sym (subList-length τ ps)) (BrTy-sub τ bt))
+    (⊨-sub le lm s Db) (brs-sub le lm s Bs)
+brs-sub {τ = τ} le lm s (b-skip {ps = ps} {c = c} ip cl Bs) =
+  b-skip (subst (λ T → InstParams _ T _ _) (closed-sub τ (Ctor.ctype c)) (InstParams-sub τ ip))
+    (subst (λ k → Clash _ k _ _) (sym (subList-length τ ps)) (Clash-sub τ cl))
+    (brs-sub le lm s Bs)
+
+mot-sub {τ = τ} {di = di} {ps = ps} {ixs = []} le s W =
+  subst (λ A → _ , ext _ affine A ⊨ _ wf) (sub-appsFrom τ (dty di) ps)
+    (wf-sub le (Subst-lifts s _ _) W)
+mot-sub {τ = τ} {di = di} {ps = ps} {ixs = (q , T) ∷ ixs} le s D =
+  ⊨-≡ (trans (sub-motiveTail (lifts τ) di _ ixs) (cong (λ xs → motiveTail di xs ixs) (subList-acc τ ps)))
+    (⊨-ctx (cong (ext _ q) (closed-sub τ T)) (⊨-sub le ≤ᵐ-spec-top (Subst-lifts s q (closed T)) D))
 
 wf-sub le s wf-typ = wf-typ
 wf-sub le s (wf-pi WA WB) = wf-pi (wf-sub le s WA) (wf-sub le (Subst-lifts s _ _) WB)
@@ -831,68 +880,114 @@ ctor-inv () (t-letp _ _)
 -- Branches: the branch for constructor k.
 ------------------------------------------------------------------------
 
-brs-lookup : ∀ {σ n} {Γ : Ctx n} {m bs di ps P ci cs k b c}
-  → σ , Γ ⊨[ m ] bs brs⟨ di , ps , P , ci ⟩ cs
+-- The branch for constructor k: typed by BrTy, or skipped on a clash.
+data BrAt (σ : Sig) {n} (Γ : Ctx n) (m : Mode) (di np : ℕ) (ps is : List (Tm n))
+          (P : Tm (suc n)) (j : ℕ) (c : Ctor) (b : Tm n) : Set where
+  br-typed : ∀ {T X}
+    → InstParams σ (closed (Ctor.ctype c)) ps T
+    → BrTy σ di j np T P [] X
+    → σ , Γ ⊨[ m ] b ∶ X
+    → BrAt σ Γ m di np ps is P j c b
+  br-clash : ∀ {T}
+    → InstParams σ (closed (Ctor.ctype c)) ps T
+    → Clash σ np is T
+    → BrAt σ Γ m di np ps is P j c b
+
+brs-lookup : ∀ {σ n} {Γ : Ctx n} {m bs di ps is P ci cs k b c}
+  → σ , Γ ⊨[ m ] bs brs⟨ di , ps , is , P , ci ⟩ cs
   → lookupList bs k ≡ ok b → lookupList cs k ≡ ok c
-  → ∃ λ T → ∃ λ X → InstParams σ (closed (Ctor.ctype c)) ps T
-    × BrTy σ di (ci + k) T P [] X × σ , Γ ⊨[ m ] b ∶ X
+  → BrAt σ Γ m di (length ps) ps is P (ci + k) c b
 brs-lookup {σ = σ} {di = di} {P = P} {ci = ci} {k = zero} (b-∷ {T = T} {X = X} ip bt Db Bs) refl refl =
-  T , X , ip , subst (λ j → BrTy σ di j T P [] X) (sym (+-identityʳ ci)) bt , Db
-brs-lookup {σ = σ} {di = di} {P = P} {ci = ci} {k = suc k} (b-∷ ip bt Db Bs) lb lc
+  br-typed ip (subst (λ j → BrTy σ di j _ T P [] X) (sym (+-identityʳ ci)) bt) Db
+brs-lookup {k = zero} (b-skip ip cl Bs) refl refl = br-clash ip cl
+brs-lookup {σ = σ} {di = di} {ps = ps} {P = P} {ci = ci} {k = suc k} (b-∷ ip bt Db Bs) lb lc
   with brs-lookup Bs lb lc
-... | T , X , ip′ , bt′ , Db′ =
-  T , X , ip′ , subst (λ j → BrTy σ di j T P [] X) (sym (+-suc ci k)) bt′ , Db′
+... | br-typed {T = T} {X = X} ip′ bt′ Db′ =
+  br-typed ip′ (subst (λ j → BrTy σ di j (length ps) T P [] X) (sym (+-suc ci k)) bt′) Db′
+... | br-clash ip′ cl = br-clash ip′ cl
+brs-lookup {σ = σ} {di = di} {ps = ps} {P = P} {ci = ci} {k = suc k} (b-skip ip cl Bs) lb lc
+  with brs-lookup Bs lb lc
+... | br-typed {T = T} {X = X} ip′ bt′ Db′ =
+  br-typed ip′ (subst (λ j → BrTy σ di j (length ps) T P [] X) (sym (+-suc ci k)) bt′) Db′
+... | br-clash ip′ cl = br-clash ip′ cl
 brs-lookup {k = zero} b-[] () _
 brs-lookup {k = suc _} b-[] () _
 
 -- A branch applied to the constructor arguments has the motive at the
--- constructor application. The telescope ends in a dty spine, which is
--- what separates bt-pi from bt-end at each step.
-brApp : ∀ {σ n} {Γ : Ctx n} {m i j k T P acc X b qs} as
-  → BrTy σ i j T P acc X
+-- indices of the constructor's target and at the constructor
+-- application. The telescope ends in a dty spine, which is what
+-- separates bt-pi from bt-end at each step; at the end the target is
+-- convertible to the type of the application, so their indices agree.
+brApp : ∀ {σ n} {Γ : Ctx n} {m i j np T P acc X b R qs} as
+  → BrTy σ i j np T P acc X
   → σ , Γ ⊨[ m ] b ∶ X
-  → σ , Γ ⊨[ m ] T ▹ as ⇝ appsFrom (dty k) qs
-  → σ , Γ ⊨[ m ] appsFrom b as ∶ inst P (appsFrom (ctor i j) (acc ++ as))
-brApp {acc = acc} [] (bt-end sp c) Db (a-[] c′) rewrite ++-identityʳ acc = Db
-brApp {k = k} {qs = qs} [] (bt-pi c _ _) Db (a-[] c′) =
-  ⊥-elim (≈-Spine-shape dh-dty (Spine-appsFrom (dty k) qs) h-pi (≈-trans (≈-sym c′) c))
-brApp (a ∷ as) (bt-end sp c) Db (a-∷ c′ _ _) =
+  → σ , Γ ⊨[ m ] T ▹ as ⇝ R
+  → σ ⊢[ spec ] R ≈ appsFrom (dty i) qs
+  → σ , Γ ⊨[ m ] appsFrom b as ∶ motApp P (drop np qs) (appsFrom (ctor i j) (acc ++ as))
+brApp {i = i} {np = np} {P = P} {acc = acc} {qs = qs} [] (bt-end sp c) Db (a-[] c′) cR rewrite ++-identityʳ acc =
+  conv-≈ Db
+    (≈-motApp P
+      (≈L-drop np (proj₂ (≈-dty-inj sp (Spine-appsFrom (dty i) qs) (≈-trans (≈-sym c) (≈-trans c′ cR)))))
+      ≈-refl)
+brApp {i = i} {qs = qs} [] (bt-pi c _ _) Db (a-[] c′) cR =
+  ⊥-elim (≈-Spine-shape dh-dty (Spine-appsFrom (dty i) qs) h-pi (≈-trans (≈-sym cR) (≈-trans (≈-sym c′) c)))
+brApp (a ∷ as) (bt-end sp c) Db (a-∷ c′ _ _) _ =
   ⊥-elim (≈-Spine-shape dh-dty sp h-pi (≈-trans (≈-sym c) c′))
-brApp {σ = σ} {Γ = Γ} {m} {i} {j} {k} {P = P} {acc = acc} {b = b} {qs} (a ∷ as) (bt-pi {q = q} c rok bt) Db (a-∷ c′ Da ar)
+brApp {σ = σ} {Γ = Γ} {m} {i} {j} {np} {P = P} {acc = acc} {b = b} {qs = qs} (a ∷ as) (bt-pi {q = q} c rok bt) Db (a-∷ c′ Da ar) cR
   with ≈-pi-inj (≈-trans (≈-sym c′) c)
 ... | refl , cA , cB =
-  subst (λ xs → σ , Γ ⊨[ m ] appsFrom (app b a) as ∶ inst P (appsFrom (ctor i j) xs))
+  subst (λ xs → σ , Γ ⊨[ m ] appsFrom (app b a) as ∶ motApp P (drop np qs) (appsFrom (ctor i j) xs))
     (++-assoc acc (a ∷ []) as)
-    (brApp {k = k} {qs = qs} as (BrTy-inst a bt) (app-q q Db rok (conv-≈ Da cA))
-      (▹-≈ (≈-sub (instσ a) cB) ar))
+    (brApp as (BrTy-inst a bt) (app-q q Db rok (conv-≈ Da cA))
+      (▹-≈ (≈-sub (instσ a) cB) ar) cR)
 
-length-0 : ∀ {A : Set} (xs : List A) → length xs ≡ 0 → xs ≡ []
-length-0 [] _ = refl
-length-0 (_ ∷ _) ()
+-- A clashing telescope has no constructor application at the
+-- scrutinee's indices: along the arguments the telescope stays a
+-- clash, and at the end its target indices would be convertible to
+-- the clashing ones.
+Clash-▹ : ∀ {σ n} {Γ : Ctx n} {m np is T as R i qs}
+  → Clash σ np is T
+  → σ , Γ ⊨[ m ] T ▹ as ⇝ R
+  → σ ⊢[ spec ] R ≈ appsFrom (dty i) qs
+  → σ ⊢[ spec ] drop np qs ≈L is → ⊥
+Clash-▹ {np = np} {i = i} {qs = qs} (cl-end sp c cl) (a-[] c′) cR cis =
+  ClashL-≈L cl
+    (≈L-sym (≈L-trans
+      (≈L-drop np (proj₂ (≈-dty-inj sp (Spine-appsFrom (dty i) qs) (≈-trans (≈-sym c) (≈-trans c′ cR)))))
+      cis))
+Clash-▹ {i = i} {qs = qs} (cl-pi c _) (a-[] c′) cR _ =
+  ⊥-elim (≈-Spine-shape dh-dty (Spine-appsFrom (dty i) qs) h-pi (≈-trans (≈-sym cR) (≈-trans (≈-sym c′) c)))
+Clash-▹ (cl-end sp c _) (a-∷ c′ _ _) _ _ =
+  ⊥-elim (≈-Spine-shape dh-dty sp h-pi (≈-trans (≈-sym c) c′))
+Clash-▹ (cl-pi c cl) (a-∷ {a = a} c′ _ ar) cR cis with ≈-pi-inj (≈-trans (≈-sym c) c′)
+... | refl , _ , cB = Clash-▹ (Clash-≈ (≈-sub (instσ a) cB) (Clash-inst a cl)) ar cR cis
 
 -- ι-data: the scrutinee is a constructor spine of the matched type, so
--- its parameters are (convertible to) those of the match, and the
--- branch for that constructor applied to the arguments has the motive
--- at the scrutinee.
-pres-ιdata : ∀ {σ n} {Γ : Ctx n} {m i j as e di ps₀ d P bs b}
+-- its parameters and indices are (convertible to) those of the match;
+-- its branch is not a skipped one (Clash-▹), and applied to the
+-- arguments it has the motive at the constructor's indices and at the
+-- scrutinee (brApp), hence at the scrutinee's indices.
+pres-ιdata : ∀ {σ n} {Γ : Ctx n} {m i j as e di ps₀ is₀ d P bs b}
   → Spine (ctor i j) as e → lookupList bs j ≡ ok b
-  → σ , Γ ⊨[ m ] e ∶ appsFrom (dty di) ps₀
-  → lookupData σ di ≡ ok d → DataDecl.idxs d ≡ [] → length ps₀ ≡ nparams d
-  → σ , Γ ⊨[ m ] bs brs⟨ di , ps₀ , P , 0 ⟩ DataDecl.ctors d
-  → σ , Γ ⊨[ m ] appsFrom b as ∶ inst P e
-pres-ιdata {σ = σ} {Γ = Γ} {m} {as = as} {di = di} {ps₀} {P = P} {b = b} sp lkb (conv D c) lk ix lps Bs
+  → σ , Γ ⊨[ m ] e ∶ appsFrom (dty di) (ps₀ ++ is₀)
+  → lookupData σ di ≡ ok d → length ps₀ ≡ nparams d
+  → σ , Γ ⊨[ m ] bs brs⟨ di , ps₀ , is₀ , P , 0 ⟩ DataDecl.ctors d
+  → σ , Γ ⊨[ m ] appsFrom b as ∶ motApp P is₀ e
+pres-ιdata {σ = σ} {Γ = Γ} {m} {as = as} {di = di} {ps₀} {is₀} {P = P} {b = b} sp lkb (conv D c) lk lps Bs
   with ctor-inv sp D
 ... | ca {ps = ps} {idxs} lk′ lkc lps′ lidx ip ar
-  with ≈-dty-inj (Spine-appsFrom (dty _) (ps ++ idxs)) (Spine-appsFrom (dty di) ps₀) c
+  with ≈-dty-inj (Spine-appsFrom (dty _) (ps ++ idxs)) (Spine-appsFrom (dty di) (ps₀ ++ is₀)) c
 ... | refl , cps with ok-inj (trans (sym lk) lk′)
-... | refl with length-0 idxs (subst (λ is → length idxs ≡ length is) ix lidx)
-... | refl with brs-lookup Bs lkb lkc
-... | T′ , X , ip′ , bt , Db =
-  subst (λ e → σ , Γ ⊨[ m ] appsFrom b as ∶ inst P e) (sym (Spine-≡ sp))
-    (brApp {k = di} {qs = ps ++ []} as bt Db
-      (▹-≈ (InstParams-≈ ≈-refl
-              (subst (λ xs → σ ⊢[ spec ] xs ≈L ps₀) (++-identityʳ ps) cps) ip ip′)
-        ar))
+... | refl with ≈L-++-split (trans lps′ (sym lps)) cps
+... | cps′ , cidx with brs-lookup Bs lkb lkc
+... | br-typed {T = T′} {X} ip′ bt Db =
+  conv-≈
+    (subst (λ e → σ , Γ ⊨[ m ] appsFrom b as ∶ motApp P (drop (length ps₀) (ps ++ idxs)) e) (sym (Spine-≡ sp))
+      (brApp as bt Db (▹-≈ (InstParams-≈ ≈-refl cps′ ip ip′) ar) ≈-refl))
+    (≈-motApp P (subst (λ xs → σ ⊢[ spec ] xs ≈L is₀) (sym (drop-++ (length ps₀) ps idxs (trans lps′ (sym lps)))) cidx) ≈-refl)
+... | br-clash ip′ cl =
+  ⊥-elim (Clash-▹ (Clash-≈ (InstParams-≈ ≈-refl (≈L-sym cps′) ip′ ip) cl) ar ≈-refl
+    (subst (λ xs → σ ⊢[ spec ] xs ≈L is₀) (sym (drop-++ (length ps₀) ps idxs (trans lps′ (sym lps)))) cidx))
 
 -- The step may be taken in any mode m′: δ is justified by the typing's
 -- allowedDef, not the step's.
@@ -945,9 +1040,9 @@ pres⁰ wf le (t-rwt Deq W Dt) (rwt-e s) =
   conv (t-rwt (pres wf ≤ᵐ-evid Deq s) W Dt) ≈-refl
 -- data
 pres⁰ wf le (t-ctor sp _) s = ⊥-elim (Spine-no-step dh-ctor sp s)
-pres⁰ wf le (t-mData De lk ix lps W Bs) (ι-data sp lkb) = pres-ιdata sp lkb De lk ix lps Bs
-pres⁰ wf le (t-mData {P = P} De lk ix lps W Bs) (mData-e s) =
-  conv (t-mData (pres wf le De s) lk ix lps W Bs) (≈-inst P (step-≈ s))
+pres⁰ wf le (t-mData De lk lps lis M Bs) (ι-data sp lkb) = pres-ιdata sp lkb De lk lps Bs
+pres⁰ wf le (t-mData {is = is} {P = P} De lk lps lis M Bs) (mData-e s) =
+  conv (t-mData (pres wf le De s) lk lps lis M Bs) (≈-motApp P (≈L-refl is) (step-≈ s))
 -- ann
 pres⁰ wf le (t-ann W D) ann-e = D
 -- let (a, b) = (a₀, b₀) in t

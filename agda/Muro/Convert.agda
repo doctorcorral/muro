@@ -504,6 +504,18 @@ shape-unique h-pair h-pair = refl
 ...   | A″ , B″ , refl , rA , rB with pi-⇛* uv
 ...     | _ , _ , refl , rA′ , rB′ = refl , join→≈ rA rA′ , join→≈ rB rB′
 
+≈-su-inj : ∀ {σ m n} {a b : Tm n}
+  → σ ⊢[ m ] su a ≈ su b → σ ⊢[ m ] a ≈ b
+≈-su-inj c with ≈→join c
+... | v , tv , uv with su-⇛* tv
+...   | _ , refl , ra with su-⇛* uv
+...     | _ , refl , rb = join→≈ ra rb
+
+-- su and ze are not convertible.
+≈-su-ze : ∀ {σ m n} {a : Tm n} → σ ⊢[ m ] su a ≈ ze → ⊥
+≈-su-ze c with ≈-shape h-su h-ze c
+... | ()
+
 ≈-prod-inj : ∀ {σ m n} {A A′ B B′ : Tm n}
   → σ ⊢[ m ] prod A B ≈ prod A′ B′
   → (σ ⊢[ m ] A ≈ A′) × (σ ⊢[ m ] B ≈ B′)

@@ -102,7 +102,7 @@ agda/Muro/Wall.agda     mode wall lemmas
 agda/Muro/Consistency.agda  Empty-nf, progress, preservation at Empty; Empty-evid is not proved
 agda/Muro/Soundness.agda  Check says yes → ⊢ derives it, on the fragment
 agda/Muro/Soundness/Conv.agda   whnf-sound, conv-sound
-agda/Muro/Soundness/Views.agda  views, isData-sound, GoodSig, instParams / forces on a telescope
+agda/Muro/Soundness/Views.agda  views, isData-sound, GoodSig, instParams / index clashes on a telescope
 test/muro_check_test.exs
 ```
 
