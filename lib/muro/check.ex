@@ -6,9 +6,9 @@ defmodule Muro.Check do
 
   alias Muro.{Ast, Subst}
 
-  # Default fuel. Fuel bounds reduction (whnf, conversion, isData, index
-  # matching) and the substitution of a forced match argument; everything
-  # else is structural recursion on the term, as in Agda's Muro.Check.
+  # Default fuel. Fuel bounds reduction (whnf, conversion, isData, the
+  # index-clash test); everything else is structural recursion on the
+  # term, as in Agda's Muro.Check.
   # Running out is reported as an error, never as a silently unreduced term.
   @fuel 2000
   @out_of_fuel "out of fuel (the checker gave up reducing; raise the fuel)"
@@ -1538,13 +1538,13 @@ defmodule Muro.Check do
     with {:ok, rest} <- inst_params(k, book, c.type, params) do
       np = nparams_of(book, dname)
 
-      case analyze_forces(k, book, np, idxs, rest) do
+      case clashes(k, book, np, idxs, rest) do
         {:error, e} ->
           {:error, e}
 
-        # a clash: the constructor cannot produce the expected indices,
-        # its branch is skipped
-        {:ok, :clash} ->
+        # a clash: the constructor cannot produce the scrutinee's indices,
+        # its branch is consumed and not checked
+        {:ok, true} ->
           case bs do
             [] ->
               {:error, "missing branch for #{c.name}"}
@@ -1553,7 +1553,7 @@ defmodule Muro.Check do
               check_branches(k, book, rs, gamma, m, dname, sm, params, idxs, mot, cs, bs1)
           end
 
-        {:ok, forces} ->
+        {:ok, false} ->
           case bs do
             [] ->
               {:error, "missing branch for #{c.name}"}
@@ -1565,21 +1565,7 @@ defmodule Muro.Check do
                 wrapped = wrap_tel(rest, body)
 
                 with {:ok, u} <-
-                       check_br(
-                         k,
-                         book,
-                         rs,
-                         gamma,
-                         m,
-                         dname,
-                         c.name,
-                         sm,
-                         rest,
-                         wrapped,
-                         mot,
-                         [],
-                         forces
-                       ),
+                       check_br(k, book, rs, gamma, m, dname, c.name, sm, rest, wrapped, mot, []),
                      {:ok, v} <-
                        check_branches(
                          k,
@@ -1617,43 +1603,22 @@ defmodule Muro.Check do
   end
 
   # A branch of match against the constructor's telescope ty: one λ per
-  # remaining Π (a forced argument is instantiated instead of bound), then
-  # the body against the motive at the constructor applied to the arguments.
-  # sm: the scrutinee is a variable a self-call may descend on (scrut_ok),
-  # so a field of type D … is smaller; the fields of a computed scrutinee
-  # are not smaller than anything.
-  defp check_br(k, book, rs, gamma, m, dname, cname, sm, ty, br, mot, args, forces) do
+  # Π, then the body against the motive at the constructor's own target
+  # indices and the constructor applied to the arguments (Agda: checkBr /
+  # checkBrPi). sm: the scrutinee is a variable a self-call may descend on
+  # (scrut_ok), so a field of type D … is smaller; the fields of a
+  # computed scrutinee are not smaller than anything.
+  defp check_br(k, book, rs, gamma, m, dname, cname, sm, ty, br, mot, args) do
     with {:ok, ty1} <- whnf(k, book, ty) do
-      check_br_n(k, book, rs, gamma, m, dname, cname, sm, ty1, br, mot, args, forces)
+      check_br_n(k, book, rs, gamma, m, dname, cname, sm, ty1, br, mot, args)
     end
   end
 
-  defp check_br_n(k, book, rs, gamma, m, dname, cname, sm, ty1, br, mot, args, forces) do
+  defp check_br_n(k, book, rs, gamma, m, dname, cname, sm, ty1, br, mot, args) do
     case ty1 do
       {:pi, q, a, b} ->
-        case {forces, br} do
-          {[u | fs], {:lam, q1, a1, t}} when not is_nil(u) ->
-            with :ok <- if(q == q1, do: :ok, else: {:error, "λ/Π quantity mismatch"}),
-                 :ok <- check_ty(k, book, rs, gamma, a1),
-                 :ok <- conv(k, book, a1, a) do
-              force_br(
-                k,
-                book,
-                rs,
-                gamma,
-                m,
-                dname,
-                cname,
-                sm,
-                Subst.inst(b, u),
-                Subst.inst(t, u),
-                mot,
-                args ++ [u],
-                fs
-              )
-            end
-
-          {[nil | fs], {:lam, q1, a1, t}} ->
+        case br do
+          {:lam, q1, a1, t} ->
             rec? = sm and is_d_type?(book, dname, a)
             rs2 = ext_rec(rs, rec?, rec?)
             args1 = Enum.map(args, &Subst.wk/1) ++ [{:var, 0}]
@@ -1674,18 +1639,14 @@ defmodule Muro.Check do
                      b,
                      t,
                      Subst.wk(mot),
-                     args1,
-                     wk_forces(fs)
+                     args1
                    ),
                  :ok <- check_bound(m, q, u0) do
               {:ok, us}
             end
 
-          {[_ | _], _} ->
+          _ ->
             {:error, "match branch expected a λ for a constructor argument"}
-
-          {[], _} ->
-            {:error, "constructor telescope / force list mismatch"}
         end
 
       _ ->
@@ -1695,21 +1656,6 @@ defmodule Muro.Check do
         ctor_tm = Subst.apps_from({:def, cname}, args)
         check(k, book, rs, gamma, m, br, Subst.apps_from(mot, idxs ++ [ctor_tm]))
     end
-  end
-
-  # A forced argument is substituted into the branch; the result is not a
-  # subterm, so the step spends a unit of fuel (Agda: forceBr).
-  defp force_br(0, _book, _rs, _gamma, _m, _dname, _cname, _sm, _ty, _br, _mot, _args, _forces),
-    do: {:error, @out_of_fuel}
-
-  defp force_br(k, book, rs, gamma, m, dname, cname, sm, ty, br, mot, args, forces),
-    do: check_br(k - 1, book, rs, gamma, m, dname, cname, sm, ty, br, mot, args, forces)
-
-  defp wk_forces(fs) do
-    Enum.map(fs, fn
-      nil -> nil
-      t -> Subst.wk(t)
-    end)
   end
 
   defp first_mot_lam(d, dname, params, p) do
@@ -1742,84 +1688,46 @@ defmodule Muro.Check do
     {:pi, q, t, motive_tail(dname, Enum.map(args, &Subst.wk/1) ++ [{:var, 0}], rest)}
   end
 
-  # Index clash / forcing. `{:ok, :clash}`: the constructor cannot produce
-  # the expected indices (its branch is skipped); `{:ok, forces}`: one entry
-  # per binder of tel, a forced term or nil.
-  defp analyze_forces(k, book, np, expected, tel) do
-    d = count_pis(tel)
+  # The index-clash test (Agda: clashes). `{:ok, true}`: some target index
+  # of the constructor's telescope tel is a numeral that differs from the
+  # scrutinee's index at that position (su against ze, under any number of
+  # matching su), so the constructor cannot occur; `{:ok, false}`
+  # otherwise. Each comparison reduces both sides, so it spends fuel.
+  defp clashes(k, book, np, expected, {:pi, _, _, b}),
+    do: clashes(k, book, np, expected, b)
 
-    case walk_forces(k, book, np, expected, tel, 0) do
-      {:ok, :clash} -> {:ok, :clash}
-      {:ok, pairs} -> {:ok, forces_for(d, pairs)}
+  defp clashes(k, book, np, expected, t) do
+    with {:ok, t1} <- whnf(k, book, t) do
+      {_h, args} = apps(t1)
+      clash_idxs(k, book, expected, Enum.drop(args, np))
+    end
+  end
+
+  defp clash_idxs(_k, _book, [], []), do: {:ok, false}
+
+  defp clash_idxs(k, book, [e | es], [t | ts]) do
+    case clash_idx(k, book, e, t) do
+      {:ok, true} -> {:ok, true}
+      {:ok, false} -> clash_idxs(k, book, es, ts)
       err -> err
     end
   end
 
-  defp walk_forces(k, book, np, expected, {:pi, _, _, b}, d),
-    do: walk_forces(k, book, np, expected, b, d + 1)
+  defp clash_idxs(_, _, _, _), do: {:error, "index telescope length mismatch"}
 
-  defp walk_forces(k, book, np, expected, t, d) do
-    with {:ok, t1} <- whnf(k, book, t) do
-      {_h, args} = apps(t1)
-      match_idxs(k, book, d, expected, Enum.drop(args, np))
-    end
-  end
+  defp clash_idx(0, _book, _e, _t), do: {:error, @out_of_fuel}
 
-  defp count_pis({:pi, _, _, b}), do: 1 + count_pis(b)
-  defp count_pis(_), do: 0
-
-  defp match_idxs(_k, _book, _d, [], []), do: {:ok, []}
-
-  defp match_idxs(k, book, d, [e | es], [t | ts]) do
-    case match_idx(k, book, d, e, t) do
-      {:ok, :clash} ->
-        {:ok, :clash}
-
-      {:ok, fs} ->
-        case match_idxs(k, book, d, es, ts) do
-          {:ok, :clash} -> {:ok, :clash}
-          {:ok, gs} -> {:ok, fs ++ gs}
-          err -> err
-        end
-
-      err ->
-        err
-    end
-  end
-
-  defp match_idxs(_, _, _, _, _), do: {:error, "index telescope length mismatch"}
-
-  # No metavariables: suc is inverted, a rigid mismatch is a clash, a
-  # variable is forced. Each inversion reduces both sides, so it spends a
-  # unit of fuel (Agda: matchIdx).
-  defp match_idx(0, _book, _d, _e, _t), do: {:error, @out_of_fuel}
-
-  defp match_idx(k, book, d, e, t) do
+  defp clash_idx(k, book, e, t) do
     with {:ok, e1} <- whnf(k - 1, book, e),
          {:ok, t1} <- whnf(k - 1, book, t) do
       case {e1, t1} do
-        {{:su, e2}, {:su, t2}} -> match_idx(k - 1, book, d, e2, t2)
-        {:ze, :ze} -> {:ok, []}
-        {{:su, _}, :ze} -> {:ok, :clash}
-        {:ze, {:su, _}} -> {:ok, :clash}
-        {e2, {:var, j}} when j < d -> {:ok, [{d - 1 - j, e2}]}
-        {_, _} -> {:ok, []}
+        {{:su, e2}, {:su, t2}} -> clash_idx(k - 1, book, e2, t2)
+        {{:su, _}, :ze} -> {:ok, true}
+        {:ze, {:su, _}} -> {:ok, true}
+        {_, _} -> {:ok, false}
       end
     end
   end
-
-  defp forces_for(0, _), do: []
-
-  defp forces_for(n, pairs) do
-    [lookup_force(pairs, 0) | forces_for(n - 1, shift_forces(pairs))]
-  end
-
-  defp lookup_force([], _), do: nil
-  defp lookup_force([{j, u} | rest], i), do: if(j == i, do: u, else: lookup_force(rest, i))
-
-  defp shift_forces([]), do: []
-  defp shift_forces([{0, _} | rest]), do: shift_forces(rest)
-  defp shift_forces([{j, u} | rest]), do: [{j - 1, u} | shift_forces(rest)]
 
   defp occurs_d?(i, {:def, n}), do: n == i
   defp occurs_d?(i, {:app, f, a}), do: occurs_d?(i, f) or occurs_d?(i, a)

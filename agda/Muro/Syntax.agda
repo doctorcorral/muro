@@ -38,7 +38,7 @@ data Tm (n : ℕ) : Set where
   unit  : Tm n
   one   : Tm n
   empty : Tm n
-  -- Non-indexed data: D params, constructor D.j, generic match.
+  -- Data: D params indices, constructor D.j, match with a motive.
   dty   : ℕ → Tm n
   ctor  : (di ci : ℕ) → Tm n
   mData : Tm n → Tm (suc n) → List (Tm n) → Tm n

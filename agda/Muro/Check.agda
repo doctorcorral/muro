@@ -15,10 +15,10 @@ module Muro.Check where
 open import Data.Bool.Base
   using (Bool; true; false; _∧_; _∨_; not; if_then_else_)
 open import Data.Empty using (⊥)
-open import Data.Fin.Base using (Fin; zero; suc; toℕ)
+open import Data.Fin.Base using (Fin; zero; suc)
 open import Data.List.Base as List using (List; []; _∷_; length; take; drop)
 open import Data.Maybe.Base using (Maybe; just; nothing)
-open import Data.Nat.Base using (ℕ; zero; suc; _≡ᵇ_; _<ᵇ_; _+_; _∸_)
+open import Data.Nat.Base using (ℕ; zero; suc; _≡ᵇ_; _+_)
 open import Data.Nat.Show using (show)
 open import Data.Product.Base using (_×_; _,_; proj₁; proj₂)
 open import Data.String.Base using (String; _++_)
@@ -457,7 +457,7 @@ data _,_⊢[_]_⇒_ σ Γ where
   ⇒-mData : ∀ {m di params idxs e P bs d}
     → lookupData σ di ≡ ok d
     → σ , Γ ⊢[ m ] e ⇐ appsFrom (dty di) (List._++_ params idxs)
-    → σ , Γ ⊢[ m ] mData e P bs ⇒ inst P e
+    → σ , Γ ⊢[ m ] mData e P bs ⇒ motApp P idxs e
 
   ⇒-mNat : ∀ {m e P z s}
     → σ , Γ ⊢[ m ] e ⇐ nat
@@ -871,87 +871,60 @@ selfApplied _    false rs i =
       then fail "recursive definition must be applied to its arguments"
       else ok tt
 
--- Index clash / forcing. Expected indices live at n; the constructor
--- target may mention ctor-argument variables (depth d). No metavars:
--- suc is inverted, a rigid mismatch is a clash (`nothing`: the
--- constructor cannot produce these indices and its branch is skipped),
--- a variable is forced. Each inversion of suc reduces both sides, so it
--- spends a unit of fuel.
+-- Index clash. Expected indices live at n; the constructor target may
+-- mention ctor-argument variables (depth d). No unification: su is
+-- inverted on both sides, a rigid mismatch of su against ze is a clash
+-- (the constructor cannot produce these indices and its branch is
+-- skipped), anything else says nothing. A constructor-argument variable
+-- in the target is never forced: the branch binds it and is typed at
+-- the constructor's own indices (Judgement.BrTy); a program that needs
+-- the index equation states it in the motive and uses rewrite. Each
+-- inversion of suc reduces both sides, so it spends a unit of fuel.
+data NatView {n} : Tm n → Set where
+  nv-su    : ∀ {t} → NatView (su t)
+  nv-ze    : NatView ze
+  nv-other : ∀ {t} → NatView t
+
+natView : ∀ {n} (t : Tm n) → NatView t
+natView (su t) = nv-su
+natView ze     = nv-ze
+natView t      = nv-other
+
 mutual
-  matchIdx : ∀ {n m} → ℕ → Sig → ℕ → Tm n → Tm m → Result (Maybe (List (ℕ × Tm n)))
-  matchIdx zero    _ _ _ _ = fail outOfFuel
-  matchIdx (suc k) σ d e t =
-    whnf k σ e >>= λ e′ → whnf k σ t >>= λ t′ → matchIdxN k σ d e′ t′
+  clashIdx : ∀ {n m} → ℕ → Sig → Tm n → Tm m → Result Bool
+  clashIdx zero    _ _ _ = fail outOfFuel
+  clashIdx (suc k) σ e t =
+    whnf k σ e >>= λ e′ → whnf k σ t >>= λ t′ → clashIdxN k σ e′ t′
 
-  matchIdxN : ∀ {n m} → ℕ → Sig → ℕ → Tm n → Tm m → Result (Maybe (List (ℕ × Tm n)))
-  matchIdxN k σ d (su e′) (su t′) = matchIdx k σ d e′ t′
-  matchIdxN k σ d ze      ze      = ok (just [])
-  matchIdxN k σ d (su _)  ze      = ok nothing
-  matchIdxN k σ d ze      (su _)  = ok nothing
-  matchIdxN k σ d e′      (var j) =
-    if toℕ j <ᵇ d
-    then ok (just ((d ∸ suc (toℕ j) , e′) ∷ []))
-    else ok (just [])
-  matchIdxN k σ d _       _       = ok (just [])
+  clashIdxN : ∀ {n m} → ℕ → Sig → Tm n → Tm m → Result Bool
+  clashIdxN k σ e′ t′ = clashIdxV k σ (natView e′) (natView t′)
 
-matchIdxs : ∀ {n m} → ℕ → Sig → ℕ → List (Tm n) → List (Tm m) → Result (Maybe (List (ℕ × Tm n)))
-matchIdxs _ _ _ []       []       = ok (just [])
-matchIdxs k σ d (e ∷ es) (t ∷ ts) =
-  matchIdx k σ d e t >>= λ where
-    nothing   → ok nothing
-    (just fs) → matchIdxs k σ d es ts >>= λ where
-      nothing   → ok nothing
-      (just gs) → ok (just (List._++_ fs gs))
-matchIdxs _ _ _ _ _ = fail "index telescope length mismatch"
+  clashIdxV : ∀ {n m} → ℕ → Sig → {e′ : Tm n} {t′ : Tm m} → NatView e′ → NatView t′ → Result Bool
+  clashIdxV k σ (nv-su {e″}) (nv-su {t″}) = clashIdx k σ e″ t″
+  clashIdxV k σ nv-su nv-ze = ok true
+  clashIdxV k σ nv-ze nv-su = ok true
+  clashIdxV k σ _     _     = ok false
 
-countPis : ∀ {n} → Tm n → ℕ
-countPis (pi _ _ B) = suc (countPis B)
-countPis _          = 0
+clashIdxs : ∀ {n m} → ℕ → Sig → List (Tm n) → List (Tm m) → Result Bool
+clashIdxs _ _ []       []       = ok false
+clashIdxs k σ (e ∷ es) (t ∷ ts) =
+  clashIdx k σ e t >>= λ where
+    true  → ok true
+    false → clashIdxs k σ es ts
+clashIdxs _ _ _ _ = fail "index telescope length mismatch"
 
-lookupForce : ∀ {n} → List (ℕ × Tm n) → ℕ → Maybe (Tm n)
-lookupForce [] _ = nothing
-lookupForce ((j , u) ∷ rest) i with i ≡ᵇ j
-... | true  = just u
-... | false = lookupForce rest i
-
-forcesFor : ∀ {n} → ℕ → List (ℕ × Tm n) → List (Maybe (Tm n))
-forcesFor zero    _  = []
-forcesFor (suc k) fs = lookupForce fs 0 ∷ forcesFor k (shift fs)
-  where
-    shift : ∀ {n} → List (ℕ × Tm n) → List (ℕ × Tm n)
-    shift [] = []
-    shift ((zero  , _) ∷ rest) = shift rest
-    shift ((suc j , u) ∷ rest) = (j , u) ∷ shift rest
-
--- Walk the constructor telescope to its target and match the target's
--- indices against the expected ones (d = number of binders passed).
-forcePairs : ∀ {n m} → ℕ → Sig → ℕ → List (Tm n) → ℕ → Tm m → Result (Maybe (List (ℕ × Tm n)))
-forcePairs k σ np expected d (pi _ _ B) = forcePairs k σ np expected (suc d) B
-forcePairs k σ np expected d t =
+-- Walk the constructor telescope to its target and compare the target's
+-- indices (after the np parameters) with the expected ones.
+clashes : ∀ {n m} → ℕ → Sig → ℕ → List (Tm n) → Tm m → Result Bool
+clashes k σ np expected (pi _ _ B) = clashes k σ np expected B
+clashes k σ np expected t =
   whnf k σ t >>= λ t′ →
-  matchIdxs k σ d expected (drop np (proj₂ (apps t′)))
+  clashIdxs k σ expected (drop np (proj₂ (apps t′)))
 
--- `nothing` is a clash; `just forces` has one entry per binder of tel.
-analyzeForces : ∀ {n} → ℕ → Sig → ℕ → List (Tm n) → Tm n → Result (Maybe (List (Maybe (Tm n))))
-analyzeForces k σ np expected tel =
-  forcePairs k σ np expected 0 tel >>= λ where
-    nothing      → ok nothing
-    (just pairs) → ok (just (forcesFor (countPis tel) pairs))
-
-wkForce : ∀ {n} → Maybe (Tm n) → Maybe (Tm (suc n))
-wkForce (just t) = just (wk t)
-wkForce nothing  = nothing
-
-wkForces : ∀ {n} → List (Maybe (Tm n)) → List (Maybe (Tm (suc n)))
-wkForces []       = []
-wkForces (x ∷ xs) = wkForce x ∷ wkForces xs
-
--- The block is structurally recursive on the term being checked, with
--- one exception: instantiating a forced constructor argument in a
--- match branch (forceBr) substitutes into the branch, so it spends a
--- unit of fuel instead. Types are never recursed on except by checkTy,
--- which recurses on the type as a term. A constructor spine is walked
--- from its head (inferCtorSpine), as an application is.
+-- The block is structurally recursive on the term being checked. Types
+-- are never recursed on except by checkTy, which recurses on the type
+-- as a term. A constructor spine is walked from its head
+-- (inferCtorSpine), as an application is.
 mutual
   infer : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Result (Tm n × UseVec n)
   infer k σ rs Γ m t = infer′ k σ rs Γ t m false
@@ -1014,28 +987,23 @@ mutual
       R′         → conv k σ R′ expected >> ok u
 
   -- A branch of match against the constructor's telescope ty: one λ per
-  -- remaining Π (a forced argument is instantiated instead of bound),
-  -- then the body against the motive at the constructor applied to the
+  -- remaining Π, then the body against the motive at the indices of the
+  -- constructor's target and at the constructor applied to the
   -- arguments. sm: the scrutinee is a variable a self-call may descend
   -- on (scrutOk), so a field of type D … is smaller; the fields of a
   -- computed scrutinee are not smaller than anything.
-  checkBr : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Bool → Tm n → Tm n → Tm n → List (Tm n) → List (Maybe (Tm n)) → Result (UseVec n)
-  checkBr k σ rs Γ m di ci sm ty br mot args forces with whnf k σ ty
+  checkBr : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Bool → Tm n → Tm n → Tm n → List (Tm n) → Result (UseVec n)
+  checkBr k σ rs Γ m di ci sm ty br mot args with whnf k σ ty
   ... | fail msg          = fail msg
-  ... | ok (pi q A B)     = checkBrPi k σ rs Γ m di ci sm q A B br mot args forces
+  ... | ok (pi q A B)     = checkBrPi k σ rs Γ m di ci sm q A B br mot args
   ... | ok ty′            =
     check k σ rs Γ m br
       (appsFrom mot
         (List._++_ (drop (nparamsOf σ di) (proj₂ (apps ty′)))
           (appsFrom (ctor di ci) args ∷ [])))
 
-  checkBrPi : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Bool → Qty → Tm n → Tm (suc n) → Tm n → Tm n → List (Tm n) → List (Maybe (Tm n)) → Result (UseVec n)
-  checkBrPi k σ rs Γ m di ci sm q A B (lam q′ A′ t) mot args (just u ∷ fs) =
-    guard "λ/Π quantity mismatch" (eqQty q q′) >>
-    checkTy k σ rs Γ A′ >>
-    conv k σ A′ A >>
-    forceBr k σ rs Γ m di ci sm (inst B u) (inst t u) mot (List._++_ args (u ∷ [])) fs
-  checkBrPi k σ rs Γ m di ci sm q A B (lam q′ A′ t) mot args (nothing ∷ fs) =
+  checkBrPi : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Bool → Qty → Tm n → Tm (suc n) → Tm n → Tm n → List (Tm n) → Result (UseVec n)
+  checkBrPi k σ rs Γ m di ci sm q A B (lam q′ A′ t) mot args =
     guard "λ/Π quantity mismatch" (eqQty q q′) >>
     checkTy k σ rs Γ A′ >>
     conv k σ A′ A >>
@@ -1043,68 +1011,54 @@ mutual
     let rec? = sm ∧ isDType di A
         rs′  = extRec rs rec? rec?
         args′ = List._++_ (renList suc args) (var zero ∷ [])
-    in checkBr k σ rs′ (ext Γ q A) m di ci sm B t (wk mot) args′ (wkForces fs) >>= λ uses →
+    in checkBr k σ rs′ (ext Γ q A) m di ci sm B t (wk mot) args′ >>= λ uses →
     let (u₀ , us) = headTailU uses
     in checkBound m q u₀ >> ok us
-  checkBrPi k σ rs Γ m di ci sm q A B _ mot args (_ ∷ _) =
+  checkBrPi k σ rs Γ m di ci sm q A B _ mot args =
     fail "match branch expected a λ for a constructor argument"
-  checkBrPi k σ rs Γ m di ci sm q A B _ mot args [] =
-    fail "constructor telescope / force list mismatch"
-
-  -- A forced argument is substituted into the branch; the result is not a
-  -- subterm, so the step spends a unit of fuel.
-  forceBr : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → ℕ → Bool → Tm n → Tm n → Tm n → List (Tm n) → List (Maybe (Tm n)) → Result (UseVec n)
-  forceBr zero    _ _  _ _ _  _  _  _  _  _   _    _      = fail outOfFuel
-  forceBr (suc k) σ rs Γ m di ci sm ty br mot args forces = checkBr k σ rs Γ m di ci sm ty br mot args forces
 
   nparamsOf : Sig → ℕ → ℕ
   nparamsOf σ i with lookupData σ i
   ... | ok d   = nparams d
   ... | fail _ = 0
 
+  -- One branch per constructor, in declaration order. A constructor
+  -- whose target indices clash with the scrutinee's cannot occur: its
+  -- branch is consumed and not checked.
   checkBranches : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → ℕ → Bool → List (Tm n) → List (Tm n) → Tm n → ℕ → List Ctor → List (Tm n) → Result (UseVec n)
   checkBranches _ _ _ _ _ _ _ _ _ _ _ [] [] = ok u0s
   checkBranches k σ rs Γ m di sm params idxs mot ci (c ∷ cs) bs =
     instParams k σ (closed (Ctor.ctype c)) params >>= λ rest →
-    analyzeForces k σ (nparamsOf σ di) idxs rest >>= λ where
-      -- a clash: the constructor cannot produce the expected indices,
-      -- its branch is skipped
-      nothing →
+    clashes k σ (nparamsOf σ di) idxs rest >>= λ where
+      true →
         case bs of λ where
           []        → fail ("missing branch for " ++ Ctor.cname c)
           (_ ∷ bs′) →
             checkBranches k σ rs Γ m di sm params idxs mot (suc ci) cs bs′
-      (just forces) →
+      false →
         case bs of λ where
           []        → fail ("missing branch for " ++ Ctor.cname c)
           (b ∷ bs′) →
-            checkBr k σ rs Γ m di ci sm rest b mot [] forces >>= λ u →
+            checkBr k σ rs Γ m di ci sm rest b mot [] >>= λ u →
             checkBranches k σ rs Γ m di sm params idxs mot (suc ci) cs bs′ >>= λ v →
             ok (combineAlt m u v)
   checkBranches _ _ _ _ _ _ _ _ _ _ _ [] (_ ∷ _) =
     fail "match branch count does not match constructors"
 
-  firstMotLam : ∀ {n} → ℕ → DataDecl → List (Tm n) → Tm (suc n) → Tm n
-  firstMotLam di d params P with DataDecl.idxs d
-  ... | []          = lam affine (appsFrom (dty di) params) P
-  ... | (q , T) ∷ _ = lam q (closed T) P
+  -- The motive as a λ: over the scrutinee when the data type has no
+  -- indices, otherwise over the first index (the rest of the motive's
+  -- telescope is the remaining indices and the scrutinee).
+  firstMotLam : ∀ {n} → ℕ → List (Qty × Tm 0) → List (Tm n) → Tm (suc n) → Tm n
+  firstMotLam di []            params P = lam affine (appsFrom (dty di) params) P
+  firstMotLam di ((q , T) ∷ _) params P = lam q (closed T) P
 
-  motiveTail : ∀ {n} → ℕ → List (Tm n) → List (Qty × Tm 0) → Tm n
-  motiveTail di args []             = pi affine (appsFrom (dty di) args) typ
-  motiveTail di args ((q , T) ∷ is) =
-    pi q (closed T) (motiveTail di (List._++_ (renList suc args) (var zero ∷ [])) is)
-
-  checkMotive : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → ℕ → List (Tm n) → List (Tm n) → Tm (suc n) → Result ⊤
-  checkMotive k σ rs Γ di params idxs P =
-    lookupData σ di >>= λ d →
-    case DataDecl.idxs d of λ where
-      [] →
-        checkTy k σ (extRec rs false false)
-          (ext Γ affine (appsFrom (dty di) params)) P
-      ((q , T) ∷ rest) →
-        let Γ1 = ext Γ q (closed T)
-            tail = motiveTail di (List._++_ (renList suc params) (var zero ∷ [])) rest
-        in check k σ (extRec rs false false) Γ1 spec P tail >>= λ _ → ok tt
+  checkMotive : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → ℕ → List (Qty × Tm 0) → List (Tm n) → Tm (suc n) → Result ⊤
+  checkMotive k σ rs Γ di [] params P =
+    checkTy k σ (extRec rs false false) (ext Γ affine (appsFrom (dty di) params)) P
+  checkMotive k σ rs Γ di ((q , T) ∷ rest) params P =
+    let Γ1 = ext Γ q (closed T)
+        tail = motiveTail di (List._++_ (renList suc params) (var zero ∷ [])) rest
+    in check k σ (extRec rs false false) Γ1 spec P tail >>= λ _ → ok tt
 
   -- The argument of an application (⇒-app-*), by the quantity of the Π.
   inferArg : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Qty → Tm n → UseVec n → Result (UseVec n)
@@ -1223,8 +1177,8 @@ mutual
     infer k σ rs Γ m e >>= λ (et , eu) →
     viewData k σ et >>= λ (di , params , idxs) →
     lookupData σ di >>= λ d →
-    checkMotive k σ rs Γ di params idxs P >>
-    let motFun = firstMotLam di d params P
+    checkMotive k σ rs Γ di (DataDecl.idxs d) params P >>
+    let motFun = firstMotLam di (DataDecl.idxs d) params P
     in checkBranches k σ rs Γ m di (scrutOk rs e) params idxs motFun 0 (DataDecl.ctors d) bs >>= λ bu →
     combine m eu bu >>= λ uses →
     ok (appsFrom motFun (List._++_ idxs (e ∷ [])) , uses)

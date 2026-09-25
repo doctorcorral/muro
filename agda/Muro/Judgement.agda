@@ -8,16 +8,18 @@
 --   Unit / one / mUnit,
 --   ≡ / refl / rewrite,
 --   data: dty (spec only), constructor applications (checked against
---     a dty spine), match on a non-indexed data type,
+--     a dty spine), match on a data type, indexed or not: the branch
+--     of a constructor whose target indices clash with the scrutinee's
+--     is skipped, every other branch binds all the constructor's
+--     fields and is typed at the motive at the constructor's own
+--     indices (no index is forced into the branch),
 --   def lookup (allowedDef),
 --   annotation,
 --   A × B / (a, b) / let (a, b) = e in t (the tensor eliminator, in
 --     both modes; fst / snd are surface sugar for it),
 --   uses as in Check (spec forgets; run/evid count).
 --
--- omitted = indexed data (match with forced indices) / ν / Tensor /
---   I64 / F32. dty and constructors of an
---   indexed type are typed; match on one is not.
+-- omitted = ν / Tensor / I64 / F32.
 -- ⊢ does not track RecSt descent and does not use fuel. It does not
 -- check the data declarations of σ (Check.checkData); Muro.Typing
 -- states what preservation needs of them.
@@ -41,13 +43,14 @@ open import Data.Empty using (⊥)
 open import Data.List.Base as List using (List; []; _∷_; _++_; length)
 open import Data.Unit.Base using (tt)
 open import Data.Fin.Base as Fin using ()
+open import Data.Product.Base using (_×_; _,_; ∃)
 open import Data.Nat.Base using (ℕ; zero; suc)
 open import Data.Vec.Base as Vec using ([]; _∷_)
 open import Relation.Binary.PropositionalEquality.Core using (_≡_; refl)
 
 open import Muro.Base
 open import Muro.Syntax
-open import Muro.Subst using (inst; motSuc; closed; appsFrom; wk)
+open import Muro.Subst using (inst; motSuc; closed; appsFrom; wk; motApp; motiveTail; renList)
 open import Muro.Env
 open import Muro.Convert using (_⊢[_]_≈_; ≈-trans; ≈-sym; ≈-ren)
 open import Muro.Spine using (Spine)
@@ -62,7 +65,7 @@ open import Muro.Data
 ------------------------------------------------------------------------
 
 infix 3 _,_⊢[_]_⇒_⊣_ _,_⊢[_]_⇐_⊣_ _,_⊢_wf
-infix 3 _,_⊢[_]_▹_⇝_⊣_ _,_⊢[_]_brs⟨_,_,_,_⟩_⊣_
+infix 3 _,_⊢[_]_▹_⇝_⊣_ _,_⊢[_]_brs⟨_,_,_,_,_⟩_⊣_
 
 data _,_⊢[_]_⇒_⊣_ (σ : Sig) {n} (Γ : Ctx n)
     : Mode → Tm n → Tm n → UseVec n → Set
@@ -71,8 +74,14 @@ data _,_⊢[_]_⇐_⊣_ (σ : Sig) {n} (Γ : Ctx n)
 data _,_⊢_wf (σ : Sig) {n} (Γ : Ctx n) : Tm n → Set
 data _,_⊢[_]_▹_⇝_⊣_ (σ : Sig) {n} (Γ : Ctx n)
     : Mode → Tm n → List (Tm n) → Tm n → UseVec n → Set
-data _,_⊢[_]_brs⟨_,_,_,_⟩_⊣_ (σ : Sig) {n} (Γ : Ctx n)
-    : Mode → List (Tm n) → ℕ → List (Tm n) → Tm (suc n) → ℕ → List Ctor → UseVec n → Set
+data _,_⊢[_]_brs⟨_,_,_,_,_⟩_⊣_ (σ : Sig) {n} (Γ : Ctx n)
+    : Mode → List (Tm n) → ℕ → List (Tm n) → List (Tm n) → Tm (suc n) → ℕ → List Ctor → UseVec n → Set
+-- The motive of a match on data type di at parameters ps, whose index
+-- telescope is ixs. Without indices it is a type over the scrutinee
+-- (Check.checkMotive: checkTy); with indices it is checked, under the
+-- first index, against the kind Π over the remaining indices and the
+-- scrutinee, ending in Type (Check: check against motiveTail).
+MotiveOk : ∀ (σ : Sig) {n} (Γ : Ctx n) → ℕ → List (Tm n) → List (Qty × Tm 0) → Tm (suc n) → Set
 
 -- A well-formed type is the sort Type, a kind Π (x : A) → K, or a small
 -- type (a term of type Type). Kinds are not small: Π (x : A) → Type is wf
@@ -196,21 +205,23 @@ data _,_⊢[_]_⇒_⊣_ σ Γ where
     → lookupData σ i ≡ ok d
     → σ , Γ ⊢[ spec ] dty i ⇒ dtyType (DataDecl.pqtys d) (DataDecl.idxs d) ⊣ u0s
 
-  -- match on a non-indexed data type. The scrutinee's type is read
-  -- through ≈ as dty di applied to its parameters (Check: viewData); the
-  -- motive is a type over the scrutinee; one branch per constructor in
-  -- declaration order, of the type BrTy gives. Check returns the motive
-  -- as a λ applied to the scrutinee, which is β-convertible to inst P e.
-  ⇒-mData : ∀ {m e E di ps d P bs eu bu uses}
+  -- match on a data type. The scrutinee's type is read through ≈ as
+  -- dty di applied to its parameters and indices (Check: viewData); the
+  -- motive is over the indices and the scrutinee (MotiveOk); one branch
+  -- per constructor in declaration order, typed by BrTy or skipped when
+  -- its indices clash. The type is the motive at the scrutinee's
+  -- indices and the scrutinee. Check returns the motive as a λ applied
+  -- to indices and scrutinee, which is β-convertible to motApp.
+  ⇒-mData : ∀ {m e E di ps is d P bs eu bu uses}
     → σ , Γ ⊢[ m ] e ⇒ E ⊣ eu
-    → σ ⊢[ spec ] E ≈ appsFrom (dty di) ps
+    → σ ⊢[ spec ] E ≈ appsFrom (dty di) (ps ++ is)
     → lookupData σ di ≡ ok d
-    → DataDecl.idxs d ≡ []
     → length ps ≡ nparams d
-    → σ , ext Γ affine (appsFrom (dty di) ps) ⊢ P wf
-    → σ , Γ ⊢[ m ] bs brs⟨ di , ps , P , 0 ⟩ DataDecl.ctors d ⊣ bu
+    → length is ≡ nidxs d
+    → MotiveOk σ Γ di ps (DataDecl.idxs d) P
+    → σ , Γ ⊢[ m ] bs brs⟨ di , ps , is , P , 0 ⟩ DataDecl.ctors d ⊣ bu
     → combine m eu bu ≡ ok uses
-    → σ , Γ ⊢[ m ] mData e P bs ⇒ inst P e ⊣ uses
+    → σ , Γ ⊢[ m ] mData e P bs ⇒ motApp P is e ⊣ uses
 
   ⇒-def : ∀ {m i d}
     → lookupDef σ i ≡ ok d
@@ -326,16 +337,30 @@ data _,_⊢[_]_▹_⇝_⊣_ σ Γ where
     → combineArg q m au asu ≡ ok uses
     → σ , Γ ⊢[ m ] T ▹ (as ++ (a ∷ [])) ⇝ inst B a ⊣ uses
 
-data _,_⊢[_]_brs⟨_,_,_,_⟩_⊣_ σ Γ where
-  brs-[] : ∀ {m di ps P ci}
-    → σ , Γ ⊢[ m ] [] brs⟨ di , ps , P , ci ⟩ [] ⊣ u0s
+-- Branches, one per constructor. A constructor whose telescope (at the
+-- parameters) targets indices clashing with the scrutinee's is skipped:
+-- its branch term is consumed, not typed (Check.checkBranches).
+data _,_⊢[_]_brs⟨_,_,_,_,_⟩_⊣_ σ Γ where
+  brs-[] : ∀ {m di ps is P ci}
+    → σ , Γ ⊢[ m ] [] brs⟨ di , ps , is , P , ci ⟩ [] ⊣ u0s
 
-  brs-∷ : ∀ {m di ps P ci c cs b bs T X u v}
+  brs-∷ : ∀ {m di ps is P ci c cs b bs T X u v}
     → InstParams σ (closed (Ctor.ctype c)) ps T
-    → BrTy σ di ci T P [] X
+    → BrTy σ di ci (length ps) T P [] X
     → σ , Γ ⊢[ m ] b ⇐ X ⊣ u
-    → σ , Γ ⊢[ m ] bs brs⟨ di , ps , P , suc ci ⟩ cs ⊣ v
-    → σ , Γ ⊢[ m ] (b ∷ bs) brs⟨ di , ps , P , ci ⟩ (c ∷ cs) ⊣ combineAlt m u v
+    → σ , Γ ⊢[ m ] bs brs⟨ di , ps , is , P , suc ci ⟩ cs ⊣ v
+    → σ , Γ ⊢[ m ] (b ∷ bs) brs⟨ di , ps , is , P , ci ⟩ (c ∷ cs) ⊣ combineAlt m u v
+
+  brs-skip : ∀ {m di ps is P ci c cs b bs T v}
+    → InstParams σ (closed (Ctor.ctype c)) ps T
+    → Clash σ (length ps) is T
+    → σ , Γ ⊢[ m ] bs brs⟨ di , ps , is , P , suc ci ⟩ cs ⊣ v
+    → σ , Γ ⊢[ m ] (b ∷ bs) brs⟨ di , ps , is , P , ci ⟩ (c ∷ cs) ⊣ v
+
+MotiveOk σ Γ di ps [] P =
+  σ , ext Γ affine (appsFrom (dty di) ps) ⊢ P wf
+MotiveOk σ Γ di ps ((q , T) ∷ ixs) P =
+  ∃ λ u → σ , ext Γ q (closed T) ⊢[ spec ] P ⇐ motiveTail di (renList Fin.suc ps ++ (var Fin.zero ∷ [])) ixs ⊣ u
 
 ------------------------------------------------------------------------
 -- Empty signature / empty context (for Wall and Consistency).

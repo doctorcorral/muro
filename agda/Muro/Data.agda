@@ -9,12 +9,20 @@
 --                     the constructor type T instantiated at the
 --                     parameters ps is R (Check.instParams: peel one Π
 --                     per parameter, seen through ≈).
---   BrTy σ i j T P acc X
+--   BrTy σ i j np T P acc X
 --                     X is the type of the branch for constructor i.j
---                     whose remaining telescope is T, with motive P and
---                     the constructor arguments seen so far acc
---                     (Check.checkBr: one Π per field, then the motive
---                     at the constructor applied to its fields).
+--                     of a data type with np parameters, whose remaining
+--                     telescope is T, with motive P and the constructor
+--                     arguments seen so far acc (Check.checkBr: one Π
+--                     per field, then the motive at the indices of the
+--                     constructor's target and at the constructor
+--                     applied to its fields).
+--   Clash σ np is T   the constructor with telescope T cannot produce a
+--                     value at the indices is: some target index and
+--                     the expected one are rigidly different Nat
+--                     constructors, under su (Check.clashes). Its
+--                     branch is skipped; Muro.Typing shows it never
+--                     fires.
 --
 -- All are closed under renaming and substitution, and InstParams is
 -- functional up to ≈. Nothing here mentions typing; Muro.Judgement and
@@ -25,7 +33,8 @@
 module Muro.Data where
 
 open import Data.Fin.Base using (Fin; zero; suc)
-open import Data.List.Base using (List; []; _∷_; _++_; take)
+open import Data.Empty using (⊥)
+open import Data.List.Base using (List; []; _∷_; _++_; take; drop; length)
 open import Data.Nat.Base as ℕ using (ℕ)
 open import Data.Product.Base using (_×_; _,_)
 open import Data.Unit.Base using (⊤; tt)
@@ -152,19 +161,88 @@ InstParams-≈ c (≈L-∷ cp cps) (ip-∷ c₁ ip₁) (ip-∷ c₂ ip₂)
 -- The type of a branch.
 ------------------------------------------------------------------------
 
-data BrTy (σ : Sig) (i j : ℕ) : ∀ {n} → Tm n → Tm (ℕ.suc n) → List (Tm n) → Tm n → Set where
+-- List facts used below.
+renList-drop : ∀ {n k} (ρ : Fin n → Fin k) m (as : List (Tm n))
+  → renList ρ (drop m as) ≡ drop m (renList ρ as)
+renList-drop ρ ℕ.zero as = refl
+renList-drop ρ (ℕ.suc m) [] = refl
+renList-drop ρ (ℕ.suc m) (a ∷ as) = renList-drop ρ m as
+
+subList-drop : ∀ {n k} (τ : Fin n → Tm k) m (as : List (Tm n))
+  → subList τ (drop m as) ≡ drop m (subList τ as)
+subList-drop τ ℕ.zero as = refl
+subList-drop τ (ℕ.suc m) [] = refl
+subList-drop τ (ℕ.suc m) (a ∷ as) = subList-drop τ m as
+
+drop-++ : ∀ {A : Set} m (xs ys : List A) → length xs ≡ m → drop m (xs ++ ys) ≡ ys
+drop-++ ℕ.zero [] ys _ = refl
+drop-++ (ℕ.suc m) (x ∷ xs) ys eq = drop-++ m xs ys (cong ℕ.pred eq)
+
+≈L-drop : ∀ {σ m n} k {as bs : List (Tm n)} → σ ⊢[ m ] as ≈L bs → σ ⊢[ m ] drop k as ≈L drop k bs
+≈L-drop ℕ.zero c = c
+≈L-drop (ℕ.suc k) ≈L-[] = ≈L-[]
+≈L-drop (ℕ.suc k) (≈L-∷ _ c) = ≈L-drop k c
+
+≈L-++ : ∀ {σ m n} {as bs cs ds : List (Tm n)}
+  → σ ⊢[ m ] as ≈L bs → σ ⊢[ m ] cs ≈L ds → σ ⊢[ m ] (as ++ cs) ≈L (bs ++ ds)
+≈L-++ ≈L-[] c′ = c′
+≈L-++ (≈L-∷ c cs) c′ = ≈L-∷ c (≈L-++ cs c′)
+
+≈L-++-split : ∀ {σ m n} {as bs cs ds : List (Tm n)} → length as ≡ length bs
+  → σ ⊢[ m ] (as ++ cs) ≈L (bs ++ ds) → (σ ⊢[ m ] as ≈L bs) × (σ ⊢[ m ] cs ≈L ds)
+≈L-++-split {as = []} {bs = []} _ c = ≈L-[] , c
+≈L-++-split {as = _ ∷ as} {bs = _ ∷ bs} len (≈L-∷ c cs) with ≈L-++-split {as = as} {bs = bs} (cong ℕ.pred len) cs
+... | c₁ , c₂ = ≈L-∷ c c₁ , c₂
+
+-- The motive at indices and scrutinee commutes with renaming and
+-- substitution, and is a congruence in the indices.
+ren-motApp : ∀ {n k} (ρ : Fin n → Fin k) (P : Tm (ℕ.suc n)) is (e : Tm n)
+  → ren ρ (motApp P is e) ≡ motApp (ren (lift ρ) P) (renList ρ is) (ren ρ e)
+ren-motApp ρ P [] e = ren-inst ρ P e
+ren-motApp ρ P (i ∷ is) e
+  rewrite ren-appsFrom ρ (inst P i) (is ++ (e ∷ [])) | ren-inst ρ P i | renList-++ ρ is (e ∷ []) = refl
+
+sub-motApp : ∀ {n k} (τ : Fin n → Tm k) (P : Tm (ℕ.suc n)) is (e : Tm n)
+  → sub τ (motApp P is e) ≡ motApp (sub (lifts τ) P) (subList τ is) (sub τ e)
+sub-motApp τ P [] e = sub-inst τ P e
+sub-motApp τ P (i ∷ is) e
+  rewrite sub-appsFrom τ (inst P i) (is ++ (e ∷ [])) | sub-inst τ P i | subList-++ τ is (e ∷ []) = refl
+
+≈-motApp : ∀ {σ n} (P : Tm (ℕ.suc n)) {is is′ : List (Tm n)} {e e′}
+  → σ ⊢[ spec ] is ≈L is′ → σ ⊢[ spec ] e ≈ e′ → σ ⊢[ spec ] motApp P is e ≈ motApp P is′ e′
+≈-motApp P ≈L-[] ce = ≈-inst P ce
+≈-motApp P (≈L-∷ ci cis) ce = ≈-appsFrom (≈-inst P ci) (≈L-++ cis (≈L-∷ ce ≈L-[]))
+
+-- The kind of a motive commutes with renaming and substitution.
+ren-motiveTail : ∀ {n k} (ρ : Fin n → Fin k) di (args : List (Tm n)) ixs
+  → ren ρ (motiveTail di args ixs) ≡ motiveTail di (renList ρ args) ixs
+ren-motiveTail ρ di args [] rewrite ren-appsFrom ρ (dty di) args = refl
+ren-motiveTail ρ di args ((q , T) ∷ ixs)
+  rewrite closed-ren ρ T | ren-motiveTail (lift ρ) di (renList suc args ++ (var zero ∷ [])) ixs
+        | renList-++ (lift ρ) (renList suc args) (var zero ∷ [])
+        | renList-ren (lift ρ) suc args | sym (renList-ren suc ρ args) = refl
+
+sub-motiveTail : ∀ {n k} (τ : Fin n → Tm k) di (args : List (Tm n)) ixs
+  → sub τ (motiveTail di args ixs) ≡ motiveTail di (subList τ args) ixs
+sub-motiveTail τ di args [] rewrite sub-appsFrom τ (dty di) args = refl
+sub-motiveTail τ di args ((q , T) ∷ ixs)
+  rewrite closed-sub τ T | sub-motiveTail (lifts τ) di (renList suc args ++ (var zero ∷ [])) ixs
+        | subList-++ (lifts τ) (renList suc args) (var zero ∷ [])
+        | subList-ren (lifts τ) suc args | sym (renList-sub suc τ args) = refl
+
+data BrTy (σ : Sig) (i j np : ℕ) : ∀ {n} → Tm n → Tm (ℕ.suc n) → List (Tm n) → Tm n → Set where
   bt-pi  : ∀ {n} {T : Tm n} {q A B P acc X}
     → σ ⊢[ spec ] T ≈ pi q A B
     → ReuseOk σ q A
-    → BrTy σ i j B (ren (lift suc) P) (renList suc acc ++ (var zero ∷ [])) X
-    → BrTy σ i j T P acc (pi q A X)
-  bt-end : ∀ {n} {T : Tm n} {P acc ps D}
-    → Spine (dty i) ps D
+    → BrTy σ i j np B (ren (lift suc) P) (renList suc acc ++ (var zero ∷ [])) X
+    → BrTy σ i j np T P acc (pi q A X)
+  bt-end : ∀ {n} {T : Tm n} {P acc qs D}
+    → Spine (dty i) qs D
     → σ ⊢[ spec ] T ≈ D
-    → BrTy σ i j T P acc (inst P (appsFrom (ctor i j) acc))
+    → BrTy σ i j np T P acc (motApp P (drop np qs) (appsFrom (ctor i j) acc))
 
-BrTy-≈ : ∀ {σ i j n} {T T′ : Tm n} {P acc X}
-  → σ ⊢[ spec ] T ≈ T′ → BrTy σ i j T P acc X → BrTy σ i j T′ P acc X
+BrTy-≈ : ∀ {σ i j np n} {T T′ : Tm n} {P acc X}
+  → σ ⊢[ spec ] T ≈ T′ → BrTy σ i j np T P acc X → BrTy σ i j np T′ P acc X
 BrTy-≈ c (bt-pi c′ rok bt) = bt-pi (≈-trans (≈-sym c) c′) rok bt
 BrTy-≈ c (bt-end sp c′) = bt-end sp (≈-trans (≈-sym c) c′)
 
@@ -212,26 +290,28 @@ subst₂ : ∀ {A B : Set} (F : A → B → Set) {a a′ b b′}
   → a ≡ a′ → b ≡ b′ → F a b → F a′ b′
 subst₂ F refl refl x = x
 
-BrTy-ren : ∀ {σ i j n k} (ρ : Fin n → Fin k) {T : Tm n} {P acc X}
-  → BrTy σ i j T P acc X
-  → BrTy σ i j (ren ρ T) (ren (lift ρ) P) (renList ρ acc) (ren ρ X)
+BrTy-ren : ∀ {σ i j np n k} (ρ : Fin n → Fin k) {T : Tm n} {P acc X}
+  → BrTy σ i j np T P acc X
+  → BrTy σ i j np (ren ρ T) (ren (lift ρ) P) (renList ρ acc) (ren ρ X)
 BrTy-ren ρ (bt-pi {q = q} {P = P} {acc = acc} c rok bt) =
   bt-pi (≈-ren ρ c) (ReuseOk-ren ρ q rok)
-    (subst₂ (λ P′ acc′ → BrTy _ _ _ _ P′ acc′ _) (ren-lift-suc ρ P) (renList-acc ρ acc)
+    (subst₂ (λ P′ acc′ → BrTy _ _ _ _ _ P′ acc′ _) (ren-lift-suc ρ P) (renList-acc ρ acc)
       (BrTy-ren (lift ρ) bt))
-BrTy-ren {i = i} {j = j} ρ (bt-end {P = P} {acc = acc} sp c)
-  rewrite ren-inst ρ P (appsFrom (ctor i j) acc) | ren-appsFrom ρ (ctor i j) acc =
+BrTy-ren {i = i} {j = j} {np = np} ρ (bt-end {P = P} {acc = acc} {qs = qs} sp c)
+  rewrite ren-motApp ρ P (drop np qs) (appsFrom (ctor i j) acc) | ren-appsFrom ρ (ctor i j) acc
+        | renList-drop ρ np qs =
   bt-end (Spine-ren ρ sp) (≈-ren ρ c)
 
-BrTy-sub : ∀ {σ i j n k} (τ : Fin n → Tm k) {T : Tm n} {P acc X}
-  → BrTy σ i j T P acc X
-  → BrTy σ i j (sub τ T) (sub (lifts τ) P) (subList τ acc) (sub τ X)
+BrTy-sub : ∀ {σ i j np n k} (τ : Fin n → Tm k) {T : Tm n} {P acc X}
+  → BrTy σ i j np T P acc X
+  → BrTy σ i j np (sub τ T) (sub (lifts τ) P) (subList τ acc) (sub τ X)
 BrTy-sub τ (bt-pi {q = q} {P = P} {acc = acc} c rok bt) =
   bt-pi (≈-sub τ c) (ReuseOk-sub τ q rok)
-    (subst₂ (λ P′ acc′ → BrTy _ _ _ _ P′ acc′ _) (sub-lift-suc τ P) (subList-acc τ acc)
+    (subst₂ (λ P′ acc′ → BrTy _ _ _ _ _ P′ acc′ _) (sub-lift-suc τ P) (subList-acc τ acc)
       (BrTy-sub (lifts τ) bt))
-BrTy-sub {i = i} {j = j} τ (bt-end {P = P} {acc = acc} sp c)
-  rewrite sub-inst τ P (appsFrom (ctor i j) acc) | sub-appsFrom τ (ctor i j) acc =
+BrTy-sub {i = i} {j = j} {np = np} τ (bt-end {P = P} {acc = acc} {qs = qs} sp c)
+  rewrite sub-motApp τ P (drop np qs) (appsFrom (ctor i j) acc) | sub-appsFrom τ (ctor i j) acc
+        | subList-drop τ np qs =
   bt-end (Spine-sub τ sp) (≈-sub τ c)
 
 -- Instantiating the field binder: the motive and the earlier arguments
@@ -258,9 +338,107 @@ inst-acc acc a =
     (cong (_++ (a ∷ []))
       (trans (subList-ren (instσ a) suc acc) (subList-var acc)))
 
-BrTy-inst : ∀ {σ i j n} {B : Tm (ℕ.suc n)} {P acc X} (a : Tm n)
-  → BrTy σ i j B (ren (lift suc) P) (renList suc acc ++ (var zero ∷ [])) X
-  → BrTy σ i j (inst B a) P (acc ++ (a ∷ [])) (inst X a)
+BrTy-inst : ∀ {σ i j np n} {B : Tm (ℕ.suc n)} {P acc X} (a : Tm n)
+  → BrTy σ i j np B (ren (lift suc) P) (renList suc acc ++ (var zero ∷ [])) X
+  → BrTy σ i j np (inst B a) P (acc ++ (a ∷ [])) (inst X a)
 BrTy-inst {P = P} {acc = acc} a bt =
-  subst₂ (λ P′ acc′ → BrTy _ _ _ _ P′ acc′ _) (inst-lift-suc P a) (inst-acc acc a)
+  subst₂ (λ P′ acc′ → BrTy _ _ _ _ _ P′ acc′ _) (inst-lift-suc P a) (inst-acc acc a)
     (BrTy-sub (instσ a) bt)
+
+------------------------------------------------------------------------
+-- Index clashes. Check.clashes walks the constructor telescope to its
+-- target and compares each target index with the expected one after
+-- whnf: su against su recurses, su against ze (either way) is a clash,
+-- anything else says nothing. A clash means the branch cannot fire.
+------------------------------------------------------------------------
+
+data ClashIdx (σ : Sig) {n} : Tm n → Tm n → Set where
+  ci-sz : ∀ {e t e′} → σ ⊢[ spec ] e ≈ su e′ → σ ⊢[ spec ] t ≈ ze → ClashIdx σ e t
+  ci-zs : ∀ {e t t′} → σ ⊢[ spec ] e ≈ ze → σ ⊢[ spec ] t ≈ su t′ → ClashIdx σ e t
+  ci-ss : ∀ {e t e′ t′} → σ ⊢[ spec ] e ≈ su e′ → σ ⊢[ spec ] t ≈ su t′
+    → ClashIdx σ e′ t′ → ClashIdx σ e t
+
+data ClashL (σ : Sig) {n} : List (Tm n) → List (Tm n) → Set where
+  cl-here  : ∀ {e t es ts} → ClashIdx σ e t → ClashL σ (e ∷ es) (t ∷ ts)
+  cl-there : ∀ {e t es ts} → ClashL σ es ts → ClashL σ (e ∷ es) (t ∷ ts)
+
+-- Clash σ np is T: the telescope T, of a constructor of a data type with
+-- np parameters, targets indices that clash with is.
+data Clash (σ : Sig) (np : ℕ) : ∀ {n} → List (Tm n) → Tm n → Set where
+  cl-pi  : ∀ {n} {is : List (Tm n)} {T q A B}
+    → σ ⊢[ spec ] T ≈ pi q A B
+    → Clash σ np (renList suc is) B
+    → Clash σ np is T
+  cl-end : ∀ {n} {is : List (Tm n)} {T qs D i}
+    → Spine (dty i) qs D
+    → σ ⊢[ spec ] T ≈ D
+    → ClashL σ is (drop np qs)
+    → Clash σ np is T
+
+-- Clashing indices are not convertible.
+ClashIdx-≈ : ∀ {σ n} {e t : Tm n} → ClashIdx σ e t → σ ⊢[ spec ] e ≈ t → ⊥
+ClashIdx-≈ (ci-sz ce ct) c = ≈-su-ze (≈-trans (≈-sym ce) (≈-trans c ct))
+ClashIdx-≈ (ci-zs ce ct) c = ≈-su-ze (≈-trans (≈-sym ct) (≈-trans (≈-sym c) ce))
+ClashIdx-≈ (ci-ss ce ct cl) c =
+  ClashIdx-≈ cl (≈-su-inj (≈-trans (≈-sym ce) (≈-trans c ct)))
+
+ClashL-≈L : ∀ {σ n} {es ts : List (Tm n)} → ClashL σ es ts → σ ⊢[ spec ] es ≈L ts → ⊥
+ClashL-≈L (cl-here cl) (≈L-∷ c _) = ClashIdx-≈ cl c
+ClashL-≈L (cl-there cl) (≈L-∷ _ cs) = ClashL-≈L cl cs
+
+Clash-≈ : ∀ {σ np n} {is : List (Tm n)} {T T′}
+  → σ ⊢[ spec ] T ≈ T′ → Clash σ np is T → Clash σ np is T′
+Clash-≈ c (cl-pi c′ cl) = cl-pi (≈-trans (≈-sym c) c′) cl
+Clash-≈ c (cl-end sp c′ cl) = cl-end sp (≈-trans (≈-sym c) c′) cl
+
+ClashIdx-ren : ∀ {σ n k} (ρ : Fin n → Fin k) {e t : Tm n}
+  → ClashIdx σ e t → ClashIdx σ (ren ρ e) (ren ρ t)
+ClashIdx-ren ρ (ci-sz ce ct) = ci-sz (≈-ren ρ ce) (≈-ren ρ ct)
+ClashIdx-ren ρ (ci-zs ce ct) = ci-zs (≈-ren ρ ce) (≈-ren ρ ct)
+ClashIdx-ren ρ (ci-ss ce ct cl) = ci-ss (≈-ren ρ ce) (≈-ren ρ ct) (ClashIdx-ren ρ cl)
+
+ClashIdx-sub : ∀ {σ n k} (τ : Fin n → Tm k) {e t : Tm n}
+  → ClashIdx σ e t → ClashIdx σ (sub τ e) (sub τ t)
+ClashIdx-sub τ (ci-sz ce ct) = ci-sz (≈-sub τ ce) (≈-sub τ ct)
+ClashIdx-sub τ (ci-zs ce ct) = ci-zs (≈-sub τ ce) (≈-sub τ ct)
+ClashIdx-sub τ (ci-ss ce ct cl) = ci-ss (≈-sub τ ce) (≈-sub τ ct) (ClashIdx-sub τ cl)
+
+ClashL-ren : ∀ {σ n k} (ρ : Fin n → Fin k) {es ts : List (Tm n)}
+  → ClashL σ es ts → ClashL σ (renList ρ es) (renList ρ ts)
+ClashL-ren ρ (cl-here cl) = cl-here (ClashIdx-ren ρ cl)
+ClashL-ren ρ (cl-there cl) = cl-there (ClashL-ren ρ cl)
+
+ClashL-sub : ∀ {σ n k} (τ : Fin n → Tm k) {es ts : List (Tm n)}
+  → ClashL σ es ts → ClashL σ (subList τ es) (subList τ ts)
+ClashL-sub τ (cl-here cl) = cl-here (ClashIdx-sub τ cl)
+ClashL-sub τ (cl-there cl) = cl-there (ClashL-sub τ cl)
+
+Clash-ren : ∀ {σ np n k} (ρ : Fin n → Fin k) {is : List (Tm n)} {T}
+  → Clash σ np is T → Clash σ np (renList ρ is) (ren ρ T)
+Clash-ren ρ (cl-pi {is = is} c cl) =
+  cl-pi (≈-ren ρ c)
+    (subst (λ xs → Clash _ _ xs _)
+      (trans (renList-ren (lift ρ) suc is) (sym (renList-ren suc ρ is)))
+      (Clash-ren (lift ρ) cl))
+Clash-ren {np = np} ρ (cl-end {qs = qs} sp c cl) =
+  cl-end (Spine-ren ρ sp) (≈-ren ρ c)
+    (subst (ClashL _ _) (renList-drop ρ np qs) (ClashL-ren ρ cl))
+
+Clash-sub : ∀ {σ np n k} (τ : Fin n → Tm k) {is : List (Tm n)} {T}
+  → Clash σ np is T → Clash σ np (subList τ is) (sub τ T)
+Clash-sub τ (cl-pi {is = is} c cl) =
+  cl-pi (≈-sub τ c)
+    (subst (λ xs → Clash _ _ xs _)
+      (trans (subList-ren (lifts τ) suc is) (sym (renList-sub suc τ is)))
+      (Clash-sub (lifts τ) cl))
+Clash-sub {np = np} τ (cl-end {qs = qs} sp c cl) =
+  cl-end (Spine-sub τ sp) (≈-sub τ c)
+    (subst (ClashL _ _) (subList-drop τ np qs) (ClashL-sub τ cl))
+
+-- Instantiating the field binder of a clash.
+Clash-inst : ∀ {σ np n} {is : List (Tm n)} {B : Tm (ℕ.suc n)} (a : Tm n)
+  → Clash σ np (renList suc is) B → Clash σ np is (inst B a)
+Clash-inst {is = is} a cl =
+  subst (λ xs → Clash _ _ xs _)
+    (trans (subList-ren (instσ a) suc is) (subList-var is))
+    (Clash-sub (instσ a) cl)

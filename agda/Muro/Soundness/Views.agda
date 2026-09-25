@@ -2,9 +2,9 @@
 ------------------------------------------------------------------------
 -- Soundness of the executable checker, part 2: the checker's views of a
 -- type (viewPi, viewId, viewData), isData, and what the proof assumes
--- of the signature (GoodSig: fragment, non-indexed data, constructor
--- types are telescopes ending in the data type), with instParams and
--- analyzeForces on such a telescope.
+-- of the signature (GoodSig: fragment, constructor types are telescopes
+-- ending in the data type at its parameters and indices), with
+-- instParams and the index-clash test on such a telescope.
 ------------------------------------------------------------------------
 
 module Muro.Soundness.Views where
@@ -23,6 +23,7 @@ open import Relation.Binary.PropositionalEquality.Core
 open import Muro.Base
 open import Muro.Syntax
 open import Muro.Subst
+open import Muro.SubstLemmas using (renList-ren)
 open import Muro.Env
 open import Muro.Spine
 open import Muro.Frag
@@ -31,8 +32,7 @@ open import Muro.Convert
 open import Muro.Data hiding (subst₂)
 open import Muro.Check
   using (whnf; apps; viewPi; viewId; viewProd; viewData; splitData; isData; isDataN; allData;
-         dataParamsData; instParams; analyzeForces; forcePairs; forcesFor; countPis;
-         wkForces; lookupForce; matchIdxs; nparamsOf)
+         dataParamsData; instParams; clashes; clashIdx; clashIdxN; clashIdxV; clashIdxs; NatView; nv-su; nv-ze; nv-other; natView; nparamsOf; firstMotLam)
 open import Muro.Typing using (typ-ext-suc)
 open import Muro.Soundness.Conv
 
@@ -389,10 +389,10 @@ reuseOk-sound k σ {A = A} reuse fs FA eq with isData k σ A in ieq
 ------------------------------------------------------------------------
 
 -- A constructor type: Π-binders, then the data type applied to exactly
--- np arguments (Check.checkTelPos with no indices).
-data Tel (i np : ℕ) : ∀ {n} → Tm n → Set where
-  tel-pi  : ∀ {n q} {A : Tm n} {B} → Tel i np B → Tel i np (pi q A B)
-  tel-end : ∀ {n} {as : List (Tm n)} {e} → Spine (dty i) as e → length as ≡ np → Tel i np e
+-- ar arguments, its parameters and indices (Check.checkTelPos).
+data Tel (i ar : ℕ) : ∀ {n} → Tm n → Set where
+  tel-pi  : ∀ {n q} {A : Tm n} {B} → Tel i ar B → Tel i ar (pi q A B)
+  tel-end : ∀ {n} {as : List (Tm n)} {e} → Spine (dty i) as e → length as ≡ ar → Tel i ar e
 
 Tel-ren : ∀ {i np n k} (ρ : Fin n → Fin k) {T : Tm n} → Tel i np T → Tel i np (ren ρ T)
 Tel-ren ρ (tel-pi tl) = tel-pi (Tel-ren (lift ρ) tl)
@@ -409,14 +409,13 @@ Tel-whnf : ∀ k σ {i np n} {T : Tm n} {r} → Tel i np T → whnf k σ T ≡ o
 Tel-whnf k σ (tel-pi _) eq = whnf-pi k σ eq
 Tel-whnf k σ (tel-end sp _) eq = whnf-dty k σ sp eq
 
--- Signatures the soundness theorem covers: in the fragment, data types
--- without indices, constructor types telescopes into their data type.
+-- Signatures the soundness theorem covers: in the fragment, constructor
+-- types telescopes into their data type at its parameters and indices.
 record GoodSig (σ : Sig) : Set where
   field
     frag   : FragSig σ
-    nonIdx : ∀ i d → lookupData σ i ≡ ok d → DataDecl.idxs d ≡ []
     tel    : ∀ i d → lookupData σ i ≡ ok d → ∀ j c → lookupCtor d j ≡ ok c
-             → Tel i (nparams d) (Ctor.ctype c)
+             → Tel i (nparams d + nidxs d) (Ctor.ctype c)
 
 -- The constructors still to be matched, with what is known of them.
 data CtorsOk (i np : ℕ) : List Ctor → Set where
@@ -432,14 +431,14 @@ ctorsOk-go (c ∷ cs) h with h 0 c refl
 ... | F , tl = co-∷ F tl (ctorsOk-go cs (λ j c′ e → h (suc j) c′ e))
 
 ctorsOk : ∀ {σ i d} → GoodSig σ → lookupData σ i ≡ ok d
-  → CtorsOk i (nparams d) (DataDecl.ctors d)
+  → CtorsOk i (nparams d + nidxs d) (DataDecl.ctors d)
 ctorsOk {σ} {i} {d} G leq =
   ctorsOk-go (DataDecl.ctors d)
     (λ j c e → FragCtors-lookup (proj₂ (FragSig.datas (GoodSig.frag G) i d leq)) e
              , GoodSig.tel G i d leq j c e)
 
 ------------------------------------------------------------------------
--- instParams, and the forces of a non-indexed telescope.
+-- instParams, and the index-clash test on a telescope.
 ------------------------------------------------------------------------
 
 instParams-sound : ∀ k σ {n} {T : Tm n} {ps R i np} → FragSig σ → Frag T → FragL ps
@@ -467,34 +466,66 @@ nparamsOf-ok : ∀ {σ i d} → lookupData σ i ≡ ok d → nparamsOf σ i ≡ 
 nparamsOf-ok {σ} {i} eq with lookupData σ i
 nparamsOf-ok refl | ok d = refl
 
--- Forces of a non-indexed telescope: one `nothing` per binder.
-noForces : ∀ {n m} → Tm m → List (Maybe (Tm n))
-noForces T = forcesFor (countPis T) []
+-- The clash test is sound: a reported clash is a Clash. The expected
+-- indices and the telescope live in different contexts (Check compares
+-- them syntactically after whnf, which only looks at su and ze); the
+-- statement renames the indices into the telescope's context, and the
+-- renaming grows by one under each binder.
+clashIdx-sound : ∀ k σ {n m} (ρ : Fin n → Fin m) {e : Tm n} {t : Tm m} → FragSig σ → Frag e → Frag t
+  → clashIdx k σ e t ≡ ok true → ClashIdx σ (ren ρ e) t
+clashIdx-sound (suc k) σ ρ {e} {t} fs Fe Ft eq with whnf k σ e in eeq
+... | fail _ = ⊥-elim (fail≢ok eq)
+... | ok e′ with whnf k σ t in teq
+...   | fail _ = ⊥-elim (fail≢ok eq)
+...   | ok t′ with natView e′ | natView t′ | whnf-Frag k σ fs Fe eeq | whnf-Frag k σ fs Ft teq
+...     | nv-su | nv-su | f-su Fe″ | f-su Ft″ =
+  ci-ss (≈-ren ρ (whnf-≈ k σ fs Fe eeq)) (whnf-≈ k σ fs Ft teq)
+    (clashIdx-sound k σ ρ fs Fe″ Ft″ eq)
+...     | nv-su | nv-ze | _ | _ = ci-sz (≈-ren ρ (whnf-≈ k σ fs Fe eeq)) (whnf-≈ k σ fs Ft teq)
+...     | nv-ze | nv-su | _ | _ = ci-zs (≈-ren ρ (whnf-≈ k σ fs Fe eeq)) (whnf-≈ k σ fs Ft teq)
+...     | nv-su | nv-other | _ | _ = ⊥-elim (false≢true (ok-inj eq))
+  where false≢true : false ≡ true → ⊥
+        false≢true ()
+...     | nv-ze | nv-ze | _ | _ = ⊥-elim (false≢true (ok-inj eq))
+  where false≢true : false ≡ true → ⊥
+        false≢true ()
+...     | nv-ze | nv-other | _ | _ = ⊥-elim (false≢true (ok-inj eq))
+  where false≢true : false ≡ true → ⊥
+        false≢true ()
+...     | nv-other | _ | _ | _ = ⊥-elim (false≢true (ok-inj eq))
+  where false≢true : false ≡ true → ⊥
+        false≢true ()
 
-forcePairs-tel : ∀ k σ {n m} {np i d r} {T : Tm m} → Tel i np T
-  → forcePairs {n} k σ np [] d T ≡ ok r → r ≡ just []
-forcePairs-tel k σ (tel-pi tl) eq = forcePairs-tel k σ tl eq
-forcePairs-tel k σ {m = m} {np = np} {i = i} (tel-end {as = as} sp-[] len) eq
+clashIdxs-sound : ∀ k σ {n m} (ρ : Fin n → Fin m) {es : List (Tm n)} {ts : List (Tm m)} → FragSig σ
+  → FragL es → FragL ts → clashIdxs k σ es ts ≡ ok true → ClashL σ (renList ρ es) ts
+clashIdxs-sound k σ ρ fs fl-[] fl-[] eq = ⊥-elim (false≢true (ok-inj eq))
+  where false≢true : false ≡ true → ⊥
+        false≢true ()
+clashIdxs-sound k σ ρ {es = e ∷ es} {ts = t ∷ ts} fs (fl-∷ Fe Fes) (fl-∷ Ft Fts) eq with clashIdx k σ e t in ceq
+... | fail _ = ⊥-elim (fail≢ok eq)
+... | ok true = cl-here (clashIdx-sound k σ ρ fs Fe Ft ceq)
+... | ok false = cl-there (clashIdxs-sound k σ ρ fs Fes Fts eq)
+clashIdxs-sound k σ ρ fs fl-[] (fl-∷ _ _) eq = ⊥-elim (fail≢ok eq)
+clashIdxs-sound k σ ρ fs (fl-∷ _ _) fl-[] eq = ⊥-elim (fail≢ok eq)
+
+clashes-sound : ∀ k σ {n m i ar np} (ρ : Fin n → Fin m) {is : List (Tm n)} {T : Tm m} → FragSig σ
+  → FragL is → Frag T → Tel i ar T → clashes k σ np is T ≡ ok true → Clash σ np (renList ρ is) T
+clashes-sound k σ ρ {is = is} fs Fis (f-pi _ FB) (tel-pi tl) eq =
+  cl-pi ≈-refl
+    (subst (λ xs → Clash _ _ xs _) (sym (renList-ren suc ρ is))
+      (clashes-sound k σ (λ x → suc (ρ x)) fs Fis FB tl eq))
+clashes-sound k σ {m = m} {i = i} {np = np} ρ fs Fis FT (tel-end sp-[] len) eq
   with whnf k σ (dty {m} i) in weq
 ... | fail _ = ⊥-elim (fail≢ok eq)
-... | ok T′ with whnf-dty k σ {i = i} (sp-[] {h = dty i}) weq
-...   | refl rewrite drop-all np as len = sym (ok-inj eq)
-forcePairs-tel k σ {m = m} {np = np} (tel-end {as = as} (sp-snoc {f = f} {a = a} sp) len) eq
+... | ok T′ with whnf-dty k σ (sp-[] {h = dty {m} i}) weq
+...   | refl = cl-end (sp-[] {h = dty {m} i}) ≈-refl (clashIdxs-sound k σ ρ fs Fis (FragL-drop np fl-[]) eq)
+clashes-sound k σ {m = m} {np = np} ρ fs Fis FT (tel-end (sp-snoc {f = f} {a = a} sp) len) eq
   with whnf k σ (app {m} f a) in weq
 ... | fail _ = ⊥-elim (fail≢ok eq)
 ... | ok T′ with whnf-dty k σ (sp-snoc {a = a} sp) weq
-...   | refl rewrite Spine→unspine head-dty (sp-snoc {a = a} sp) | drop-all np as len = sym (ok-inj eq)
-
-analyzeForces-tel : ∀ k σ {n np i r} {T : Tm n} → Tel i np T
-  → analyzeForces k σ np [] T ≡ ok r → r ≡ just (noForces T)
-analyzeForces-tel k σ {n = n} {np} {T = T} tl eq with forcePairs {n} k σ np [] 0 T in feq
-... | fail _ = ⊥-elim (fail≢ok eq)
-... | ok r′ with forcePairs-tel k σ tl feq
-...   | refl = sym (ok-inj eq)
-
-wkForces-noForces : ∀ {n} c → wkForces {n} (forcesFor c []) ≡ forcesFor c []
-wkForces-noForces zero = refl
-wkForces-noForces (suc c) = cong (nothing ∷_) (wkForces-noForces c)
+...   | refl rewrite Spine→unspine head-dty (sp-snoc {a = a} sp) =
+  cl-end (sp-snoc sp) ≈-refl
+    (clashIdxs-sound k σ ρ fs Fis (FragL-drop np (proj₂ (Frag-Spine (sp-snoc {a = a} sp) FT))) eq)
 
 FragCtx-ext : ∀ {n} {Γ : Ctx n} {q A} → FragCtx Γ → Frag A → FragCtx (ext Γ q A)
 FragCtx-ext FΓ FA zero = Frag-wk FA
@@ -503,3 +534,21 @@ FragCtx-ext {Γ = Γ} {q} {A} FΓ FA (suc x) rewrite typ-ext-suc Γ q A x = Frag
 -- A branch applied to the motive: Check writes the motive as a λ.
 β-mot : ∀ {σ n q} {D : Tm n} {P e} → σ ⊢[ spec ] app (lam q D P) e ≈ inst P e
 β-mot = ≈-step (⇛-β (⇛-refl _) (⇛-refl _))
+
+-- Check writes the motive as a λ applied to indices and scrutinee.
+motApp-β : ∀ {σ n q} {D : Tm n} {P} is {e} → σ ⊢[ spec ] appsFrom (lam q D P) (is ++ (e ∷ [])) ≈ motApp P is e
+motApp-β [] = β-mot
+motApp-β (i ∷ is) {e} = ≈-appsFrom {as = is ++ (e ∷ [])} β-mot (≈L-refl _)
+
+-- The kind of a motive is in the fragment when its arguments and the
+-- index types are.
+Frag-motiveTail : ∀ {n} di {args : List (Tm n)} {ixs} → FragL args → FragIdxs ixs → Frag (motiveTail di args ixs)
+Frag-motiveTail di Fargs fi-[] = f-pi (Frag-appsFrom f-dty Fargs) f-typ
+Frag-motiveTail di Fargs (fi-∷ FT fi) =
+  f-pi (Frag-closed FT) (Frag-motiveTail di (FragL-++ (FragL-ren suc Fargs) (fl-∷ f-var fl-[])) fi)
+
+-- Check's motive λ: over the scrutinee, or over the first index.
+firstMotLam-form : ∀ {n} di {ixs} (params : List (Tm n)) (P : Tm (suc n)) → FragL params → FragIdxs ixs
+  → ∃ λ q → ∃ λ D → (firstMotLam di ixs params P ≡ lam q D P) × Frag D
+firstMotLam-form di params P Fps fi-[]        = affine , _ , refl , Frag-appsFrom f-dty Fps
+firstMotLam-form di params P Fps (fi-∷ FT _) = _ , _ , refl , Frag-closed FT

@@ -146,8 +146,8 @@ spec-⇐-uses : ∀ {σ n} {Γ : Ctx n} {e A u} →
   σ , Γ ⊢[ spec ] e ⇐ A ⊣ u → u ≡ u0s
 spec-args-uses : ∀ {σ n} {Γ : Ctx n} {T as R u} →
   σ , Γ ⊢[ spec ] T ▹ as ⇝ R ⊣ u → u ≡ u0s
-spec-brs-uses : ∀ {σ n} {Γ : Ctx n} {bs di ps P ci cs u} →
-  σ , Γ ⊢[ spec ] bs brs⟨ di , ps , P , ci ⟩ cs ⊣ u → u ≡ u0s
+spec-brs-uses : ∀ {σ n} {Γ : Ctx n} {bs di ps is P ci cs u} →
+  σ , Γ ⊢[ spec ] bs brs⟨ di , ps , is , P , ci ⟩ cs ⊣ u → u ≡ u0s
 
 spec-⇒-uses ⇒-var-spec = refl
 spec-⇒-uses ⇒-ze = refl
@@ -192,3 +192,4 @@ spec-args-uses (args-snoc {q = reuse}  _ _ _ eq) = sym (ok-inj eq)
 
 spec-brs-uses brs-[] = refl
 spec-brs-uses (brs-∷ _ _ _ _) = refl
+spec-brs-uses (brs-skip _ _ Bs) = spec-brs-uses Bs

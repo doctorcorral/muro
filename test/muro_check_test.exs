@@ -468,6 +468,40 @@ defmodule Muro.CheckTest do
     assert Muro.Vecs.lookup({:fzero, 0}, ones1) == {:suc, 0}
   end
 
+  # A branch is typed at its constructor's own indices: nothing is
+  # substituted for p. Without the equation in the motive, as : Vec A p is
+  # not a Vec A m, and the recursive call lookup A p j as has j : Fin m
+  # against Fin p.
+  test "an indexed match branch does not learn the scrutinee's index by itself" do
+    src = """
+    data Fin : Nat → Type where
+      fzero : Π (n : Nat) → Fin suc(n)
+      fsuc  : Π (n : Nat) → Fin n → Fin suc(n)
+
+    data Vec (A : Type) : Nat → Type where
+      vnil  : Vec A 0
+      vcons : Π (n : Nat) → A → Vec A n → Vec A suc(n)
+
+    def lookup : run Π (-A : Type) → Π (-n : Nat) → Π (i : Fin n) → Π (xs : Vec A n) → A :=
+      λ (-A : Type) → λ (-n : Nat) → λ (i : Fin n) → λ (xs : Vec A n) →
+        (match i motive (λ (k : Nat) → λ (_ : Fin k) → Vec A k → A)
+          | fzero m =>
+              λ (ys : Vec A suc(m)) →
+                (match ys motive (λ (k : Nat) → λ (_ : Vec A k) → A)
+                  | vnil => 0
+                  | vcons p a as => a)
+          | fsuc m j =>
+              λ (ys : Vec A suc(m)) →
+                (match ys motive (λ (k : Nat) → λ (_ : Vec A k) → A)
+                  | vnil => 0
+                  | vcons p a as => lookup A p j as)) xs
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    assert is_binary(msg)
+  end
+
   # Type is a sort. A kind (Π … → Type) is well-formed but is not a term of
   # type Type. Otherwise Type would be a retract of a small type (Girard).
   test "a kind is not a small type: Π, ×, and data fields" do
