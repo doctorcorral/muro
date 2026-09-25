@@ -23,7 +23,7 @@ term       ::= atom atom*                  -- juxtaposition is application
              | term "::" term              -- desugars to cons
              | term ("→" | "->") term      -- non-dependent, = Π (_ : A) → B
              | term "~" term               -- bisimulation (also prefix "bisim")
-atom       ::= "Type" | "Nat" | "I64" | "F32" | "Unit" | "Empty" | "refl" | "tt" | "0"
+atom       ::= "Type" | "Nat" | "I64" | "F32" | "Unit" | "Empty" | "refl" | "tt" | "0" | "?"
              | suc | pi | lam | let | match | matchEmpty | rewrite | idt
              | stream | unfold | uncons
              | "fst" atom | "snd" atom          -- sugar for let
@@ -71,6 +71,8 @@ Inside a `data` block each constructor declaration `ident ":" term` begins on it
 The parser only accepts `ν Stream` with constructor `uncons`. Other names are an error.
 
 Rejected as **tags** (not as ordinary identifiers): `live`, `dead`, `proof`, `proof evidence`, `ghost`, `comp`, `export`. There is no other tag.
+
+`?` is an unsolved goal. It parses. It never checks. See [Terms](language.md#holes).
 
 Not in the surface (present in the kernel AST only): `matchUnit`, annotations `{e : A}`, raw de Bruijn.
 

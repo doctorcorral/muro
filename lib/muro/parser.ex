@@ -3,21 +3,38 @@ defmodule Muro.Parser do
   Tiny .muro parser. Agda-looking: Π, λ, match, explicit types.
   """
 
+  alias Muro.Print
+
+  @src_key {__MODULE__, :src}
+
   def parse(src) when is_binary(src) do
-    case parse_book(skip(src)) do
-      {:ok, book, rest} ->
-        rest = skip(rest)
+    Process.put(@src_key, src)
 
-        if rest == "" do
-          {:ok, book}
-        else
-          {:error, "trailing input: #{String.slice(rest, 0, 40)}"}
-        end
+    try do
+      case parse_book(skip(src)) do
+        {:ok, book, rest} ->
+          rest = skip(rest)
 
-      other ->
-        other
+          if rest == "" do
+            {:ok, book}
+          else
+            {:error, err(rest, "trailing input: #{String.slice(rest, 0, 40)}")}
+          end
+
+        other ->
+          other
+      end
+    after
+      Process.delete(@src_key)
     end
   end
+
+  defp here(rest) do
+    src = Process.get(@src_key, "")
+    Print.offset_to_loc(src, max(0, byte_size(src) - byte_size(rest)))
+  end
+
+  defp err(rest, msg), do: "#{Print.loc_prefix(here(rest))}#{msg}"
 
   defp parse_book(s), do: parse_book(s, [])
 
@@ -74,6 +91,8 @@ defmodule Muro.Parser do
 
   # Parameters before `:`. Index telescope after `:` before Type.
   defp parse_data(s) do
+    loc = here(s)
+
     with {:ok, rest} <- kw(s, "data"),
          {:ok, name, rest} <- ident(skip(rest)),
          {:ok, params, rest} <- parse_param_binders(skip(rest)),
@@ -82,7 +101,7 @@ defmodule Muro.Parser do
          {:ok, indices} <- peel_indices(sort),
          {:ok, rest} <- kw(skip(rest), "where"),
          {:ok, ctors, rest} <- parse_ctors(skip(rest), []) do
-      {:ok, %{kind: :data, name: name, params: params, indices: indices, ctors: ctors}, rest}
+      {:ok, %{kind: :data, name: name, params: params, indices: indices, ctors: ctors, loc: loc}, rest}
     end
   end
 
@@ -127,6 +146,8 @@ defmodule Muro.Parser do
   end
 
   defp parse_def(s) do
+    loc = here(s)
+
     with {:ok, rest} <- kw(s, "def"),
          {:ok, name, rest} <- ident(skip(rest)),
          {:ok, rest} <- tok(skip(rest), ":"),
@@ -134,7 +155,7 @@ defmodule Muro.Parser do
          {:ok, ty, rest} <- parse_term(skip(rest), 0),
          {:ok, rest} <- tok(skip(rest), ":="),
          {:ok, body, rest} <- parse_term(skip(rest), 0) do
-      {:ok, Map.merge(%{name: name, type: ty, body: body}, tag), rest}
+      {:ok, Map.merge(%{name: name, type: ty, body: body, loc: loc}, tag), rest}
     end
   end
 
@@ -334,7 +355,7 @@ defmodule Muro.Parser do
         case s do
           <<c, _::binary>>
           when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_ or c == ?( or
-                 c == ?{ or c == ?[ ->
+                 c == ?{ or c == ?[ or c == ?? ->
             true
 
           _ ->
@@ -388,6 +409,9 @@ defmodule Muro.Parser do
 
       has_prefix?(s, "tt") ->
         {:ok, :one, after_kw(s, "tt")}
+
+      has_prefix?(s, "?") ->
+        {:ok, {:hole, here(s)}, after_kw(s, "?")}
 
       has_prefix?(s, "0") ->
         {:ok, :ze, after_kw(s, "0")}
@@ -476,7 +500,7 @@ defmodule Muro.Parser do
       true ->
         case ident(s) do
           {:ok, name, rest} -> {:ok, {:var_or_def, name}, rest}
-          _ -> {:error, "expected term at #{String.slice(s, 0, 30)}"}
+          _ -> {:error, err(s, "expected term")}
         end
     end
     |> resolve_name()
@@ -787,10 +811,10 @@ defmodule Muro.Parser do
       if rest == "" or not ident_char?(String.first(rest)) do
         {:ok, rest}
       else
-        {:error, "expected #{w}"}
+        {:error, err(s, "expected #{w}")}
       end
     else
-      {:error, "expected #{w}"}
+      {:error, err(s, "expected #{w}")}
     end
   end
 
@@ -799,7 +823,7 @@ defmodule Muro.Parser do
 
     if has_prefix?(s, t),
       do: {:ok, after_kw(s, t)},
-      else: {:error, "expected #{t}"}
+      else: {:error, err(s, "expected #{t}")}
   end
 
   defp ident(s) do
@@ -811,7 +835,7 @@ defmodule Muro.Parser do
         {:ok, n, rest}
 
       _ ->
-        {:error, "expected identifier"}
+        {:error, err(s, "expected identifier")}
     end
   end
 

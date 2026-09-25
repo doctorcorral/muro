@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.9.0
+
+The write / check / fix loop prints surface syntax. A conversion error says `Fin n`, not `#0`. A parse or check error starts with `line:col`. `?` is an unsolved goal: it always fails, with the expected type and the binders in scope. It is not a metavariable and it never inhabits, so it is not in ⊢ and not in the Agda kernel.
+
+### Language
+
+- `?` is an atom. The checker refuses it in every mode, infer or check, with `unsolved hole`, `expected: …`, and `context:`. Fill it; a book that still has a hole does not check.
+- Binder names on Π and λ are kept on the de Bruijn form so printed types use the names the program wrote.
+- Parse errors and definition errors are prefixed `line:col:`. A definition error names the definition and the part (`type`, `body`, `productivity`, or a constructor).
+
+### Elixir
+
+- `Muro.Print`: surface printer, `offset_to_loc/2`, `hole_message/4`.
+- `Muro.Parser`: source is kept for the duration of a parse; `def` / `data` carry `:loc`; `?` is `{:hole, loc}`.
+- `Muro.Check`: RecSt carries binder names; conversion and views print with them; holes never succeed.
+- `Muro.Emit` refuses a hole.
+
+### Manual
+
+- `language.md` (holes), `grammar.md`, `limits.md`, `for-agents.md`, `start.md`, `index.md`.
+
+### Package
+
+- Version 0.9.0.
+
 ## 0.8.0
 
 Preservation holds in every mode. The one premise that was not monotone in the mode, the equation of a `rewrite`, now is: it is checked in evidence inside a run or evidence term and in spec inside a spec term (`rwtMode`). A type may therefore rewrite along an erased equation; a run or evidence body still needs evidence.

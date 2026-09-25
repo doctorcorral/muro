@@ -102,6 +102,10 @@ defmodule Muro.LexerTest do
     assert Lexer.tokenize("[]") == [{:builtin, 0, 2}]
   end
 
+  test "? is punctuation" do
+    assert Lexer.tokenize("?") == [{:punctuation, 0, 1}]
+  end
+
   test "makeup tags are the slices of the source" do
     src = "def plus : run Nat := 0"
     tagged = MakeupLexer.lex(src)

@@ -2,7 +2,8 @@ defmodule Muro.Lexer do
   @moduledoc """
   Fragment lexer for highlighting.
 
-  `Muro.Parser.parse/1` accepts a whole book and drops positions. A manual
+  `Muro.Parser.parse/1` accepts a whole book and records `line:col` on
+  definitions and holes. A manual
   snippet is often not a book, so highlighting cannot call it. This lexer
   uses the same lexical rules as the parser (whitespace, `--` comments,
   word-bounded keywords, identifiers) and always returns a cover of the
@@ -177,7 +178,7 @@ defmodule Muro.Lexer do
   defp digits(<<c, rest::binary>>) when c in ?0..?9, do: 1 + digits(rest)
   defp digits(_), do: 0
 
-  defp take_mark(<<c, _::binary>>) when c in ~c"(){}[]|,:+-*=~", do: mark_kind(c)
+  defp take_mark(<<c, _::binary>>) when c in ~c"(){}[]|,:+-*=~?", do: mark_kind(c)
   defp take_mark(_), do: nil
 
   defp mark_kind(c) when c in ~c"+-*=~", do: {:operator, 1}

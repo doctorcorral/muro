@@ -181,7 +181,7 @@ defmodule Muro.CheckTest do
     assert {:ok, book} = Parser.parse(src)
     assert Check.check_sig(book) == :ok
     first = Enum.find(book, &(&1.name == "first"))
-    assert {:ok, {:lam, _, _, {:letp, {:var, 0}, {:var, 1}}}} = Ast.to_db(first.body)
+    assert {:ok, {:lam, _, _, _, {:letp, {:var, 0}, {:var, 1}}}} = Ast.to_db(first.body)
 
     out = Emit.emit_module(Muro.SecondEx, book)
     Code.eval_string(out)
@@ -932,5 +932,63 @@ defmodule Muro.CheckTest do
     assert_raise Mix.Error, ~r/positive/, fn ->
       Mix.Tasks.Muro.Check.run(["--fuel", "0"])
     end
+  end
+
+  test "parse errors carry line:col" do
+    assert {:error, msg} = Parser.parse("def x : run Nat :=")
+    assert msg =~ ~r/^\d+:\d+: /
+  end
+
+  test "a check error names the definition and prefixes line:col" do
+    src = "def bad : run Nat := tt\n"
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ ~r/^1:1: bad body:/
+    assert msg =~ "Unit ≁ Nat"
+  end
+
+  test "conversion prints surface types with binder names" do
+    src = """
+    def bad : run Π (n : Nat) → {n ≡ 0 : Nat} :=
+      λ (n : Nat) → n
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "Nat ≁ {n ≡ 0 : Nat}"
+    refute msg =~ "#0"
+  end
+
+  test "a hole fails with the expected type and the context" do
+    src = """
+    def gap : run Π (n : Nat) → Nat :=
+      λ (n : Nat) → ?
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "unsolved hole"
+    assert msg =~ "expected: Nat"
+    assert msg =~ "n : Nat"
+    assert msg =~ ~r/\d+:\d+: /
+  end
+
+  test "a hole in infer position still fails" do
+    src = "def gap : run Nat := ? 0\n"
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "unsolved hole"
+    assert msg =~ "expected: (none; infer)"
+  end
+
+  test "a hole never checks, including in spec" do
+    src = "def gap : spec Π (n : Nat) → Nat := λ (n : Nat) → ?\n"
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "unsolved hole"
+    assert msg =~ "expected: Nat"
   end
 end

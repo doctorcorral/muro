@@ -39,12 +39,12 @@ Agda is not what `mix muro.check` runs. Elixir is. If Agda and Elixir disagree, 
 
 ## What it is
 
-Bidirectional. Explicit. No holes.
+Bidirectional. Explicit. A `?` is an unsolved goal, not a solution.
 
 - One sort, `Type`. Not `Type : Type`, and a kind `Π (x : A) → Type` is not a term of type `Type` either.
 - Every binder is written `(x : A)`, or `(+ x : A)`, or `(- x : A)`.
 - Every `match` and `rewrite` writes its motive.
-- No metavariables, no implicits, no unification, no tactics.
+- No metavariables, no implicits, no unification, no tactics. `?` always fails.
 - A `run` or `evidence` variable is used at most once, unless `+` on Data.
 - Recursion in `run` and `evidence` must descend. Spec does not check descent.
 - Emitted code is `run` only.

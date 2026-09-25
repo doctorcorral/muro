@@ -17,7 +17,7 @@ In brief: this is what the parser and checker refuse today. It is a description 
 - Tactics
 - Implicits
 - Unification
-- Metavariables / holes
+- Metavariables / unification (`?` is an unsolved goal that always fails; it does not unify)
 - Quantities other than affine, `+`, and `-`
 - User-defined ν-predicates (Stream, Always, and `~` are the ones that exist)
 - `+` on Stream
@@ -51,6 +51,8 @@ The language was once described as *nothing dead runs* and *a proof never become
 
 ## If you need a hole
 
-You do not have one. Write the motive. Write the binder. If conversion fails, write a `rewrite` or a `match` until `refl` checks.
+Write `?`. The checker answers with the expected type and the context, then refuses the book. Fill the hole. `?` is not a metavariable and it is not in ⊢: a derivation never contains one.
+
+If conversion fails, the error is in surface syntax (`Fin n`, `{n ≡ 0 : Nat}`). Write a `rewrite` or a `match` until `refl` checks.
 
 That is the language.

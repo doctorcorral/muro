@@ -46,13 +46,15 @@ defmodule Muro.Ast do
           | {:addt, named, named}
           | {:toi64, named}
           | {:packi, named, named}
+          | {:hole, {pos_integer(), pos_integer()} | nil}
 
-  # de Bruijn. Indices count from the nearest binder (0).
+  # de Bruijn. Indices count from the nearest binder (0). Binder
+  # names on Π / λ are for errors only; lookup is still by index.
   @type db ::
           {:var, non_neg_integer()}
           | :typ
-          | {:pi, qty, db, db}
-          | {:lam, qty, db, db}
+          | {:pi, qty, db, name, db}
+          | {:lam, qty, db, name, db}
           | {:app, db, db}
           | :nat
           | :ze
@@ -84,6 +86,7 @@ defmodule Muro.Ast do
           | {:addt, db, db}
           | {:toi64, db}
           | {:packi, db, db}
+          | {:hole, {pos_integer(), pos_integer()} | nil}
 
   @type defn :: %{
           name: name,
@@ -121,16 +124,18 @@ defmodule Muro.Ast do
     end
   end
 
+  def to_db({:hole, loc}, _), do: {:ok, {:hole, loc}}
+
   def to_db({:pi, q, a, x, b}, env) do
     with {:ok, a1} <- to_db(a, env),
          {:ok, b1} <- to_db(b, [x | env]),
-         do: {:ok, {:pi, q, a1, b1}}
+         do: {:ok, {:pi, q, a1, x, b1}}
   end
 
   def to_db({:lam, q, a, x, t}, env) do
     with {:ok, a1} <- to_db(a, env),
          {:ok, t1} <- to_db(t, [x | env]),
-         do: {:ok, {:lam, q, a1, t1}}
+         do: {:ok, {:lam, q, a1, x, t1}}
   end
 
   def to_db({:app, f, a}, env) do
@@ -286,12 +291,14 @@ defmodule Muro.Ast do
          {:ok, bo1} <- to_db(bo) do
       base = %{name: n, mode: m, type: ty1, body: bo1}
 
-      {:ok,
-       if Map.has_key?(d, :export) do
-         Map.put(base, :export, d.export)
-       else
-         base
-       end}
+      base =
+        if Map.has_key?(d, :export) do
+          Map.put(base, :export, d.export)
+        else
+          base
+        end
+
+      {:ok, if(Map.has_key?(d, :loc), do: Map.put(base, :loc, d.loc), else: base)}
     end
   end
 
@@ -301,7 +308,8 @@ defmodule Muro.Ast do
     with {:ok, params1} <- params_to_db(params),
          {:ok, indices1} <- params_to_db(indices),
          {:ok, ctors1} <- ctors_to_db(params, ctors) do
-      {:ok, %{kind: :data, name: n, params: params1, indices: indices1, ctors: ctors1}}
+      base = %{kind: :data, name: n, params: params1, indices: indices1, ctors: ctors1}
+      {:ok, if(Map.has_key?(d, :loc), do: Map.put(base, :loc, d.loc), else: base)}
     end
   end
 

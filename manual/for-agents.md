@@ -16,9 +16,11 @@ In brief: two jobs. Do not mix them. This page is the operational contract. Huma
 - Write a `.muro` file against [Grammar](grammar.md).
 - Put new programs in `examples/` unless asked otherwise.
 - Check with `mix muro.check path.muro`. If the answer is `out of fuel`, the checker gave up reducing; it is not a type error. Retry with `mix muro.check --fuel 20000 path.muro`.
+- Read the error. Parse and check errors start with `line:col`. Conversion prints surface types (`Fin n`, not `#0`). A `?` prints `expected` and `context`; fill it.
 - Copy syntax from `examples/`, not from memory.
 - Keep every binder typed. Write every motive.
 - Use only tags `run`, `run internal`, `spec`, `evidence`.
+- Leave `?` only while a term is unfinished. A hole always fails and is not in the finished book.
 
 **Do not**
 
@@ -26,7 +28,7 @@ In brief: two jobs. Do not mix them. This page is the operational contract. Huma
 - Edit `lib/muro/*.ex`.
 - Edit `lib/mix/tasks/`.
 - Add a fourth representation (no raw HOAS as inductive syntax).
-- Invent tags, implicits, holes, or tactics.
+- Invent tags, implicits, metavariables, or tactics.
 - Promote a spec to evidence or evidence to run.
 - Treat this manual as ExDoc. Elixir API docs are `@moduledoc` / `mix docs`.
 
@@ -78,6 +80,7 @@ manual/                 this book (muro-lang.dev). Not ExDoc.
 examples/*.muro         programs
 lib/muro/parser.ex      .muro → named FOAS
 lib/muro/ast.ex         named FOAS, to_db
+lib/muro/print.ex       surface syntax, locations, hole messages
 lib/muro/subst.ex       de Bruijn subst
 lib/muro/check.ex       Elixir mirror of ⊢
 lib/muro/emit.ex        run → Elixir source
@@ -137,6 +140,6 @@ Elixir constraints when you are in Job B: ASCII identifiers only. Do not define 
 
 ## What is not in the language
 
-Type : Type, cubical, tactics, implicits, unification, metavariables, extra quantities, user-defined ν-predicates, `+` on Stream or Either, typing raw Elixir, emitting spec or evidence.
+Type : Type, cubical, tactics, implicits, unification, metavariables (a `?` always fails; it does not unify), extra quantities, user-defined ν-predicates, `+` on Stream or Either, typing raw Elixir, emitting spec or evidence.
 
 Full list: [Limits](limits.md).
