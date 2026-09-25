@@ -4,7 +4,7 @@ defmodule Muro.Check do
   from `Muro.Check` (`⇒-var-run`, `⇐-refl`, …). There is no promotion.
   """
 
-  alias Muro.{Ast, Subst}
+  alias Muro.{Ast, Print, Subst}
 
   # Default fuel. Fuel bounds reduction (whnf, conversion, isData, the
   # index-clash test); everything else is structural recursion on the
@@ -69,8 +69,24 @@ defmodule Muro.Check do
   # maximal application spine whose argument at pos is a smaller variable.
   # check_def tries each non-erased position (Agda: RecSt, checkBody).
 
-  defp empty_rec, do: %{self: nil, pos: 0, next_arg: nil, smaller: [], rec_ok: []}
-  defp def_rec(name, pos), do: %{self: name, pos: pos, next_arg: pos, smaller: [], rec_ok: []}
+  defp empty_rec, do: %{self: nil, pos: 0, next_arg: nil, smaller: [], rec_ok: [], names: []}
+
+  defp def_rec(name, pos),
+    do: %{self: name, pos: pos, next_arg: pos, smaller: [], rec_ok: [], names: []}
+
+  defp push_name(rs, x), do: %{rs | names: [x | Map.get(rs, :names, [])]}
+
+  defp names_of(rs, gamma) do
+    names = Map.get(rs, :names, [])
+    n = length(gamma)
+
+    cond do
+      length(names) >= n -> Enum.take(names, n)
+      true -> names ++ Enum.map(length(names)..(n - 1)//1, fn i -> "x#{i}" end)
+    end
+  end
+
+  defp shown(rs, gamma, t), do: Print.term(t, names_of(rs, gamma))
 
   defp ext_rec(rs, new_small, new_ok) do
     %{
@@ -228,7 +244,7 @@ defmodule Muro.Check do
 
   # The non-erased argument positions of a definition's type, read
   # syntactically: the candidates for the position a self-call descends on.
-  defp arg_positions({:pi, q, _, b}, j) do
+  defp arg_positions({:pi, q, _, _, b}, j) do
     if(q == :erased, do: [], else: [j]) ++ arg_positions(b, j + 1)
   end
 
@@ -242,7 +258,7 @@ defmodule Muro.Check do
 
   defp whnf(k, book, {:app, f, a}) do
     case whnf(k - 1, book, f) do
-      {:ok, {:lam, _, _, t}} -> whnf(k - 1, book, Subst.inst(t, a))
+      {:ok, {:lam, _, _, _, t}} -> whnf(k - 1, book, Subst.inst(t, a))
       {:ok, f1} -> {:ok, {:app, f1, a}}
       err -> err
     end
@@ -395,7 +411,7 @@ defmodule Muro.Check do
   defp run_ty_n(_book, :i64), do: true
   defp run_ty_n(_book, :f32ty), do: true
   defp run_ty_n(_book, {:tensor, _, _}), do: true
-  defp run_ty_n(book, {:pi, _, _, b}), do: run_ty_n(book, b)
+  defp run_ty_n(book, {:pi, _, _, _, b}), do: run_ty_n(book, b)
   defp run_ty_n(book, {:nu, f}), do: run_ty_n(book, f)
   defp run_ty_n(book, {:prod, a, b}), do: run_ty_n(book, a) and run_ty_n(book, b)
   defp run_ty_n(book, {:app, f, _}), do: run_ty_n(book, f)
@@ -406,165 +422,165 @@ defmodule Muro.Check do
 
   defp syn_eq(a, b), do: a == b
 
-  defp conv(0, _, _, _), do: {:error, @out_of_fuel}
+  defp conv(0, _, _, _, _), do: {:error, @out_of_fuel}
 
-  defp conv(k, book, u, v) do
+  defp conv(k, book, names, u, v) do
     if syn_eq(u, v) do
       :ok
     else
-      stuck_cong(k, book, u, v)
+      stuck_cong(k, book, names, u, v)
     end
   end
 
-  defp stuck_cong(k, book, u, v) do
+  defp stuck_cong(k, book, names, u, v) do
     case {apps(u), apps(v)} do
       {{{:def, i}, [a | as]}, {{:def, j}, [b | bs]}} ->
         if i == j and not ctor_head_book?(book, a) and not ctor_head_book?(book, b) do
-          with :ok <- conv(k - 1, book, a, b), do: conv_args(k - 1, book, as, bs)
+          with :ok <- conv(k - 1, book, names, a, b), do: conv_args(k - 1, book, names, as, bs)
         else
-          conv_whnf(k - 1, book, u, v)
+          conv_whnf(k - 1, book, names, u, v)
         end
 
       _ ->
-        conv_whnf(k - 1, book, u, v)
+        conv_whnf(k - 1, book, names, u, v)
     end
   end
 
-  defp conv_whnf(k, book, u, v) do
+  defp conv_whnf(k, book, names, u, v) do
     with {:ok, u1} <- whnf(k, book, u),
          {:ok, v1} <- whnf(k, book, v),
-         do: conv_n(k, book, u1, v1)
+         do: conv_n(k, book, names, u1, v1)
   end
 
-  defp conv_args(_k, _book, [], []), do: :ok
-  defp conv_args(_k, _book, _, []), do: {:error, "conv: spine length mismatch"}
-  defp conv_args(_k, _book, [], _), do: {:error, "conv: spine length mismatch"}
+  defp conv_args(_k, _book, _names, [], []), do: :ok
+  defp conv_args(_k, _book, _names, _, []), do: {:error, "conv: spine length mismatch"}
+  defp conv_args(_k, _book, _names, [], _), do: {:error, "conv: spine length mismatch"}
 
-  defp conv_args(k, book, [a | as], [b | bs]) do
-    with :ok <- conv(k, book, a, b), do: conv_args(k, book, as, bs)
+  defp conv_args(k, book, names, [a | as], [b | bs]) do
+    with :ok <- conv(k, book, names, a, b), do: conv_args(k, book, names, as, bs)
   end
 
-  defp conv_n(_k, _book, a, b) when a == b, do: :ok
-  defp conv_n(k, book, {:su, a}, {:su, b}), do: conv(k, book, a, b)
-  defp conv_n(_k, _book, {:var, i}, {:var, j}) when i == j, do: :ok
+  defp conv_n(_k, _book, _names, a, b) when a == b, do: :ok
+  defp conv_n(k, book, names, {:su, a}, {:su, b}), do: conv(k, book, names, a, b)
+  defp conv_n(_k, _book, _names, {:var, i}, {:var, j}) when i == j, do: :ok
 
-  defp conv_n(k, book, {:pi, q, a, b}, {:pi, q, a1, b1}) do
-    with :ok <- conv(k, book, a, a1), do: conv(k, book, b, b1)
+  defp conv_n(k, book, names, {:pi, q, a, x, b}, {:pi, q, a1, _, b1}) do
+    with :ok <- conv(k, book, names, a, a1), do: conv(k, book, [x | names], b, b1)
   end
 
-  defp conv_n(k, book, {:lam, q, a, t}, {:lam, q, a1, t1}) do
-    with :ok <- conv(k, book, a, a1), do: conv(k, book, t, t1)
+  defp conv_n(k, book, names, {:lam, q, a, x, t}, {:lam, q, a1, _, t1}) do
+    with :ok <- conv(k, book, names, a, a1), do: conv(k, book, [x | names], t, t1)
   end
 
-  defp conv_n(k, book, {:app, f, a}, {:app, g, b}) do
-    with :ok <- conv(k, book, f, g), do: conv(k, book, a, b)
+  defp conv_n(k, book, names, {:app, f, a}, {:app, g, b}) do
+    with :ok <- conv(k, book, names, f, g), do: conv(k, book, names, a, b)
   end
 
-  defp conv_n(k, book, {:idt, a, x, y}, {:idt, a1, x1, y1}) do
-    with :ok <- conv(k, book, a, a1),
-         :ok <- conv(k, book, x, x1),
-         do: conv(k, book, y, y1)
+  defp conv_n(k, book, names, {:idt, a, x, y}, {:idt, a1, x1, y1}) do
+    with :ok <- conv(k, book, names, a, a1),
+         :ok <- conv(k, book, names, x, x1),
+         do: conv(k, book, names, y, y1)
   end
 
-  defp conv_n(k, book, {:mnat, e, p, z, s}, {:mnat, e1, p1, z1, s1}) do
-    with :ok <- conv(k, book, e, e1),
-         :ok <- conv(k, book, p, p1),
-         :ok <- conv(k, book, z, z1),
-         do: conv(k, book, s, s1)
+  defp conv_n(k, book, names, {:mnat, e, p, z, s}, {:mnat, e1, p1, z1, s1}) do
+    with :ok <- conv(k, book, names, e, e1),
+         :ok <- conv(k, book, names, p, p1),
+         :ok <- conv(k, book, names, z, z1),
+         do: conv(k, book, names, s, s1)
   end
 
-  defp conv_n(k, book, {:memp, e, p}, {:memp, e1, p1}) do
-    with :ok <- conv(k, book, e, e1), do: conv(k, book, p, p1)
+  defp conv_n(k, book, names, {:memp, e, p}, {:memp, e1, p1}) do
+    with :ok <- conv(k, book, names, e, e1), do: conv(k, book, names, p, p1)
   end
 
-  defp conv_n(k, book, {:munit, e, p, u}, {:munit, e1, p1, u1}) do
-    with :ok <- conv(k, book, e, e1),
-         :ok <- conv(k, book, p, p1),
-         do: conv(k, book, u, u1)
+  defp conv_n(k, book, names, {:munit, e, p, u}, {:munit, e1, p1, u1}) do
+    with :ok <- conv(k, book, names, e, e1),
+         :ok <- conv(k, book, names, p, p1),
+         do: conv(k, book, names, u, u1)
   end
 
-  defp conv_n(k, book, {:rwt, e, p, t}, {:rwt, e1, p1, t1}) do
-    with :ok <- conv(k, book, e, e1),
-         :ok <- conv(k, book, p, p1),
-         do: conv(k, book, t, t1)
+  defp conv_n(k, book, names, {:rwt, e, p, t}, {:rwt, e1, p1, t1}) do
+    with :ok <- conv(k, book, names, e, e1),
+         :ok <- conv(k, book, names, p, p1),
+         do: conv(k, book, names, t, t1)
   end
 
-  defp conv_n(k, book, {:ann, e, a}, {:ann, e1, a1}) do
-    with :ok <- conv(k, book, e, e1), do: conv(k, book, a, a1)
+  defp conv_n(k, book, names, {:ann, e, a}, {:ann, e1, a1}) do
+    with :ok <- conv(k, book, names, e, e1), do: conv(k, book, names, a, a1)
   end
 
-  defp conv_n(k, book, {:prod, a, b}, {:prod, a1, b1}) do
-    with :ok <- conv(k, book, a, a1), do: conv(k, book, b, b1)
+  defp conv_n(k, book, names, {:prod, a, b}, {:prod, a1, b1}) do
+    with :ok <- conv(k, book, names, a, a1), do: conv(k, book, names, b, b1)
   end
 
-  defp conv_n(k, book, {:pair, a, b}, {:pair, a1, b1}) do
-    with :ok <- conv(k, book, a, a1), do: conv(k, book, b, b1)
+  defp conv_n(k, book, names, {:pair, a, b}, {:pair, a1, b1}) do
+    with :ok <- conv(k, book, names, a, a1), do: conv(k, book, names, b, b1)
   end
 
-  defp conv_n(k, book, {:letp, e, t}, {:letp, e1, t1}) do
-    with :ok <- conv(k, book, e, e1), do: conv(k, book, t, t1)
+  defp conv_n(k, book, names, {:letp, e, t}, {:letp, e1, t1}) do
+    with :ok <- conv(k, book, names, e, e1), do: conv(k, book, ["b", "a" | names], t, t1)
   end
 
-  defp conv_n(k, book, {:nu, f}, {:nu, f1}), do: conv(k, book, f, f1)
+  defp conv_n(k, book, names, {:nu, f}, {:nu, f1}), do: conv(k, book, names, f, f1)
 
-  defp conv_n(k, book, {:unf, s, f}, {:unf, s1, f1}) do
-    with :ok <- conv(k, book, s, s1), do: conv(k, book, f, f1)
+  defp conv_n(k, book, names, {:unf, s, f}, {:unf, s1, f1}) do
+    with :ok <- conv(k, book, names, s, s1), do: conv(k, book, names, f, f1)
   end
 
-  defp conv_n(k, book, {:ucons, s}, {:ucons, s1}), do: conv(k, book, s, s1)
+  defp conv_n(k, book, names, {:ucons, s}, {:ucons, s1}), do: conv(k, book, names, s, s1)
 
-  defp conv_n(k, book, {:tensor, d, s}, {:tensor, d1, s1}) do
-    with :ok <- conv(k, book, d, d1), do: conv(k, book, s, s1)
+  defp conv_n(k, book, names, {:tensor, d, s}, {:tensor, d1, s1}) do
+    with :ok <- conv(k, book, names, d, d1), do: conv(k, book, names, s, s1)
   end
 
-  defp conv_n(k, book, {:addi, x, y}, {:addi, x1, y1}) do
-    with :ok <- conv(k, book, x, x1), do: conv(k, book, y, y1)
+  defp conv_n(k, book, names, {:addi, x, y}, {:addi, x1, y1}) do
+    with :ok <- conv(k, book, names, x, x1), do: conv(k, book, names, y, y1)
   end
 
-  defp conv_n(k, book, {:muli, x, y}, {:muli, x1, y1}) do
-    with :ok <- conv(k, book, x, x1), do: conv(k, book, y, y1)
+  defp conv_n(k, book, names, {:muli, x, y}, {:muli, x1, y1}) do
+    with :ok <- conv(k, book, names, x, x1), do: conv(k, book, names, y, y1)
   end
 
-  defp conv_n(k, book, {:addt, t, u}, {:addt, t1, u1}) do
-    with :ok <- conv(k, book, t, t1), do: conv(k, book, u, u1)
+  defp conv_n(k, book, names, {:addt, t, u}, {:addt, t1, u1}) do
+    with :ok <- conv(k, book, names, t, t1), do: conv(k, book, names, u, u1)
   end
 
-  defp conv_n(k, book, {:toi64, t}, {:toi64, t1}), do: conv(k, book, t, t1)
+  defp conv_n(k, book, names, {:toi64, t}, {:toi64, t1}), do: conv(k, book, names, t, t1)
 
-  defp conv_n(k, book, {:packi, x, y}, {:packi, x1, y1}) do
-    with :ok <- conv(k, book, x, x1), do: conv(k, book, y, y1)
+  defp conv_n(k, book, names, {:packi, x, y}, {:packi, x1, y1}) do
+    with :ok <- conv(k, book, names, x, x1), do: conv(k, book, names, y, y1)
   end
 
-  defp conv_n(k, book, {:mdata, e, p, bs}, {:mdata, e1, p1, bs1}) do
-    with :ok <- conv(k, book, e, e1),
-         :ok <- conv(k, book, p, p1) do
-      conv_mdata_bs(k, book, bs, bs1)
+  defp conv_n(k, book, names, {:mdata, e, p, bs}, {:mdata, e1, p1, bs1}) do
+    with :ok <- conv(k, book, names, e, e1),
+         :ok <- conv(k, book, names, p, p1) do
+      conv_mdata_bs(k, book, names, bs, bs1)
     end
   end
 
-  defp conv_n(_k, _book, u, v),
-    do: {:error, "cannot convert #{inspect(u)} ≁ #{inspect(v)}"}
+  defp conv_n(_k, _book, names, u, v),
+    do: {:error, "cannot convert #{Print.term(u, names)} ≁ #{Print.term(v, names)}"}
 
-  defp conv_mdata_bs(_k, _book, [], []), do: :ok
+  defp conv_mdata_bs(_k, _book, _names, [], []), do: :ok
 
-  defp conv_mdata_bs(k, book, [{n, ar, b} | bs], [{n, ar, b1} | bs1]) do
-    with :ok <- conv(k, book, b, b1), do: conv_mdata_bs(k, book, bs, bs1)
+  defp conv_mdata_bs(k, book, names, [{n, ar, b} | bs], [{n, ar, b1} | bs1]) do
+    with :ok <- conv(k, book, names, b, b1), do: conv_mdata_bs(k, book, names, bs, bs1)
   end
 
-  defp conv_mdata_bs(_, _, _, _), do: {:error, "match branches do not convert"}
+  defp conv_mdata_bs(_, _, _, _, _), do: {:error, "match branches do not convert"}
 
-  defp view_pi(k, book, t) do
+  defp view_pi(k, book, t, names) do
     case whnf(k, book, t) do
-      {:ok, {:pi, q, a, b}} -> {:ok, {q, a, b}}
-      {:ok, t1} -> {:error, "expected Π, got #{inspect(t1)}"}
+      {:ok, {:pi, q, a, _, b}} -> {:ok, {q, a, b}}
+      {:ok, t1} -> {:error, "expected Π, got #{Print.term(t1, names)}"}
       err -> err
     end
   end
 
-  defp view_id(k, book, t) do
+  defp view_id(k, book, t, names) do
     case whnf(k, book, t) do
       {:ok, {:idt, a, x, y}} -> {:ok, {a, x, y}}
-      {:ok, t1} -> {:error, "expected Id, got #{inspect(t1)}"}
+      {:ok, t1} -> {:error, "expected Id, got #{Print.term(t1, names)}"}
       err -> err
     end
   end
@@ -603,25 +619,25 @@ defmodule Muro.Check do
   # packI shape: toI64 (suc (suc 0))
   defp i64two, do: {:toi64, {:su, {:su, :ze}}}
 
-  defp view_prod(k, book, t) do
+  defp view_prod(k, book, t, names) do
     case whnf(k, book, t) do
       {:ok, {:prod, a, b}} -> {:ok, {a, b}}
-      {:ok, t1} -> {:error, "expected ×, got #{inspect(t1)}"}
+      {:ok, t1} -> {:error, "expected ×, got #{Print.term(t1, names)}"}
       err -> err
     end
   end
 
-  defp view_nu(k, book, t) do
+  defp view_nu(k, book, t, names) do
     case whnf(k, book, t) do
       {:ok, {:nu, f}} -> {:ok, f}
-      {:ok, t1} -> {:error, "expected ν, got #{inspect(t1)}"}
+      {:ok, t1} -> {:error, "expected ν, got #{Print.term(t1, names)}"}
       err -> err
     end
   end
 
   # ⇒-bisim / ⇐-unf: σ ~ τ = ν R. {head σ ≡ head τ} × R
   defp payload_ty(k, book, f) do
-    case view_prod(k, book, Subst.inst(f, :unit)) do
+    case view_prod(k, book, Subst.inst(f, :unit), []) do
       {:ok, {a, _}} -> {:ok, a}
       err -> err
     end
@@ -629,10 +645,10 @@ defmodule Muro.Check do
 
   defp expand_bisim(k, book, rs, gamma, s, t) do
     with {:ok, {ts, _}} <- infer(k, book, rs, gamma, :spec, s),
-         {:ok, f} <- view_nu(k, book, ts),
+         {:ok, f} <- view_nu(k, book, ts, names_of(rs, gamma)),
          {:ok, a} <- payload_ty(k, book, f),
          {:ok, {tt, _}} <- infer(k, book, rs, gamma, :spec, t),
-         :ok <- conv(k, book, ts, tt) do
+         :ok <- conv(k, book, names_of(rs, gamma), ts, tt) do
       id = {:idt, a, {:letp, {:ucons, s}, {:var, 1}}, {:letp, {:ucons, t}, {:var, 1}}}
       {:ok, {:nu, {:prod, Subst.wk(id), {:var, 0}}}}
     end
@@ -647,14 +663,14 @@ defmodule Muro.Check do
         with {:ok, {:nu, f}} <- expand_bisim(k, book, rs, gamma, s, u), do: {:ok, f}
 
       {:ok, t1} ->
-        {:error, "expected ν, got #{inspect(t1)}"}
+        {:error, "expected ν, got #{Print.term(t1, names_of(rs, gamma))}"}
 
       err ->
         err
     end
   end
 
-  defp view_data(k, book, t) do
+  defp view_data(k, book, t, names) do
     with {:ok, t1} <- whnf(k, book, t) do
       {h, args} = apps(t1)
 
@@ -672,11 +688,11 @@ defmodule Muro.Check do
               end
 
             _ ->
-              {:error, "expected data type, got #{inspect(h)}"}
+              {:error, "expected data type, got #{Print.term(h, names)}"}
           end
 
         _ ->
-          {:error, "expected data type, got #{inspect(h)}"}
+          {:error, "expected data type, got #{Print.term(h, names)}"}
       end
     end
   end
@@ -717,8 +733,8 @@ defmodule Muro.Check do
   defp has_self?(self, {:addt, t, u}), do: has_self?(self, t) or has_self?(self, u)
   defp has_self?(self, {:toi64, t}), do: has_self?(self, t)
   defp has_self?(self, {:packi, x, y}), do: has_self?(self, x) or has_self?(self, y)
-  defp has_self?(self, {:lam, _, a, t}), do: has_self?(self, a) or has_self?(self, t)
-  defp has_self?(self, {:pi, _, a, b}), do: has_self?(self, a) or has_self?(self, b)
+  defp has_self?(self, {:lam, _, a, _, t}), do: has_self?(self, a) or has_self?(self, t)
+  defp has_self?(self, {:pi, _, a, _, b}), do: has_self?(self, a) or has_self?(self, b)
   defp has_self?(self, {:prod, a, b}), do: has_self?(self, a) or has_self?(self, b)
   defp has_self?(self, {:nu, f}), do: has_self?(self, f)
   defp has_self?(self, {:bisim, s, t}), do: has_self?(self, s) or has_self?(self, t)
@@ -731,8 +747,8 @@ defmodule Muro.Check do
   defp has_self?(_, _), do: false
 
   defp occurs?(x, {:var, y}), do: x == y
-  defp occurs?(x, {:pi, _, a, b}), do: occurs?(x, a) or occurs?(x + 1, b)
-  defp occurs?(x, {:lam, _, a, t}), do: occurs?(x, a) or occurs?(x + 1, t)
+  defp occurs?(x, {:pi, _, a, _, b}), do: occurs?(x, a) or occurs?(x + 1, b)
+  defp occurs?(x, {:lam, _, a, _, t}), do: occurs?(x, a) or occurs?(x + 1, t)
   defp occurs?(x, {:app, f, a}), do: occurs?(x, f) or occurs?(x, a)
   defp occurs?(x, {:su, t}), do: occurs?(x, t)
   defp occurs?(x, {:prod, a, b}), do: occurs?(x, a) or occurs?(x, b)
@@ -759,7 +775,7 @@ defmodule Muro.Check do
 
   defp spos?(_x, {:var, _}), do: true
   defp spos?(x, {:prod, a, b}), do: spos?(x, a) and spos?(x, b)
-  defp spos?(x, {:pi, _, a, b}), do: not occurs?(x, a) and spos?(x + 1, b)
+  defp spos?(x, {:pi, _, a, _, b}), do: not occurs?(x, a) and spos?(x + 1, b)
   defp spos?(x, {:nu, f}), do: not occurs?(x + 1, f)
   defp spos?(x, t), do: not occurs?(x, t)
 
@@ -771,7 +787,7 @@ defmodule Muro.Check do
     with {:ok, f1} <- whnf(k, book, f), do: go_unfold(f1, rs.self)
   end
 
-  defp go_unfold({:lam, _, _, t}, self), do: go_unfold(t, self)
+  defp go_unfold({:lam, _, _, _, t}, self), do: go_unfold(t, self)
 
   defp go_unfold({:pair, h, _}, self) do
     if has_self?(self, h),
@@ -787,7 +803,7 @@ defmodule Muro.Check do
     go_nu(ty, body)
   end
 
-  defp go_nu({:pi, _, _, b}, {:lam, _, _, t}), do: go_nu(b, t)
+  defp go_nu({:pi, _, _, _, b}, {:lam, _, _, _, t}), do: go_nu(b, t)
   defp go_nu({:nu, _}, {:unf, _, _}), do: :ok
   defp go_nu({:bisim, _, _}, {:unf, _, _}), do: :ok
   defp go_nu({:nu, _}, _), do: {:error, "ν value must be an unfold"}
@@ -847,6 +863,9 @@ defmodule Muro.Check do
     n = nctx(gamma)
 
     case {mode, t} do
+      {_, {:hole, loc}} ->
+        {:error, Print.hole_message(loc, gamma, names_of(rs, gamma), nil)}
+
       # ⇒-var-run / ⇒-var-evid / ⇒-var-spec
       {:run, {:var, x}} ->
         infer_var_tax(k, book, gamma, n, x, :run)
@@ -895,7 +914,7 @@ defmodule Muro.Check do
       # ⇒-mData
       {m, {:mdata, e, p, bs}} ->
         with {:ok, {et, eu}} <- infer(k, book, rs, gamma, m, e),
-             {:ok, {d, dname, params, idxs}} <- view_data(k, book, et),
+             {:ok, {d, dname, params, idxs}} <- view_data(k, book, et, names_of(rs, gamma)),
              :ok <- match_arity(bs, d.ctors),
              :ok <- check_motive(k, book, rs, gamma, d, dname, params, p),
              mot_fun = first_mot_lam(d, dname, params, p),
@@ -922,19 +941,27 @@ defmodule Muro.Check do
         {:error, "Type has no type (no Type : Type)"}
 
       # ⇒-pi
-      {m, {:pi, _, _, _}} when m in [:run, :evidence] ->
+      {m, {:pi, _, _, _, _}} when m in [:run, :evidence] ->
         {:error, "no promotion: Π is an erased term"}
 
       # The codomain must be small (: Type). With check_ty instead,
       # Π (x : A) → Type : Type and Type is a retract of a small type.
-      {:spec, {:pi, q, a, b}} ->
+      {:spec, {:pi, q, a, x, b}} ->
         with :ok <- check_ty(k, book, rs, gamma, a),
              {:ok, _} <-
-               check(k, book, ext_rec(rs, false, false), ext(gamma, q, a), :spec, b, :typ),
+               check(
+                 k,
+                 book,
+                 push_name(ext_rec(rs, false, false), x),
+                 ext(gamma, q, a),
+                 :spec,
+                 b,
+                 :typ
+               ),
              do: {:ok, {:typ, u0s(n)}}
 
       # ⇒-lam
-      {m, {:lam, q, a, t1}} ->
+      {m, {:lam, q, a, x, t1}} ->
         with :ok <- check_ty(k, book, rs, gamma, a),
              :ok <-
                if(q == :reuse,
@@ -942,16 +969,16 @@ defmodule Muro.Check do
                  else: :ok
                ),
              {:ok, {b, [u0 | us]}} <-
-               infer(k, book, lam_rec(rs), ext(gamma, q, a), m, t1),
+               infer(k, book, push_name(lam_rec(rs), x), ext(gamma, q, a), m, t1),
              :ok <- check_bound(m, q, u0) do
-          {:ok, {{:pi, q, a, b}, us}}
+          {:ok, {{:pi, q, a, x, b}, us}}
         end
 
       # ⇒-app-aff / ⇒-app-era / ⇒-app-reuse: the head as a head; the
       # descent check is the outermost app's, on the maximal spine
       {m, {:app, f, a}} ->
         with {:ok, {ft, fu}} <- infer(k, book, rs, gamma, m, f, true),
-             {:ok, {q, a_ty, b}} <- view_pi(k, book, ft),
+             {:ok, {q, a_ty, b}} <- view_pi(k, book, ft, names_of(rs, gamma)),
              {:ok, uses} <- infer_arg(k, book, rs, gamma, m, q, a_ty, fu, a, f),
              :ok <- check_rec(m, head?, rs, {:app, f, a}) do
           {:ok, {Subst.inst(b, a), uses}}
@@ -975,8 +1002,15 @@ defmodule Muro.Check do
       # (Agda: rwtMode); its uses are discarded.
       {m, {:rwt, eq, p, t1}} ->
         with {:ok, {et, _}} <- infer(k, book, rs, gamma, rwt_mode(m), eq),
-             {:ok, {a, lft, r}} <- view_id(k, book, et),
-             :ok <- check_ty(k, book, ext_rec(rs, false, false), ext(gamma, :affine, a), p),
+             {:ok, {a, lft, r}} <- view_id(k, book, et, names_of(rs, gamma)),
+             :ok <-
+               check_ty(
+                 k,
+                 book,
+                 push_name(ext_rec(rs, false, false), "z"),
+                 ext(gamma, :affine, a),
+                 p
+               ),
              {:ok, tu} <- check(k, book, rs, gamma, m, t1, Subst.inst(p, r)) do
           {:ok, {Subst.inst(p, lft), tu}}
         end
@@ -984,14 +1018,21 @@ defmodule Muro.Check do
       # ⇒-mNat
       {m, {:mnat, e, p, z, s}} ->
         with {:ok, eu} <- check(k, book, rs, gamma, m, e, :nat),
-             :ok <- check_ty(k, book, ext_rec(rs, false, false), ext(gamma, :affine, :nat), p),
+             :ok <-
+               check_ty(
+                 k,
+                 book,
+                 push_name(ext_rec(rs, false, false), "n"),
+                 ext(gamma, :affine, :nat),
+                 p
+               ),
              {:ok, zu} <- check(k, book, rs, gamma, m, z, Subst.inst(p, :ze)),
              ok? = scrut_ok(rs, e),
              {:ok, [u0 | sus]} <-
                check(
                  k,
                  book,
-                 ext_rec(rs, ok?, ok?),
+                 push_name(ext_rec(rs, ok?, ok?), "n"),
                  ext(gamma, :affine, :nat),
                  m,
                  s,
@@ -1005,14 +1046,28 @@ defmodule Muro.Check do
       # ⇒-mEmp
       {m, {:memp, e, p}} ->
         with {:ok, eu} <- check(k, book, rs, gamma, m, e, :empty),
-             :ok <- check_ty(k, book, ext_rec(rs, false, false), ext(gamma, :affine, :empty), p) do
+             :ok <-
+               check_ty(
+                 k,
+                 book,
+                 push_name(ext_rec(rs, false, false), "e"),
+                 ext(gamma, :affine, :empty),
+                 p
+               ) do
           {:ok, {Subst.inst(p, e), eu}}
         end
 
       # ⇒-mUnit
       {m, {:munit, e, p, u}} ->
         with {:ok, eu} <- check(k, book, rs, gamma, m, e, :unit),
-             :ok <- check_ty(k, book, ext_rec(rs, false, false), ext(gamma, :affine, :unit), p),
+             :ok <-
+               check_ty(
+                 k,
+                 book,
+                 push_name(ext_rec(rs, false, false), "x"),
+                 ext(gamma, :affine, :unit),
+                 p
+               ),
              {:ok, uu} <- check(k, book, rs, gamma, m, u, Subst.inst(p, :one)),
              {:ok, uses} <- combine(m, eu, uu) do
           {:ok, {Subst.inst(p, e), uses}}
@@ -1049,7 +1104,7 @@ defmodule Muro.Check do
                check(
                  k,
                  book,
-                 ext_rec(rs, false, false),
+                 push_name(ext_rec(rs, false, false), "x"),
                  ext(gamma, :affine, :typ),
                  :spec,
                  f,
@@ -1081,12 +1136,12 @@ defmodule Muro.Check do
       # mention the two components (Subst.strengthen2).
       {m, {:letp, e, t}} ->
         with {:ok, {e_ty, eu}} <- infer(k, book, rs, gamma, m, e),
-             {:ok, {a1, b1}} <- view_prod(k, book, e_ty),
+             {:ok, {a1, b1}} <- view_prod(k, book, e_ty, names_of(rs, gamma)),
              {:ok, {t_ty, [ub, ua | tus]}} <-
                infer(
                  k,
                  book,
-                 ext_rec(ext_rec(rs, false, false), false, false),
+                 push_name(push_name(ext_rec(ext_rec(rs, false, false), false, false), "a"), "b"),
                  ext(ext(gamma, :affine, a1), :affine, Subst.wk(b1)),
                  m,
                  t
@@ -1102,10 +1157,10 @@ defmodule Muro.Check do
       {m, {:unf, seed, f}} ->
         with {:ok, {s_ty, seed_u}} <- infer(k, book, rs, gamma, m, seed),
              {:ok, {ft, fu}} <- infer(k, book, rs, gamma, m, f),
-             {:ok, {_q, s1, body}} <- view_pi(k, book, ft),
-             :ok <- conv(k, book, s1, s_ty),
-             {:ok, {a, s2}} <- view_prod(k, book, Subst.inst(body, seed)),
-             :ok <- conv(k, book, s2, s_ty),
+             {:ok, {_q, s1, body}} <- view_pi(k, book, ft, names_of(rs, gamma)),
+             :ok <- conv(k, book, names_of(rs, gamma), s1, s_ty),
+             {:ok, {a, s2}} <- view_prod(k, book, Subst.inst(body, seed), names_of(rs, gamma)),
+             :ok <- conv(k, book, names_of(rs, gamma), s2, s_ty),
              :ok <- check_unfold(k, book, m, rs, f),
              {:ok, uses} <- combine(m, seed_u, fu) do
           {:ok, {{:nu, {:prod, Subst.wk(a), {:var, 0}}}, uses}}
@@ -1114,7 +1169,7 @@ defmodule Muro.Check do
       # ⇒-ucons
       {m, {:ucons, s}} ->
         with {:ok, {tt, u}} <- infer(k, book, rs, gamma, m, s),
-             {:ok, f} <- view_nu(k, book, tt) do
+             {:ok, f} <- view_nu(k, book, tt, names_of(rs, gamma)) do
           {:ok, {Subst.inst(f, tt), u}}
         end
 
@@ -1168,7 +1223,7 @@ defmodule Muro.Check do
               end
 
             t1 ->
-              {:error, "addt expected a Tensor, got #{inspect(t1)}"}
+              {:error, "addt expected a Tensor, got #{Print.term(t1, names_of(rs, gamma))}"}
           end
         end
 
@@ -1186,7 +1241,7 @@ defmodule Muro.Check do
         end
 
       {_, t1} ->
-        {:error, "cannot infer #{inspect(t1)}"}
+        {:error, "cannot infer #{shown(rs, gamma, t1)}"}
     end
   end
 
@@ -1243,26 +1298,29 @@ defmodule Muro.Check do
         :ok
 
       # type-pi
-      {:pi, q, a1, b} ->
+      {:pi, q, a1, x, b} ->
         with :ok <- check_ty(k, book, rs, gamma, a1),
-             do: check_ty(k, book, ext_rec(rs, false, false), ext(gamma, q, a1), b)
+             do: check_ty(k, book, push_name(ext_rec(rs, false, false), x), ext(gamma, q, a1), b)
 
       # type-el
       a1 ->
         with {:ok, {t, _}} <- infer(k, book, rs, gamma, :spec, a1),
-             do: conv(k, book, t, :typ)
+             do: conv(k, book, names_of(rs, gamma), t, :typ)
     end
   end
 
   defp check(k, book, rs, gamma, mode, e, a) do
     case e do
+      {:hole, loc} ->
+        {:error, Print.hole_message(loc, gamma, names_of(rs, gamma), a)}
+
       # ⇐-lam
-      {:lam, q, a_ann, t} ->
-        case view_pi(k, book, a) do
+      {:lam, q, a_ann, x, t} ->
+        case view_pi(k, book, a, names_of(rs, gamma)) do
           {:ok, {q1, a1, b}} ->
             with :ok <- if(q == q1, do: :ok, else: {:error, "λ/Π quantity mismatch"}),
                  :ok <- check_ty(k, book, rs, gamma, a_ann),
-                 :ok <- conv(k, book, a_ann, a1),
+                 :ok <- conv(k, book, names_of(rs, gamma), a_ann, a1),
                  :ok <-
                    if(q == :reuse,
                      do: guard_data(k, book, a1, "+ requires a Data type"),
@@ -1272,7 +1330,7 @@ defmodule Muro.Check do
                    check(
                      k,
                      book,
-                     lam_rec(rs),
+                     push_name(lam_rec(rs), x),
                      ext(gamma, q, a1),
                      mode,
                      t,
@@ -1288,14 +1346,14 @@ defmodule Muro.Check do
 
       # ⇐-refl
       :rfl ->
-        with {:ok, {sort, x, y}} <- view_id(k, book, a),
+        with {:ok, {sort, x, y}} <- view_id(k, book, a, names_of(rs, gamma)),
              :ok <- float_id_ok(k, book, sort),
-             :ok <- conv(k, book, x, y),
+             :ok <- conv(k, book, names_of(rs, gamma), x, y),
              do: {:ok, u0s(nctx(gamma))}
 
       # ⇐-pair
       {:pair, x, y} ->
-        with {:ok, {a1, b1}} <- view_prod(k, book, a),
+        with {:ok, {a1, b1}} <- view_prod(k, book, a, names_of(rs, gamma)),
              {:ok, au} <- check(k, book, rs, gamma, mode, x, a1),
              {:ok, bu} <- check(k, book, rs, gamma, mode, y, b1),
              do: combine(mode, au, bu)
@@ -1306,12 +1364,12 @@ defmodule Muro.Check do
       # the rest combined with the scrutinee's.
       {:letp, e, t} ->
         with {:ok, {e_ty, eu}} <- infer(k, book, rs, gamma, mode, e),
-             {:ok, {a1, b1}} <- view_prod(k, book, e_ty),
+             {:ok, {a1, b1}} <- view_prod(k, book, e_ty, names_of(rs, gamma)),
              {:ok, [ub, ua | tus]} <-
                check(
                  k,
                  book,
-                 ext_rec(ext_rec(rs, false, false), false, false),
+                 push_name(push_name(ext_rec(ext_rec(rs, false, false), false, false), "a"), "b"),
                  ext(ext(gamma, :affine, a1), :affine, Subst.wk(b1)),
                  mode,
                  t,
@@ -1322,22 +1380,22 @@ defmodule Muro.Check do
              do: combine(mode, eu, tus)
 
       # ⇐-unf
-      {:unf, seed, {:lam, q, a_ann, t}} ->
+      {:unf, seed, {:lam, q, a_ann, x, t}} ->
         with {:ok, fu_ty} <- as_nu(k, book, rs, gamma, a),
              {:ok, {s_ty, seed_u}} <- infer(k, book, rs, gamma, mode, seed),
-             :ok <- conv(k, book, a_ann, s_ty),
+             :ok <- conv(k, book, names_of(rs, gamma), a_ann, s_ty),
              {:ok, [u0 | us]} <-
                check(
                  k,
                  book,
-                 ext_rec(rs, false, false),
+                 push_name(ext_rec(rs, false, false), x),
                  ext(gamma, q, s_ty),
                  mode,
                  t,
                  Subst.wk(Subst.inst(fu_ty, s_ty))
                ),
              :ok <- check_bound(mode, q, u0),
-             :ok <- check_unfold(k, book, mode, rs, {:lam, q, a_ann, t}),
+             :ok <- check_unfold(k, book, mode, rs, {:lam, q, a_ann, x, t}),
              do: combine(mode, seed_u, us)
 
       {:unf, seed, f} ->
@@ -1351,14 +1409,14 @@ defmodule Muro.Check do
                  gamma,
                  mode,
                  f,
-                 {:pi, :affine, s_ty, Subst.wk(Subst.inst(fu_ty, s_ty))}
+                 {:pi, :affine, s_ty, "_", Subst.wk(Subst.inst(fu_ty, s_ty))}
                ),
              :ok <- check_unfold(k, book, mode, rs, f),
              do: combine(mode, seed_u, fu)
 
       # ⇐-ctor / ⇐-conv
       _ ->
-        case {view_data(k, book, a), ctor_spine(book, e)} do
+        case {view_data(k, book, a, names_of(rs, gamma)), ctor_spine(book, e)} do
           {{:ok, {_d, dname, params, idxs}}, {:ok, {dname2, _ci, _args}}}
           when dname == dname2 ->
             expected = Subst.apps_from({:def, dname}, params ++ idxs)
@@ -1373,16 +1431,19 @@ defmodule Muro.Check do
   # ⇐-conv: infer, then convert to the expected type.
   defp infer_conv(k, book, rs, gamma, mode, e, a) do
     with {:ok, {b, u}} <- infer(k, book, rs, gamma, mode, e),
-         :ok <- conv(k, book, b, a),
+         :ok <- conv(k, book, names_of(rs, gamma), b, a),
          do: {:ok, u}
   end
 
   # -- signature -------------------------------------------------------------
 
-  defp tag(name, result) do
+  defp fail_at(d, part, result) do
     case result do
-      {:error, e} -> {:error, "#{name}: #{e}"}
-      other -> other
+      {:error, e} ->
+        {:error, "#{Print.loc_prefix(Map.get(d, :loc))}#{d.name} #{part}: #{e}"}
+
+      other ->
+        other
     end
   end
 
@@ -1394,10 +1455,10 @@ defmodule Muro.Check do
 
   def check_def(book, %{kind: :data} = d, fuel), do: check_data(book, d, fuel)
 
-  def check_def(book, %{name: name, mode: mode, type: ty, body: body} = d, k) do
-    with :ok <- tag("#{name} type", check_ty(k, book, empty_rec(), [], ty)),
-         {:ok, _} <- tag("#{name} body", check_body(k, book, d)),
-         :ok <- tag("#{name} productivity", check_nu(mode, ty, body)) do
+  def check_def(book, %{mode: mode, type: ty, body: body} = d, k) do
+    with :ok <- fail_at(d, "type", check_ty(k, book, empty_rec(), [], ty)),
+         {:ok, _} <- fail_at(d, "body", check_body(k, book, d)),
+         :ok <- fail_at(d, "productivity", check_nu(mode, ty, body)) do
       :ok
     end
   end
@@ -1460,12 +1521,12 @@ defmodule Muro.Check do
 
   defp dty_type(params, indices) do
     idx_pis =
-      Enum.reduce(Enum.reverse(indices), :typ, fn {q, _x, a}, acc ->
-        {:pi, q, a, acc}
+      Enum.reduce(Enum.reverse(indices), :typ, fn {q, x, a}, acc ->
+        {:pi, q, a, x, acc}
       end)
 
-    Enum.reduce(Enum.reverse(params), idx_pis, fn {q, _x, _a}, acc ->
-      {:pi, q, :typ, acc}
+    Enum.reduce(Enum.reverse(params), idx_pis, fn {q, x, _a}, acc ->
+      {:pi, q, :typ, x, acc}
     end)
   end
 
@@ -1473,7 +1534,7 @@ defmodule Muro.Check do
 
   defp inst_params(k, book, t, [p | ps]) do
     case whnf(k, book, t) do
-      {:ok, {:pi, _, _, b}} -> inst_params(k, book, Subst.inst(b, p), ps)
+      {:ok, {:pi, _, _, _, b}} -> inst_params(k, book, Subst.inst(b, p), ps)
       {:ok, _} -> {:error, "constructor type has too few parameter binders"}
       err -> err
     end
@@ -1501,7 +1562,7 @@ defmodule Muro.Check do
     with {:ok, {ty, fu}} <- infer_ctor_spine(k, book, rs, gamma, m, dname, params, f),
          {:ok, ty1} <- whnf(k, book, ty) do
       case ty1 do
-        {:pi, q, a_ty, b} ->
+        {:pi, q, a_ty, _, b} ->
           with {:ok, au} <- check(k, book, rs, gamma, field_mode(q, m), a, a_ty),
                {:ok, uses} <- combine_arg(q, m, au, fu),
                do: {:ok, {Subst.inst(b, a), uses}}
@@ -1528,8 +1589,8 @@ defmodule Muro.Check do
     with {:ok, {r, u}} <- infer_ctor_spine(k, book, rs, gamma, m, dname, params, e),
          {:ok, r1} <- whnf(k, book, r) do
       case r1 do
-        {:pi, _, _, _} -> {:error, "too few constructor arguments"}
-        _ -> with :ok <- conv(k, book, r1, expected), do: {:ok, u}
+        {:pi, _, _, _, _} -> {:error, "too few constructor arguments"}
+        _ -> with :ok <- conv(k, book, names_of(rs, gamma), r1, expected), do: {:ok, u}
       end
     end
   end
@@ -1596,7 +1657,7 @@ defmodule Muro.Check do
   defp check_branches(_, _, _, _, _, _, _, _, _, _, [], [_ | _]),
     do: {:error, "match branch count does not match constructors"}
 
-  defp wrap_tel({:pi, q, a, b}, body), do: {:lam, q, a, wrap_tel(b, body)}
+  defp wrap_tel({:pi, q, a, x, b}, body), do: {:lam, q, a, x, wrap_tel(b, body)}
   defp wrap_tel(_, body), do: body
 
   defp nparams_of(book, dname) do
@@ -1620,16 +1681,16 @@ defmodule Muro.Check do
 
   defp check_br_n(k, book, rs, gamma, m, dname, cname, sm, ty1, br, mot, args) do
     case ty1 do
-      {:pi, q, a, b} ->
+      {:pi, q, a, _, b} ->
         case br do
-          {:lam, q1, a1, t} ->
+          {:lam, q1, a1, x, t} ->
             rec? = sm and is_d_type?(book, dname, a)
-            rs2 = ext_rec(rs, rec?, rec?)
+            rs2 = push_name(ext_rec(rs, rec?, rec?), x)
             args1 = Enum.map(args, &Subst.wk/1) ++ [{:var, 0}]
 
             with :ok <- if(q == q1, do: :ok, else: {:error, "λ/Π quantity mismatch"}),
                  :ok <- check_ty(k, book, rs, gamma, a1),
-                 :ok <- conv(k, book, a1, a),
+                 :ok <- conv(k, book, names_of(rs, gamma), a1, a),
                  {:ok, [u0 | us]} <-
                    check_br(
                      k,
@@ -1664,8 +1725,8 @@ defmodule Muro.Check do
 
   defp first_mot_lam(d, dname, params, p) do
     case Map.get(d, :indices, []) do
-      [] -> {:lam, :affine, Subst.apps_from({:def, dname}, params), p}
-      [{q, _, t} | _] -> {:lam, q, t, p}
+      [] -> {:lam, :affine, Subst.apps_from({:def, dname}, params), "x", p}
+      [{q, x, t} | _] -> {:lam, q, t, x, p}
     end
   end
 
@@ -1673,23 +1734,24 @@ defmodule Muro.Check do
     case Map.get(d, :indices, []) do
       [] ->
         dty = Subst.apps_from({:def, dname}, params)
-        check_ty(k, book, ext_rec(rs, false, false), ext(gamma, :affine, dty), p)
+        check_ty(k, book, push_name(ext_rec(rs, false, false), "x"), ext(gamma, :affine, dty), p)
 
-      [{q, _, t} | rest] ->
+      [{q, x, t} | rest] ->
         gamma1 = ext(gamma, q, t)
         args = Enum.map(params, &Subst.wk/1) ++ [{:var, 0}]
         tail = motive_tail(dname, args, rest)
 
-        with {:ok, _} <- check(k, book, ext_rec(rs, false, false), gamma1, :spec, p, tail),
+        with {:ok, _} <-
+               check(k, book, push_name(ext_rec(rs, false, false), x), gamma1, :spec, p, tail),
              do: :ok
     end
   end
 
   defp motive_tail(dname, args, []),
-    do: {:pi, :affine, Subst.apps_from({:def, dname}, args), :typ}
+    do: {:pi, :affine, Subst.apps_from({:def, dname}, args), "x", :typ}
 
-  defp motive_tail(dname, args, [{q, _, t} | rest]) do
-    {:pi, q, t, motive_tail(dname, Enum.map(args, &Subst.wk/1) ++ [{:var, 0}], rest)}
+  defp motive_tail(dname, args, [{q, x, t} | rest]) do
+    {:pi, q, t, x, motive_tail(dname, Enum.map(args, &Subst.wk/1) ++ [{:var, 0}], rest)}
   end
 
   # The index-clash test (Agda: clashes). `{:ok, true}`: some target index
@@ -1697,7 +1759,7 @@ defmodule Muro.Check do
   # scrutinee's index at that position (su against ze, under any number of
   # matching su), so the constructor cannot occur; `{:ok, false}`
   # otherwise. Each comparison reduces both sides, so it spends fuel.
-  defp clashes(k, book, np, expected, {:pi, _, _, b}),
+  defp clashes(k, book, np, expected, {:pi, _, _, _, b}),
     do: clashes(k, book, np, expected, b)
 
   defp clashes(k, book, np, expected, t) do
@@ -1735,8 +1797,8 @@ defmodule Muro.Check do
 
   defp occurs_d?(i, {:def, n}), do: n == i
   defp occurs_d?(i, {:app, f, a}), do: occurs_d?(i, f) or occurs_d?(i, a)
-  defp occurs_d?(i, {:pi, _, a, b}), do: occurs_d?(i, a) or occurs_d?(i, b)
-  defp occurs_d?(i, {:lam, _, a, t}), do: occurs_d?(i, a) or occurs_d?(i, t)
+  defp occurs_d?(i, {:pi, _, a, _, b}), do: occurs_d?(i, a) or occurs_d?(i, b)
+  defp occurs_d?(i, {:lam, _, a, _, t}), do: occurs_d?(i, a) or occurs_d?(i, t)
   defp occurs_d?(i, {:prod, a, b}), do: occurs_d?(i, a) or occurs_d?(i, b)
   defp occurs_d?(i, {:pair, a, b}), do: occurs_d?(i, a) or occurs_d?(i, b)
   defp occurs_d?(i, {:idt, a, b, c}), do: occurs_d?(i, a) or occurs_d?(i, b) or occurs_d?(i, c)
@@ -1760,7 +1822,7 @@ defmodule Muro.Check do
 
   defp pos_arg?(book, dname, a), do: is_d_type?(book, dname, a) or not occurs_d?(dname, a)
 
-  defp check_tel_pos(book, dname, np, ni, {:pi, _, a, b}) do
+  defp check_tel_pos(book, dname, np, ni, {:pi, _, a, _, b}) do
     if pos_arg?(book, dname, a) do
       check_tel_pos(book, dname, np, ni, b)
     else
@@ -1786,15 +1848,31 @@ defmodule Muro.Check do
   # Constructor fields must be small types. Parameters are (A : Type) and
   # are skipped; a field of type Type would make the data type a large
   # inductive in Type, and match with motive Type would retract Type into it.
-  defp check_ctor_fields(k, book, rs, gamma, np, {:pi, q, a, b}) when np > 0,
-    do: check_ctor_fields(k, book, ext_rec(rs, false, false), ext(gamma, q, a), np - 1, b)
+  defp check_ctor_fields(k, book, rs, gamma, np, {:pi, q, a, x, b}) when np > 0,
+    do:
+      check_ctor_fields(
+        k,
+        book,
+        push_name(ext_rec(rs, false, false), x),
+        ext(gamma, q, a),
+        np - 1,
+        b
+      )
 
   defp check_ctor_fields(_k, _book, _rs, _gamma, np, _t) when np > 0,
     do: {:error, "constructor type has too few parameter binders"}
 
-  defp check_ctor_fields(k, book, rs, gamma, 0, {:pi, q, a, b}) do
+  defp check_ctor_fields(k, book, rs, gamma, 0, {:pi, q, a, x, b}) do
     with {:ok, _} <- check(k, book, rs, gamma, :spec, a, :typ),
-         do: check_ctor_fields(k, book, ext_rec(rs, false, false), ext(gamma, q, a), 0, b)
+         do:
+           check_ctor_fields(
+             k,
+             book,
+             push_name(ext_rec(rs, false, false), x),
+             ext(gamma, q, a),
+             0,
+             b
+           )
   end
 
   defp check_ctor_fields(_k, _book, _rs, _gamma, 0, _t), do: :ok
@@ -1803,7 +1881,7 @@ defmodule Muro.Check do
 
   defp skip_params(book, dname, np, ni, 0, t), do: check_tel_pos(book, dname, np, ni, t)
 
-  defp skip_params(book, dname, np, ni, k, {:pi, _, _, b}) when k > 0,
+  defp skip_params(book, dname, np, ni, k, {:pi, _, _, _, b}) when k > 0,
     do: skip_params(book, dname, np, ni, k - 1, b)
 
   defp skip_params(_, _, _, _, k, _) when k > 0,
@@ -1815,12 +1893,12 @@ defmodule Muro.Check do
 
     Enum.reduce_while(ctors, :ok, fn c, :ok ->
       result =
-        with :ok <- tag("#{c.name} type", check_ty(k, book, empty_rec(), [], c.type)),
-             :ok <- tag("#{c.name} type", check_ctor_fields(k, book, empty_rec(), [], np, c.type)) do
+        with :ok <- check_ty(k, book, empty_rec(), [], c.type),
+             :ok <- check_ctor_fields(k, book, empty_rec(), [], np, c.type) do
           check_ctor_rest(book, name, np, ni, c.type)
         end
 
-      case tag(name, result) do
+      case fail_at(d, "#{c.name} type", result) do
         :ok -> {:cont, :ok}
         err -> {:halt, err}
       end

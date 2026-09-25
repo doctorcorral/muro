@@ -62,11 +62,11 @@ defmodule Muro.Emit do
     end
   end
 
-  defp telescope({:pi, :erased, _, b}, i, er), do: telescope(b, i + 1, [i | er])
-  defp telescope({:pi, _, _, b}, i, er), do: telescope(b, i + 1, er)
+  defp telescope({:pi, :erased, _, _, b}, i, er), do: telescope(b, i + 1, [i | er])
+  defp telescope({:pi, _, _, _, b}, i, er), do: telescope(b, i + 1, er)
   defp telescope(_, i, er), do: {er, i}
 
-  defp peel_lams({:lam, _, _, t}, n) when n > 0, do: peel_lams(t, n - 1)
+  defp peel_lams({:lam, _, _, _, t}, n) when n > 0, do: peel_lams(t, n - 1)
   defp peel_lams(t, _), do: t
 
   # de Bruijn 0 is the nearest binder = last peeled λ = x#{depth-1}.
@@ -78,9 +78,11 @@ defmodule Muro.Emit do
   defp emit_db(:rfl, _, _book), do: ":refl"
   defp emit_db({:rwt, _, _, t}, d, book), do: emit_db(t, d, book)
 
-  defp emit_db({:lam, :erased, _, t}, d, book), do: emit_db(t, d + 1, book)
+  defp emit_db({:hole, _}, _, _), do: raise("emit: hole")
 
-  defp emit_db({:lam, _, _, t}, d, book) do
+  defp emit_db({:lam, :erased, _, _, t}, d, book), do: emit_db(t, d + 1, book)
+
+  defp emit_db({:lam, _, _, _, t}, d, book) do
     "fn x#{d} -> #{emit_db(t, d + 1, book)} end"
   end
 
@@ -218,7 +220,7 @@ defmodule Muro.Emit do
     end
   end
 
-  defp qty_spine({:pi, q, _, b}), do: [q | qty_spine(b)]
+  defp qty_spine({:pi, q, _, _, b}), do: [q | qty_spine(b)]
   defp qty_spine(_), do: []
 
   defp spine({:app, f, a}, acc), do: spine(f, [a | acc])

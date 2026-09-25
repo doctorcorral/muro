@@ -75,6 +75,21 @@ A non-dependent arrow `A → B` is `Π (_ : A) → B` with an affine ignored bin
 
 Application is juxtaposition: `f a b`. `motive`, `in`, and `def` never start an argument.
 
+## Holes
+
+`?` is an unsolved goal, not a solution. It is allowed in any term position. The checker always refuses it, in every mode, whether it is inferring or checking:
+
+```
+1:1: gap body: 2:19: unsolved hole
+expected: Nat
+context:
+  n : Nat
+```
+
+The prefix is `line:col`. `expected` is the type the hole must inhabit, or `(none; infer)` when the hole is the head of an inference. `context` lists the binders in scope, oldest first. A hole is not a metavariable: nothing is unified, nothing is postponed, and a book that still contains `?` does not check. Fill it.
+
+A conversion error uses the same printer: `cannot convert Nat ≁ {n ≡ 0 : Nat}`, not `#0`.
+
 ## match
 
 Every eliminator writes its motive. The motive is the family you return in, with the scrutinee bound.

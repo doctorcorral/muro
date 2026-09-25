@@ -24,11 +24,14 @@ defmodule Muro.Subst do
       :typ ->
         :typ
 
-      {:pi, q, a, b} ->
-        {:pi, q, ren(rho, a), ren(lift(rho), b)}
+      {:pi, q, a, x, b} ->
+        {:pi, q, ren(rho, a), x, ren(lift(rho), b)}
 
-      {:lam, q, a, u} ->
-        {:lam, q, ren(rho, a), ren(lift(rho), u)}
+      {:lam, q, a, x, u} ->
+        {:lam, q, ren(rho, a), x, ren(lift(rho), u)}
+
+      {:hole, loc} ->
+        {:hole, loc}
 
       {:app, f, a} ->
         {:app, ren(rho, f), ren(rho, a)}
@@ -161,11 +164,14 @@ defmodule Muro.Subst do
       :typ ->
         :typ
 
-      {:pi, q, a, b} ->
-        {:pi, q, sub(sigma, a), sub(lifts(sigma), b)}
+      {:pi, q, a, x, b} ->
+        {:pi, q, sub(sigma, a), x, sub(lifts(sigma), b)}
 
-      {:lam, q, a, u} ->
-        {:lam, q, sub(sigma, a), sub(lifts(sigma), u)}
+      {:lam, q, a, x, u} ->
+        {:lam, q, sub(sigma, a), x, sub(lifts(sigma), u)}
+
+      {:hole, loc} ->
+        {:hole, loc}
 
       {:app, f, a} ->
         {:app, sub(sigma, f), sub(sigma, a)}
