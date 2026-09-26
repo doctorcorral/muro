@@ -13,7 +13,8 @@ defmodule Mix.Tasks.Muro.Check do
 
   `--fuel` bounds how far the checker reduces (default
   `Muro.Check.default_fuel/0`). Running out is reported as an error, not
-  as a type error; raise the fuel and check again.
+  as a type error; raise the fuel and check again. Every definition is
+  checked, and every error is reported, in book order.
   """
 
   @switches [fuel: :integer]

@@ -934,6 +934,27 @@ defmodule Muro.CheckTest do
     end
   end
 
+  test "check_sig reports every definition error, in book order" do
+    src = """
+    def a : run Nat := tt
+
+    def ok : run Nat := 0
+
+    def b : run Π (n : Nat) → Nat :=
+      λ (n : Nat) → ?
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    [first, second] = String.split(msg, "\n\n")
+    assert first =~ "a body"
+    assert first =~ "Unit ≁ Nat"
+    assert second =~ "b body"
+    assert second =~ "unsolved hole"
+    assert second =~ "expected: Nat"
+    refute msg =~ "ok body"
+  end
+
   test "parse errors carry line:col" do
     assert {:error, msg} = Parser.parse("def x : run Nat :=")
     assert msg =~ ~r/^\d+:\d+: /

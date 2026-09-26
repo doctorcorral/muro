@@ -1494,17 +1494,32 @@ defmodule Muro.Check do
 
   @doc """
   Check a named book. Options: `fuel: n` (default `default_fuel/0`).
+
+  Each definition is checked against the whole book, on its own process,
+  with that same fuel. `:ok` means every definition checked. `{:error, msg}`
+  is every failure, in book order, separated by a blank line. Fuel is the
+  only bound; a definition is not cut off by a wall-clock timeout.
   """
   def check_sig(named_book, opts \\ []) do
     fuel = Keyword.get(opts, :fuel, @fuel)
 
     with {:ok, book} <- Ast.book_to_db(named_book) do
-      Enum.reduce_while(book, :ok, fn d, :ok ->
-        case check_def(book, d, fuel) do
-          :ok -> {:cont, :ok}
-          err -> {:halt, err}
-        end
-      end)
+      errors =
+        book
+        |> Task.async_stream(fn d -> check_def(book, d, fuel) end,
+          ordered: true,
+          timeout: :infinity
+        )
+        |> Enum.flat_map(fn
+          {:ok, :ok} -> []
+          {:ok, {:error, msg}} -> [msg]
+          {:exit, reason} -> exit(reason)
+        end)
+
+      case errors do
+        [] -> :ok
+        msgs -> {:error, Enum.join(msgs, "\n\n")}
+      end
     end
   end
 

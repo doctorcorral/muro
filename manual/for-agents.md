@@ -16,7 +16,7 @@ In brief: two jobs. Do not mix them. This page is the operational contract. Huma
 - Write a `.muro` file against [Grammar](grammar.md).
 - Put new programs in `examples/` unless asked otherwise.
 - Check with `mix muro.check path.muro`. If the answer is `out of fuel`, the checker gave up reducing; it is not a type error. Retry with `mix muro.check --fuel 20000 path.muro`.
-- Read the error. Parse and check errors start with `line:col`. Conversion prints surface types (`Fin n`, not `#0`). A `?` prints `expected` and `context`; fill it.
+- Read every error. The checker reports each definition that fails, in book order, separated by a blank line. Parse and check errors start with `line:col`. Conversion prints surface types (`Fin n`, not `#0`). A `?` prints `expected` and `context`; fill it.
 - Copy syntax from `examples/`, not from memory.
 - Keep every binder typed. Write every motive.
 - Use only tags `run`, `run internal`, `spec`, `evidence`.
@@ -125,7 +125,7 @@ Success line from `mix muro.check`:
 All terms check. Evidence never becomes a run.
 ```
 
-`Muro.Check.check_sig/2` returns `:ok` on a well-typed book; `check_sig(book, fuel: n)` sets the fuel.
+`Muro.Check.check_sig/2` returns `:ok` on a well-typed book, or `{:error, msg}` with every definition error in book order. `check_sig(book, fuel: n)` sets the fuel for each definition. Definitions are checked concurrently; the fuel is the bound, not a wall-clock timeout.
 
 ## Representations (do not add a fourth)
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.10.0
+
+A book is checked one definition at a time, concurrently, and every failure comes back. `check_sig` used to stop at the first error. Each definition was already checked against the whole book with its own fuel, and `checkSig-sound` is the conjunction of those results, so running them with `Task.async_stream` is the same function. The Agda checker is unchanged: it still stops at the first `fail`.
+
+### Elixir
+
+- `Muro.Check.check_sig/2` checks each definition on its own process (`ordered: true`, `timeout: :infinity`). `{:error, msg}` joins the failures in book order with a blank line. Fuel remains the only bound.
+- `mix muro.check` raises that combined message.
+
+### Manual
+
+- `for-agents.md`, README.
+
+### Package
+
+- Version 0.10.0.
+
 ## 0.9.0
 
 The write / check / fix loop prints surface syntax. A conversion error says `Fin n`, not `#0`. A parse or check error starts with `line:col`. `?` is an unsolved goal: it always fails, with the expected type and the binders in scope. It is not a metavariable and it never inhabits, so it is not in ⊢ and not in the Agda kernel.
