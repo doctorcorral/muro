@@ -1004,6 +1004,50 @@ defmodule Muro.CheckTest do
     assert msg =~ "expected: (none; infer)"
   end
 
+  test "the prelude checks, and a file can use it" do
+    assert Check.check_sig(Muro.Prelude.book()) == :ok
+    assert Muro.check_file("examples/using_prelude.muro") == :ok
+
+    assert {:ok, src} = Muro.emit_file("examples/using_prelude.muro", Muro.UsePrelude)
+    assert src =~ "def before"
+    assert src =~ "defp pred"
+    refute src =~ "def plus"
+    refute src =~ "defp plus"
+  end
+
+  test "a file definition replaces the prelude name and its dependents" do
+    path = Path.join(System.tmp_dir!(), "muro_shadow_plus.muro")
+
+    File.write!(path, """
+    def plus : run Nat := 0
+    def before : run Nat := pred (suc 0)
+    """)
+
+    assert Muro.check_file(path) == :ok
+    assert {:ok, src} = Muro.emit_file(path, Muro.ShadowPlus)
+    assert src =~ "def plus"
+    assert src =~ "defp pred"
+    refute src =~ "defp plus"
+
+    bad = Path.join(System.tmp_dir!(), "muro_shadow_pred.muro")
+
+    File.write!(bad, """
+    def pred : run Nat := 0
+    def bad : evidence {0 ≡ 0 : Nat} := inj-suc 0 0 refl
+    """)
+
+    assert {:error, msg} = Muro.check_file(bad)
+    assert msg =~ "unknown constructor inj-suc"
+  end
+
+  test "half_ok keeps its own plus when emitted through the prelude" do
+    assert {:ok, src} = Muro.emit_file("examples/half_ok.muro", Muro.HalfFromFile)
+    assert src =~ "def plus"
+    assert src =~ "def half"
+    refute src =~ "defp pred"
+    refute src =~ "defp plus"
+  end
+
   test "a hole never checks, including in spec" do
     src = "def gap : spec Π (n : Nat) → Nat := λ (n : Nat) → ?\n"
 

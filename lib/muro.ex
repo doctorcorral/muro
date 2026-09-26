@@ -6,23 +6,30 @@ defmodule Muro do
   it, only run terms run.
   """
 
-  alias Muro.{Check, Emit, Parser}
+  alias Muro.{Check, Emit, Parser, Prelude}
 
-  @doc "Parse and check a `.muro` file. Options: `fuel: n` (see `Muro.Check.check_sig/2`)."
+  @doc """
+  Parse and check a `.muro` file. Options: `fuel: n` (see `Muro.Check.check_sig/2`).
+
+  The prelude is in scope behind the file. A name the file defines replaces
+  the prelude's.
+  """
   def check_file(path, opts \\ []) do
-    path
-    |> File.read!()
-    |> Parser.parse()
-    |> case do
-      {:ok, book} -> Check.check_sig(book, opts)
-      other -> other
+    with {:ok, book} <- parse_path(path) do
+      Check.check_sig(Prelude.for_check(book), opts)
     end
   end
 
   def emit_file(path, module, opts \\ []) when is_atom(module) do
-    with {:ok, book} <- Parser.parse(File.read!(path)),
-         :ok <- Check.check_sig(book, opts) do
-      {:ok, Emit.emit_module(module, book)}
+    with {:ok, book} <- parse_path(path),
+         :ok <- Check.check_sig(Prelude.for_check(book), opts) do
+      {:ok, Emit.emit_module(module, Prelude.for_emit(book))}
     end
+  end
+
+  defp parse_path(path) do
+    path
+    |> File.read!()
+    |> Parser.parse()
   end
 end

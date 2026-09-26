@@ -104,6 +104,10 @@ See [Emit](emit.md).
 
 See [Machine numbers](machine.md).
 
+## using_prelude.muro
+
+Uses `sym`, `cong`, and `pred` from the prelude and defines none of them. `before` is `pred (suc (suc 0))`. There is no Agda twin: the prelude is an Elixir book, not a kernel rule. See [Terms](language.md#prelude).
+
 ## Adding a file
 
 1. Put it in `examples/`. Use only `run` / `run internal` / `spec` / `evidence`.

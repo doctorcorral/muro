@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.11.0
+
+`mix muro.check` puts a small book behind the file: `pred`, `plus`, `inj-suc`, `plus_suc`, `sym`, `cong`. They are ordinary definitions, checked by the same checker. A name the file defines replaces the prelude's, and so does any prelude definition that refers to a replaced name, so `plus_suc` is not a lemma about a different `plus`. A prelude `run` is emitted as `defp` only when a `run` term in the file calls it. `check_sig` on a book passed in directly is unchanged. The Agda kernel has no prelude.
+
+### Elixir
+
+- `lib/muro/prelude.muro`, `Muro.Prelude`. `Muro.check_file/2` and `Muro.emit_file/3` use it.
+- `examples/using_prelude.muro`.
+
+### Manual
+
+- `language.md`, `emit.md`, `for-agents.md`, `examples.md`, README.
+
+### Package
+
+- Version 0.11.0.
+
 ## 0.10.0
 
 A book is checked one definition at a time, concurrently, and every failure comes back. `check_sig` used to stop at the first error. Each definition was already checked against the whole book with its own fuel, and `checkSig-sound` is the conjunction of those results, so running them with `Task.async_stream` is the same function. The Agda checker is unchanged: it still stops at the first `fail`.
