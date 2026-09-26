@@ -19,6 +19,7 @@ In brief: two jobs. Do not mix them. This page is the operational contract. Huma
 - Read every error. The checker reports each definition that fails, in book order, separated by a blank line. Parse and check errors start with `line:col`. Conversion prints surface types (`Fin n`, not `#0`). A `?` prints `expected` and `context`; fill it.
 - Copy syntax from `examples/`, not from memory.
 - Keep every binder typed. Write every motive.
+- `pred`, `plus`, `inj-suc`, `plus_suc`, `sym`, and `cong` are already in scope (`lib/muro/prelude.muro`). Defining one of those names replaces it, and drops any prelude definition that refers to it.
 - Use only tags `run`, `run internal`, `spec`, `evidence`.
 - Leave `?` only while a term is unfinished. A hole always fails and is not in the finished book.
 
@@ -83,6 +84,8 @@ lib/muro/ast.ex         named FOAS, to_db
 lib/muro/print.ex       surface syntax, locations, hole messages
 lib/muro/subst.ex       de Bruijn subst
 lib/muro/check.ex       Elixir mirror of ⊢
+lib/muro/prelude.ex     book behind every checked file
+lib/muro/prelude.muro   pred, plus, inj-suc, plus_suc, sym, cong
 lib/muro/emit.ex        run → Elixir source
 lib/muro/example.ex     same book as Agda
 lib/mix/tasks/muro.check.ex

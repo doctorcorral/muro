@@ -21,6 +21,25 @@ The tag is `run`, `run internal`, `spec`, or `evidence`. There is no other tag. 
 
 Forward references are allowed. The checker sees every definition when it checks any one of them.
 
+## Prelude
+
+`mix muro.check` and `Muro.check_file/2` put a small book in scope behind the file. These names are already defined:
+
+| Name | Tag | What it is |
+| --- | --- | --- |
+| `pred` | `run internal` | The predecessor. `pred 0` is `0`. |
+| `plus` | `run internal` | Addition on `Nat`. |
+| `inj-suc` | `evidence` | `{suc(m) ≡ suc(p) : Nat}` gives `{m ≡ p : Nat}`. |
+| `plus_suc` | `evidence` | `{plus n suc(m) ≡ suc(plus n m) : Nat}`. |
+| `sym` | `evidence` | `{x ≡ y : A}` gives `{y ≡ x : A}`. |
+| `cong` | `evidence` | `{x ≡ y : A}` gives `{f x ≡ f y : B}`. |
+
+A name the file defines replaces that prelude definition. Anything in the prelude that refers to a replaced name is dropped with it: a file that defines its own `plus` does not see the prelude's `plus_suc`, because that lemma is about the prelude's `plus`.
+
+The prelude is ordinary `.muro`. It is not a new rule. `check_sig` on a book you built yourself does not add it; `check_file` does. A prelude `run` is emitted only when a `run` term in the file calls it, and then as `defp`. Evidence in the prelude is not emitted.
+
+`examples/using_prelude.muro` uses `sym`, `cong`, and `pred` without defining them. `examples/half_ok.muro` defines its own `plus`, so that is the `plus` the file checks and emits.
+
 ## Type
 
 There is one sort, `Type`. It is not `Type : Type`. `Type` itself is erased: you do not compute with it.

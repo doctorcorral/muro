@@ -1,0 +1,12 @@
+-- sym, cong, and pred come from the prelude. This file does not define them.
+def flip : evidence Π (n : Nat) → Π (m : Nat) →
+                    Π (e : {n ≡ m : Nat}) → {m ≡ n : Nat} :=
+  λ (n : Nat) → λ (m : Nat) → λ (e : {n ≡ m : Nat}) →
+    sym Nat n m e
+
+def step : evidence Π (n : Nat) → Π (m : Nat) →
+                    Π (e : {n ≡ m : Nat}) → {suc(n) ≡ suc(m) : Nat} :=
+  λ (n : Nat) → λ (m : Nat) → λ (e : {n ≡ m : Nat}) →
+    cong Nat Nat (λ (k : Nat) → suc(k)) n m e
+
+def before : run Nat := pred (suc (suc 0))

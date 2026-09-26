@@ -20,7 +20,7 @@ iex -S mix
 IO.puts(src)
 ```
 
-`Muro.emit_file/2` parses, checks, then emits. If the book does not check, you get the error and no module.
+`Muro.emit_file/2` parses, checks (with the prelude in scope), then emits. If the book does not check, you get the error and no module. A prelude `run` the file calls is emitted as `defp`. One the file does not call is left out. The file's own `run` definitions are unchanged.
 
 The generated file starts with:
 

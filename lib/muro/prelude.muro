@@ -1,0 +1,41 @@
+-- Shipped in front of every file `mix muro.check` reads.
+-- A name the file defines replaces the one here, and so does any
+-- definition below that refers to a replaced name.
+
+def pred : run internal Π (n : Nat) → Nat :=
+  λ (n : Nat) →
+    match n motive (λ _ → Nat)
+      | 0 => 0
+      | suc m => m
+
+def inj-suc : evidence Π (-m : Nat) → Π (-p : Nat) →
+                        Π (e : {suc(m) ≡ suc(p) : Nat}) → {m ≡ p : Nat} :=
+  λ (-m : Nat) → λ (-p : Nat) → λ (e : {suc(m) ≡ suc(p) : Nat}) →
+    rewrite e motive (λ z → {pred z ≡ p : Nat}) in refl
+
+def plus : run internal Π (n : Nat) → Π (m : Nat) → Nat :=
+  λ (n : Nat) → λ (m : Nat) →
+    match n motive (λ _ → Nat)
+      | 0 => m
+      | suc np => suc(plus np m)
+
+def plus_suc : evidence Π (n : Nat) → Π (m : Nat) →
+                          {plus n suc(m) ≡ suc(plus n m) : Nat} :=
+  λ (n : Nat) → λ (m : Nat) →
+    match n motive (λ np → {plus np suc(m) ≡ suc(plus np m) : Nat})
+      | 0 => refl
+      | suc np =>
+        rewrite plus_suc np m motive (λ z → {suc(z) ≡ suc(suc(plus np m)) : Nat}) in
+        refl
+
+def sym : evidence Π (-A : Type) → Π (-x : A) → Π (-y : A) →
+                   Π (e : {x ≡ y : A}) → {y ≡ x : A} :=
+  λ (-A : Type) → λ (-x : A) → λ (-y : A) → λ (e : {x ≡ y : A}) →
+    rewrite e motive (λ z → {y ≡ z : A}) in refl
+
+def cong : evidence Π (-A : Type) → Π (-B : Type) →
+                    Π (-f : A → B) → Π (-x : A) → Π (-y : A) →
+                    Π (e : {x ≡ y : A}) → {f x ≡ f y : B} :=
+  λ (-A : Type) → λ (-B : Type) → λ (-f : A → B) →
+  λ (-x : A) → λ (-y : A) → λ (e : {x ≡ y : A}) →
+    rewrite e motive (λ z → {f z ≡ f y : B}) in refl
